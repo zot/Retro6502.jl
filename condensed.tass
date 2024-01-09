@@ -1,0 +1,342 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                                        ;;
+;; FRTH: FORTH-inspired, low memory usage ;;
+;;                                        ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; FRTH supports one- and two-byte instructions: the
+;; first 128 (most common) words use 1-byte instructions
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; MEMORY MODEL                                               ;;
+;;                                                            ;;
+;; ...                                                        ;;
+;; 0002-0003: QADDR -- indirect address of current quick word ;;
+;; 0004-0005: DP -- data pointer                              ;;
+;; 0006-0007: TMP -- temporary calculations                   ;;
+;; ...                                                        ;;
+;; 0100-01FF: MACHINE STACK                                   ;;
+;; ...                                                        ;;
+;; 0801: BASIC PROLOGUE                                       ;;
+;; 081D: JUMP TO MAIN                                         ;;
+;; 0900: QUICKDEF TABLE                                       ;;
+;; 0A00: DICTIONARY BASE                                      ;;
+;;          |                                                 ;;
+;;          |                                                 ;;
+;;          V                                                 ;;
+;;                                                            ;;
+;;          ^                                                 ;;
+;;          |                                                 ;;
+;;          |                                                 ;;
+;; CFFF: BOS - bottom of data stack                           ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;
+;; KERNAL ROUTINES ;;
+;;;;;;;;;;;;;;;;;;;;;
+
+CHRIN       = $FFCF -- read a character, line buffered
+CHROUT      = $FFD2 -- output a character
+GETIN       = $FFE4 -- get a character
+SCNKEY      = $FF9F -- scan keyboard
+CINT        = $FF81 -- init screen
+
+;;;;;;;;;;;;;;
+;; prologue ;;
+;;;;;;;;;;;;;;
+
+*       = $0801
+        .word (+), 10  ;pointer, line number
+        .null $9e, format("%d", start) ;will be sys 2061
++       .word 0        ;basic line end
+
+; make screen black and text white
+start       lda #$00
+            sta $d020
+            sta $d021
+            lda #$01
+            sta $0286
+            ; clear screen and jump to main program
+            jsr $e544
+            jsr main
+end_prologue jmp *
+
+;;;;;;;;;;;;;;;;;;;;
+;; FRTH variables ;;
+;;;;;;;;;;;;;;;;;;;;
+
+*           = $fb               ; pc must be on page zero because of (pc),y
+pc
+*           = $02               ; low byte of current quickdef pointer
+qaddr
+*           = $04               ; data stack pointer
+dp
+*           = $06               ; temporary calculations
+tmp
+*           = $0900             ; quickdef table
+startquick
+nextquick   := startquick       ; next available quickdef entry
+bos         = $cfff             ; highest data stack element (bottom of stack)
+
+*           = startquick + $100 ; code starts after quickdef table
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; macros for definitions ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;
+;; def -- define a word in the main table (for the first 128 words)
+def         .function ; compile the next addr into the quick table
+            .align $04
+index       = (nextquick - startquick) / 2
+            .if index < 128
+result      = index
+cur
+*           = nextquick
+            .addr cur
+addr
+nextquick   ::= addr
+*           = cur
+            .else
+result      = (* & $ff00) | $80 | ((* & $ff) >> 2)
+            .endif
+            .endfunction result
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; fat -- define a word in the fat table (for the 129th and later words)
+;; THIS SHOULDN'T BE NECESSARY BECAUSE DEF SHOULD HANDLE IT AUTOMATICALLY
+fat         .function
+            .align $04
+            .endfunction (* & $ff00) | $80 | ((* & $ff) >> 2)
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; call -- call a def or fat word
+call        .macro
+            .if \1 < $80
+            .byte \1
+            .else       ; this is a fat word
+            .addr \1
+            .endif
+            .endmacro
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; lit -- push an integer, use lit instruction if possible
+lit         .macro
+            .if (\1 & $8000) == ((\1 << 1) & $8000)
+            .byte \1 | $c0
+            .byte (\1 >> 6) & $ff ; only 14-bit integers can be inline literals
+            .else
+            .byte pushlit, \1 & $ff, \1 >> 8
+            .endif
+            .endmacro
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; word -- define a high-level word
+word        .macro
+            jsr body
+            .endmacro
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; word -- define a high-level word
+fatword     .function
+addr        #fat
+            jsr body
+            .endfunction addr
+;;
+;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; basic VM executor
+;;
+;; condensed threaded code
+;; flags are the two high bits because the BIT instruction uses them
+;; 0XXX XXXX => one of the first 128 definitions
+;; 10XX XXXX XXXX XXXX => one of the other 129+ definitions (aligned on 4-byte boundaries)
+;; 11XX XXXX XXXX XXXX => push a signed 14-byte number
+;;
+;; we know whether the current item is 1 or two bytes when we jmp, so inc the PC before the jmp
+;;
+begin       ; initialize macroforth 
+            ; pop addr off stack and put it in the pc
+            pla                 ; pop pc-l
+            tax
+            pla                 ; pop pc-h
+            tay
+            jmp storpc
+body        pla                 ; called by a primitive word to transition to FRTH code
+            tax
+            pla
+            tay
+            lda pc+1            ; start a body section, saving the previous pc, push pc-h
+            pha
+            lda pc
+            pha                 ; push pc-l
+storpc      inx
+            bne +
+            iny
++           stx pc
+            sty pc+1
+next        ldy #$00            ; continue execution -- get current threaded instruction
+            lda (pc),y          ; fetch quickfunc index
+            clc                 ; check bit-7
+            rol
+            bcs checkprefix     ; prefix 0 for quick addresses
+quickword   tay                 ; instr is already doubled from rol
+            lda startquick,y    ; store quickfunc addr low byte in qaddr
+            sta qaddr
+            lda startquick+1,y  ; store quickfunc addr high byte in qaddr
+storhi      sta qaddr+1
+            inc pc              ; point to next threaded instruction
+            bne JUMPQUICK
+            inc pc+1
+JUMPQUICK   jmp (qaddr)         ; jmp to quick word def
+checkprefix clc                 ; not a quick addr -- check bit-6
+            rol                 ; this is rol number 2
+            bcs litinst         ; prefix 10 for fat addresses, 11 for literals
+fatw        sta qaddr           ; this is a fat address, store addr-l (4-byte aligned)
+            ldy #1
+            lda (pc),y          ; fetch addr-h
+            sta qaddr+1         ; store addr-h
+            lda pc              ; inc pc by 2
+            clc
+            adc #2
+            sta pc
+            bcc JUMPFAT
+            inc pc+1
+JUMPFAT     jmp (qaddr)         ; jump to fat word def
+litinst     sta tmp             ; save the low 6-bits of literal-l 14-bit integer (A has literal-l)
+            lda dp              ; dec dp by 2
+            sec
+            sbc #2
+            sta dp
+            bcc +
+            dec dp+1
++           clc                 ; prep to rotate 2 bits into tmp and sign-extend
+            ldy #1
+            lda (pc),y          ; load literal-h (Y is $00)
+            bpl +               ; sign extend high byte
+            sec                 ; set carry when literal is negative
++           ror                 ; rotate first bit onto tmp
+            ror tmp
+            clc
+            cmp #$00
+            bpl +               ; sign extend high byte
+            sec
++           ror                 ; rotate first bit onto tmp
+            ror tmp
+            ldy #$02
+            sta (dp),y          ; store value-h on stack
+            lda tmp
+            dey
+storlit_2   sta (dp),y          ; store value-l on stack (or value-h if from pushlit)
+            lda pc              ; inc pc by 2
+            clc
+            adc #2
+            sta pc
+            bcc +
+            inc pc+1
++           jmp next            ; process next instruction
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;
+;; STD FRTH words ;;
+;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;
+;; ret ( -- ) return from a fth word
+ret         #def
+ref_def     jmp begin
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; end ( -- ) exit fth
+end         #def
+end_def     rts                 ; terminate execution and return to caller
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; byte ( -- byte-value ) push a byte value onto the stack
+byte        #def
+byte_def    ldy #$00
+            lda (pc),y
+            sta (dp),y
+            dec dp
+            bne +
+            dec dp+1
++           jmp next
+;;
+;;;;;;;;
+
+;;;;;;;;
+;; pushlit ( -- int ) push an int value onto the stack
+pushlit     #def
+pushlit_def lda dp          ; dec 2 from dp
+            sec
+            sbc #2
+            sta dp
+            bcc +
+            dec dp+1
++           ldy #0          ; store value-l
+            lda (pc),y
+            iny
+            sta (dp),y
+            lda (pc),y
+            iny
+            jmp storlit_2   ; store value-h
+;;
+;;;;;;;;
+
+            .warn "**** THERE ARE ", 128 - (nextquick - startquick) / 2, " DEFINITIONS REMAINING"
+
+;;;;;;;;;;;;;;;
+;; test code ;;
+;;;;;;;;;;;;;;;
+;            .enc "screen"
+msg2        .text "word2 hello                             "
+
+dt2         #def
+dt2_def     ldx #$28
+draw_loop2  DEX
+            lda msg2,x
+            sta $0608,x
+            cpx #$00
+            bne draw_loop2
+            jmp next
+
+;            .enc "screen"
+msg         .text "word1 hello                             "
+
+;dt          #fat
+dt          #def
+dt_def      ldx #$00
+draw_loop   lda msg,x
+            sta $05e0,x
+            inx
+            cpx #$28
+            bne draw_loop
+            jmp next
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; test main (called by start) ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; : main dt2 dt end ;
+
+main        jsr begin
+            #call dt2
+            #call dt
+            #call end

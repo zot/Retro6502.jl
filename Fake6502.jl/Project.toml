@@ -1,0 +1,7 @@
+name = "Fake6502"
+uuid = "16df6505-bdad-4007-bcaf-2ff60a42e0d9"
+authors = ["Bill Burdick <bill.burdick@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
