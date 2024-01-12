@@ -12,7 +12,8 @@
 ;;                                                            ;;
 ;; ...                                                        ;;
 ;; 0002-0003: QADDR -- indirect address of current quick word ;;
-;; 0004-0005: DP -- data pointer                              ;;
+;; 0004: DP -- data pointer                                   ;;
+;; 0005: UNUSED                                               ;;
 ;; 0006-0007: TMP -- temporary calculations                   ;;
 ;; ...                                                        ;;
 ;; 0100-01FF: MACHINE STACK                                   ;;
@@ -28,18 +29,20 @@
 ;;          ^                                                 ;;
 ;;          |                                                 ;;
 ;;          |                                                 ;;
-;; CFFF: BOS - bottom of data stack                           ;;
+;; C3FF: bottom of data stack                                 ;;
+;; C400-C4FF: screen memory                                   ;;
+;; C800-CFFF: character set                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; KERNAL ROUTINES ;;
 ;;;;;;;;;;;;;;;;;;;;;
 
-CHRIN       = $FFCF -- read a character, line buffered
-CHROUT      = $FFD2 -- output a character
-GETIN       = $FFE4 -- get a character
-SCNKEY      = $FF9F -- scan keyboard
-CINT        = $FF81 -- init screen
+;;CHRIN       = $FFCF -- read a character, line buffered
+;;CHROUT      = $FFD2 -- output a character
+;;GETIN       = $FFE4 -- get a character
+;;SCNKEY      = $FF9F -- scan keyboard
+;;CINT        = $FF81 -- init screen
 
 ;;;;;;;;;;;;;;
 ;; prologue ;;
@@ -51,7 +54,28 @@ CINT        = $FF81 -- init screen
 +       .word 0        ;basic line end
 
 ; make screen black and text white
-start       lda #$00
+start
+;;            lda #$2f        ;; set io lines for back switch
+;;            sta $00
+;;            lda #$32        ;; switch basic out, characters in
+;;            ldy #$D0
+;;            sty tmp         ;; tmp <- character ROM, $D000:$D7FF
+;;            ldy #$C8
+;;            sty pc          ;; pc <- character RAM, $C800:$CFFF
+;;            lda #$0
+;;            sty tmp+1
+;;            sty pc+1
+;;cpydef      lda (tmp),y     ;; cpy character defs from character ROM to character RAM
+;;            sta (pc),y
+;;            iny
+;;            bne cpydef
+;;            inc tmp
+;;            inc pc
+;;            lda #$D0        ;; check if it increased past the copy area
+;;            cmp pc
+;;            bne cpydef      ;; proceed if still in the copy area
+;;            lda #36         ;; switch character rom out
+            lda #$00
             sta $d020
             sta $d021
             lda #$01
@@ -60,6 +84,11 @@ start       lda #$00
             jsr $e544
             jsr main
 end_prologue jmp *
+
+;;;;;;;;;;;;;;;;;;;
+;; C64 CONSTANTS ;;
+;;;;;;;;;;;;;;;;;;;
+vidmem      = $d018
 
 ;;;;;;;;;;;;;;;;;;;;
 ;; FRTH variables ;;
@@ -305,7 +334,7 @@ pushlit_def lda dp          ; dec 2 from dp
 ;;;;;;;;;;;;;;;
 ;; test code ;;
 ;;;;;;;;;;;;;;;
-;            .enc "screen"
+            .enc "screen"
 msg2        .text "word2 hello                             "
 
 dt2         #def
@@ -317,7 +346,7 @@ draw_loop2  DEX
             bne draw_loop2
             jmp next
 
-;            .enc "screen"
+            .enc "screen"
 msg         .text "word1 hello                             "
 
 ;dt          #fat
