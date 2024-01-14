@@ -1,9 +1,39 @@
 using Printf
 export reset, step
 
+struct Addr
+    value::UInt32
+    Addr(a::Integer) = new(a + 1)
+end
+
+struct AddrRange
+    first::Addr
+    last::Addr
+end
+
+intRange(r::AddrRange) = r.first.value:r.last.value
+Base.in(addr::Addr, r::AddrRange) = addr.value ∈ r.first.value:r.last.value
+Base.:(:)(a::Addr, b::Addr) = AddrRange(a, b)
+Base.first(r::AddrRange) = r.first
+Base.last(r::AddrRange) = r.last
+Base.length(r::AddrRange) = r.last.value - r.first.value + 1
+Base.hash(r::AddrRange, h::UInt64) = Base.hash(intRange(r), h)
+
+Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
+Base.show(io::IO, addr::Addr) = print(io, "Addr(0x", lpad(string(UInt16(addr.value) - 1; base=16), 4, "0"), ")")
+Base.:(>>)(a::Addr, i::UInt64) = Addr((a.value - 1) >> i)
+Base.:(<<)(a::Addr, i::UInt64) = Addr((a.value - 1) << i)
+Base.:(<)(a::Addr, b::Addr) = a.value < b.value
+Base.:(-)(a::Addr, b::Addr) = a.value - 1 - b.value
+Base.:(-)(a::Addr, i::Integer) = Addr(a.value - 1 - i)
+Base.:(-)(i::Integer, a::Addr) = Addr(a.value - 1 - i)
+Base.:(+)(a::Addr, i::Integer) = Addr(a.value - 1 + i)
+Base.:(+)(i::Integer, a::Addr) = Addr(a.value - 1 + i)
+
 # 1-based addresses
-A(x::Integer) = x + 1
-A(v::AbstractVector) = v .+ 1
+A(x::Integer) = Addr(UInt32(x))
+A(v::AbstractRange) = Addr(first(v)):Addr(last(v))
+A(v::AbstractVector) = Addr.(v)
 
 const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), "..", "..", "fake6502.so"))
 const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
@@ -128,16 +158,12 @@ end
 
 ### begin system hooks
 
-#Base.getindex(mach::Machine, addr::UInt16) = mach.mem[addr + 1]
-#Base.setindex!(mach::Machine, byte::UInt8, addr::UInt16) = mach.mem[addr + 1] = byte
-Base.getindex(mach::Machine, addr::Integer) = mach.mem[addr + 1]
-Base.setindex!(mach::Machine, byte::UInt8, addr::Integer) = mach.mem[addr + 1] = byte
+Base.getindex(mach::Machine, r::AddrRange) = mach.mem[intRange(r)]
+Base.getindex(mach::Machine, addr::Addr) = mach.mem[addr.value]
+Base.setindex!(mach::Machine, byte::UInt8, addr::Addr) = mach.mem[addr.value] = byte
+Base.getindex(mach::Machine, addr::UInt16) = mach[Addr(addr)]
+Base.setindex!(mach::Machine, byte::UInt8, addr::Integer) = mach[Addr(addr)] = byte
 
-Base.getindex(ctx::Context, addr::UInt16) = ctx.mach[addr]
-Base.setindex!(ctx::Context, byte::UInt8, addr::UInt16) = ctx.mach[addr] = byte
-
-Base.getindex(ctx::Ptr{Context}, addr::UInt16) = unsafe_load(ctx)[addr]
-Base.setindex!(ctx::Ptr{Context}, byte::UInt8, addr::UInt16) = unsafe_load(ctx)[addr] = byte
 Base.getproperty(ctx::Ptr{Context}, prop::Symbol) = getproperty(unsafe_load(ctx), prop)
 
 Base.propertynames(::Accessor{T, L}) where {T, L} = Base.fieldnames(L)
@@ -163,9 +189,11 @@ function init_rom()
     rom_initialized && return
     for (addr, file) in ROM_FILES
         open(file, "r") do io
-            ranges = addr isa AbstractRange ? [addr] : addr
+            ranges = addr isa AddrRange ? [addr] : addr
             for range in ranges
-                readbytes!(io, @view(ROM[range]), length(range))
+                fst = first(range).value
+                lst = last(range).value
+                readbytes!(io, @view(ROM[fst:lst]), length(range))
             end
         end
     end

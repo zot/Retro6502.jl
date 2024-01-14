@@ -7,7 +7,7 @@ include("c64.jl")
 
 function test()
     global mach = NewMachine()
-    mach.mem[screen] .= ' '
+    mach.mem[intRange(screen)] .= ' '
     off, total, labels = loadprg("a.out", mach; labelfile="condensed.labels")
     println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")
     print("labels:")
@@ -36,7 +36,7 @@ function test()
     end
     diag(mach)
     #display_hex(mach.mem)
-    display_chars(@view mach.mem[screen]) do c; C64.SCREEN_CODES[c + 1]; end
+    display_chars(@view mach.mem[intRange(screen)]) do c; C64.SCREEN_CODES[c + 1]; end
     println("done testing, ", mach.emu.clockticks, " clock ticks")
 end
 

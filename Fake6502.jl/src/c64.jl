@@ -1,6 +1,6 @@
 module C64
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
-using ..Fake6502: ROM, init_rom
+using ..Fake6502: ROM, init_rom, Addr, intRange
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
@@ -72,20 +72,20 @@ screen2ascii(char) = SCREEN_CODES(UInt8(char))
     dirty_character_defs::Array{Bool, 1} = zeros(Bool, (256,)) # character defs that have changed
     multicolor::Bool = false
     banks::Set{UnitRange{Int}} = Set{UnitRange{Int}}()
-    screen_mem::UInt16 = A(0x400)
-    character_mem::UInt16 = A(0x1000)
+    screen_mem::Addr = A(0x400)
+    character_mem::Addr = A(0x1000)
     running::Bool = true
 end
 
 function screen_mem(mach::Machine)
     c = c64(mach)
-    @view mach.mem[c.screen_mem:c.screen_mem + 999]
+    mach[c.screen_mem:c.screen_mem + 999]
 end    
 
 function character_mem(mach::Machine)
     c = c64(mach)
     characters = c.character_mem ∈ VIC_SETS ? ROM : mach.mem
-    @view characters[c.character_mem:c.character_mem + 0x7FF]
+    @view characters[c.character_mem.value:c.character_mem.value + 0x7FF]
 end
 
 function with_sdl(func::Function)
@@ -113,6 +113,8 @@ function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
     #println("STORE ", hex(addr, 4), " = ", hex(byte))
     state = c64(mach)
     adr = A(addr)
+    adr ∈ state.screen_mem:state.screen_mem+999 &&
+        println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
     if adr == BANK_SWITCH
         # writing to bank switcher
         println("WRITE TO BANK SWITCH")
@@ -188,7 +190,7 @@ end
 
 "choose screen and character mem based on contents of VIC_BANK and "
 function update_vic_bank(mem::Vector{UInt8}, state::C64_machine)
-    ostate.all_dirty = true
+    state.all_dirty = true
     offset = A((3 - (mem[VIC_BANK] & 0xF)) << 14)
     state.screen_mem = offset + ((mem[VIC_MEM] & 0xF0) << 6)
     state.character_mem = offset + ((mem[VIC_MEM] & 0x0E) << 11)
@@ -217,8 +219,8 @@ function update_screen(mach::Machine)
                     continue
                 c.multicolor &&
                     error("multicolor not supported")
-                bg = C64_PALETTE[1 + mach.mem[BG0]]
-                fg = C64_PALETTE[1 + mach.mem[COLOR_MEM + i]]
+                bg = C64_PALETTE[1 + mach[BG0]]
+                fg = C64_PALETTE[1 + mach[COLOR_MEM + i]]
                 for rowbyte in 0 : 7
                     y = row * 8 + rowbyte
                     pixels = char_mem[1 + 8 * char + rowbyte]
@@ -257,13 +259,13 @@ end
 function test_c64()
     #global mach = NewMachine()
     global mach = NewMachine(; write_func = c64_write_mem)
-    mach.mem[screen] .= ' '
-    #mach.mem[BG0] = COLORS.Cyan
-    mach.mem[BORDER] = 0xE
-    mach.mem[BG0] = 0x6
-    mach.mem[BG1] = 0x1
-    mach.mem[BG2] = 0x2
-    mach.mem[BG3] = 0x3
+    mach.mem[intRange(screen)] .= ' '
+    #mach[BG0] = COLORS.Cyan
+    mach[BORDER] = 0xE
+    mach[BG0] = 0x6
+    mach[BG1] = 0x1
+    mach[BG2] = 0x2
+    mach[BG3] = 0x3
     init_rom()
     off, total, labels = loadprg("a.out", mach; labelfile="condensed.labels")
     println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")
