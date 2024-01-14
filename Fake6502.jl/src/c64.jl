@@ -1,6 +1,7 @@
 module C64
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange
+using ..Fake6502: register, print_n
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
@@ -299,6 +300,7 @@ function test_c64()
                     mach.cpu.s = 0
                 end
             end
+            register(print_n, mach, :print_n)
             run(mach, labels[:main]; max_ticks = 10000)
             state.all_dirty = true
             update_screen(mach)

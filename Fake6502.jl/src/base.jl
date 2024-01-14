@@ -221,16 +221,16 @@ hex(num::Integer, pad =
     num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base=16), pad, "0")
 
 function call_step(mach::Machine)
-    #if mach[mach.cpu.pc] === JSR
-    #    # check for fake routine
-    #    addr = A(mach[mach.cpu.pc + 1] + (UInt16(mach[mach.cpu.pc + 2]) << 8))
-    #    println("JSR $(hex(UInt16(addr.value - 1)))")
-    #    if addr ∈ keys(mach.fake_routines)
-    #        mach.fake_routines[addr](mach)
-    #        mach.cpu.pc += 3
-    #        return
-    #    end
-    #end
+    if mach[mach.cpu.pc] === JSR
+        # check for fake routine
+        addr = A(mach[mach.cpu.pc + 1] + (UInt16(mach[mach.cpu.pc + 2]) << 8))
+        println("JSR $(hex(UInt16(addr.value - 1)))")
+        if addr ∈ keys(mach.fake_routines)
+            mach.fake_routines[addr](mach)
+            mach.cpu.pc += 3
+            return
+        end
+    end
     mach.step(mach)
 end
 
@@ -271,7 +271,7 @@ end
 
 register(func::Function, mach::Machine, sym::Symbol) = register(func, mach, mach.labels[sym])
 function register(func::Function, mach::Machine, addr::Addr)
-    mach.fake_routines[Addr] = func
+    mach.fake_routines[addr] = func
 end
 
 diag(mach::Machine) = @printf "pc = %04x s = %02x ticks = %d\n" mach.cpu.pc mach.cpu.s mach.emu.clockticks

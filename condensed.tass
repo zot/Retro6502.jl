@@ -387,7 +387,8 @@ draw_loop   lda msg,x
 
 ;; : main dt2 dt end ;
 
-main        jsr begin
+main        ;jsr print_n
+            jsr begin
             #call dt2
             #call dt
             #call end
