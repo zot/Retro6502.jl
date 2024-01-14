@@ -20,7 +20,7 @@ function test()
     lastlabel = nothing
     labelcount = 0
     maxwid = max(0, length.(string.(keys(labels)))...)
-    run(mach, labels[:main]; max_ticks = 10000) do mach
+    mach.step = function(mach::Machine)
         label = Base.get(addrs, A(mach.cpu.pc), nothing)
         if !isnothing(label)
             if label === lastlabel
@@ -35,6 +35,7 @@ function test()
         end
         step(mach)
     end
+    run(mach, labels[:main]; max_ticks = 10000)
     diag(mach)
     #display_hex(mach.mem)
     display_chars(@view mach.mem[intRange(screen)]) do c; C64.SCREEN_CODES[c + 1]; end

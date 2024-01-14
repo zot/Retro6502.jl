@@ -275,7 +275,7 @@ function test_c64()
         update_screen(mach)
         try
             nextupdate = UPDATE_PERIOD
-            run(mach, labels[:main]; max_ticks = 10000) do _mach
+            mach.step = function(mach::Machine)
                 label = Base.get(addrs, A(mach.cpu.pc), nothing)
                 if !isnothing(label)
                     if label === lastlabel
@@ -297,6 +297,7 @@ function test_c64()
                     mach.cpu.s = 0
                 end
             end
+            run(mach, labels[:main]; max_ticks = 10000)
             state.all_dirty = true
             update_screen(mach)
         catch err

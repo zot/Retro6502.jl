@@ -152,6 +152,7 @@ mutable struct Machine
     mem::Vector{UInt8}
     read_mem::Function
     write_mem::Function
+    step::Function
     properties::Dict{Any,Any}
     labels::Dict{Symbol,Addr}
     Machine() = new()
@@ -211,6 +212,20 @@ function write_mem(mach::Machine, addr::UInt16, byte::UInt8)
     mach[addr] = byte
 end
 
+function call_step(mach::Machine)
+    #if mach[mach.cpu.pc] === JSR
+    #    # check for fake routine
+    #    addr = A(mach[mach.cpu.pc + 1] + (UInt16(mach[mach.cpu.pc + 2]) << 8))
+    #    println("JSR $(hex(UInt16(addr.value - 1)))")
+    #    if addr ∈ keys(mach.fake_routines)
+    #        mach.fake_routines[addr](mach)
+    #        mach.cpu.pc += 3
+    #        return
+    #    end
+    #end
+    mach.step(mach)
+end
+
 # primitive ctx hooks
 function read_mem(ctx::Ptr{Context}, addr::UInt16)::UInt8
     local mach = ctx.mach
@@ -226,11 +241,12 @@ end
 const c_read_mem = @cfunction(read_mem, Cuchar, (Ptr{Context}, Cushort))
 const c_write_mem = @cfunction(write_mem, Cvoid, (Ptr{Context}, Cushort, Cuchar))
 
-function NewMachine(; read_func = read_mem, write_func = write_mem)
+function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = step)
     local machine = Machine()
     machine.mem = zeros(UInt8, 64K)
     machine.read_mem = read_func
     machine.write_mem = write_func
+    machine.step = step_func
     machine.labels = Dict{Symbol,Addr}()
     println("c_read_mem ", c_read_mem)
     println("c_write_mem ", c_write_mem)
@@ -244,9 +260,9 @@ end
 
 diag(mach::Machine) = @printf "pc = %04x s = %02x ticks = %d\n" mach.cpu.pc mach.cpu.s mach.emu.clockticks
 
-run(step_func::Function, mach::Machine, addr::Addr; max_ticks = 100) = run(mach, addr; max_ticks, step_func)
+run(mach::Machine, addr::Addr; max_ticks = 100) = run(mach, addr; max_ticks)
 
-function run(mach::Machine, addr::Addr; max_ticks = 100, step_func = step)
+function run(mach::Machine, addr::Addr; max_ticks = 100)
     println("RESETTING")
     reset(mach)
     println("FINISHED RESETTING")
@@ -255,7 +271,7 @@ function run(mach::Machine, addr::Addr; max_ticks = 100, step_func = step)
     @printf "cpu.a: %d cpu.x: %d cpu.y: %d cpu.flags: %d cpu.s: %d cpu.pc: %d\n" offset(mach.cpu, :a) offset(mach.cpu, :x) offset(mach.cpu, :y) offset(mach.cpu, :flags) offset(mach.cpu, :s) offset(mach.cpu, :pc)
     #diag(mach)
     while mach.emu.clockticks < max_ticks && mach.cpu.s != 0
-        step_func(mach)
+        call_step(mach)
         #diag(mach)
     end
 end
