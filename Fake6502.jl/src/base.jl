@@ -35,6 +35,7 @@ Base.:(-)(i::Integer, a::Addr) = Addr(a.value - 1 - i)
 Base.:(+)(a::Addr, i::Integer) = Addr(a.value - 1 + i)
 Base.:(+)(i::Integer, a::Addr) = Addr(a.value - 1 + i)
 
+const JSR = 0x20
 const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), "..", "..", "fake6502.so"))
 const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
 const fake6502_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
@@ -155,6 +156,8 @@ mutable struct Machine
     step::Function
     properties::Dict{Any,Any}
     labels::Dict{Symbol,Addr}
+    fake_base::Addr
+    fake_routines::Dict{Addr,Function}
     Machine() = new()
 end
 
@@ -163,7 +166,7 @@ end
 Base.getindex(mach::Machine, r::AddrRange) = mach.mem[intRange(r)]
 Base.getindex(mach::Machine, addr::Addr) = mach.mem[addr.value]
 Base.setindex!(mach::Machine, byte::UInt8, addr::Addr) = mach.mem[addr.value] = byte
-Base.getindex(mach::Machine, addr::UInt16) = mach[Addr(addr)]
+Base.getindex(mach::Machine, addr::Integer) = mach[Addr(addr)]
 Base.setindex!(mach::Machine, byte::UInt8, addr::Integer) = mach[Addr(addr)] = byte
 
 Base.getproperty(ctx::Ptr{Context}, prop::Symbol) = getproperty(unsafe_load(ctx), prop)
@@ -212,6 +215,11 @@ function write_mem(mach::Machine, addr::UInt16, byte::UInt8)
     mach[addr] = byte
 end
 
+hex(num::Union{UInt8, Int8}) = hex(num, 2)
+hex(num::Union{UInt16,Int16}) = hex(num, 4)
+hex(num::Integer, pad =
+    num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base=16), pad, "0")
+
 function call_step(mach::Machine)
     #if mach[mach.cpu.pc] === JSR
     #    # check for fake routine
@@ -246,16 +254,25 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     machine.mem = zeros(UInt8, 64K)
     machine.read_mem = read_func
     machine.write_mem = write_func
-    machine.step = step_func
+    # use default step func for initial reset
+    machine.step = step
     machine.labels = Dict{Symbol,Addr}()
-    println("c_read_mem ", c_read_mem)
-    println("c_write_mem ", c_write_mem)
+    machine.fake_base = A(0xCFFF)
+    machine.fake_routines = Dict{Addr,Function}()
+    machine.properties = Dict{Any, Any}()
     machine.ctx = @ccall $fake6502_init(c_read_mem::Ptr{Cvoid}, c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
     println("CTX ", machine.ctx)
     machine.cpu = Accessor(machine.ctx).cpu
     machine.emu = Accessor(machine.ctx).emu
-    machine.properties = Dict{Any, Any}()
+    println("c_read_mem ", c_read_mem)
+    println("c_write_mem ", c_write_mem)
+    machine.step = step_func
     machine
+end
+
+function register(func::Function, mach::Machine)
+    mach.fake_routines[mach.fake_base] = func
+    mach.fake_base -= 1
 end
 
 diag(mach::Machine) = @printf "pc = %04x s = %02x ticks = %d\n" mach.cpu.pc mach.cpu.s mach.emu.clockticks

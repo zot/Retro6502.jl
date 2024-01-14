@@ -181,8 +181,6 @@ end
 
 c64(mach::Machine)::C64_machine = mach.properties[:c64]
 
-hex(num::Integer, pad = num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base=16), pad, "0")
-
 function update_screen(mach::Machine)
     c = c64(mach)
     all_dirty = c.all_dirty
@@ -224,13 +222,17 @@ function update_screen(mach::Machine)
 end
 
 struct Close <: Exception end
+prev_evt = 0
 
 function check_close(renderer)
     event_ref = Ref{SDL_Event}()
     Bool(SDL_PollEvent(event_ref))
     evt = event_ref[]
     evt_ty = evt.type
-    evt.type != SDL_POLLSENTINEL && println(evt.type)
+    if evt.type != SDL_POLLSENTINEL && prev_evt != evt.type
+        println(evt.type)
+        global prev_evt = evt.type
+    end
     if evt.type == SDL_WINDOWEVENT
         if evt.window.event ∈ (SDL_WINDOWEVENT_EXPOSED, SDL_WINDOWEVENT_MAXIMIZED, SDL_WINDOWEVENT_SHOWN, SDL_WINDOWEVENT_RESTORED, SDL_WINDOWEVENT_SIZE_CHANGED, SDL_WINDOWEVENT_RESIZED)
             SDL_RenderPresent(renderer)
