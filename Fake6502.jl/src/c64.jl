@@ -1,7 +1,7 @@
 module C64
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
-using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange
-using ..Fake6502: register, print_n
+using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex
+using ..Fake6502: register, print_n, call_6502, call_frth, reset
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
@@ -114,6 +114,13 @@ function with_sdl(func::Function)
 end
 
 function c64_read_mem(mach::Machine, addr::UInt16)
+    state = c64(mach)
+    banks = state.banks
+    for bank in banks
+        addr ∈ bank &&
+            return ROM[addr.value]
+    end
+    return mach[addr]
 end
 
 function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
@@ -269,6 +276,7 @@ function test_c64()
         state = C64_machine(; renderer)
         mach.properties[:c64] = state
         init_c64(mach)
+        println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
         labels = mach.labels
         lastlabel = nothing
         labelcount = 0
@@ -301,6 +309,20 @@ function test_c64()
                 end
             end
             register(print_n, mach, :print_n)
+
+            println("CALLING ASMTEST")
+            reset(mach)
+            mach.cpu.s = 0xfe
+            result = call_6502(mach, :asmtest)
+            print("RESULT: ")
+            diag(result)
+
+            println("CALLING FRTHTEST")
+            reset(mach)
+            mach.cpu.s = 0xfe
+            call_frth(mach, :frthtest_def)
+            println("RESULT: ", A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult] + 1]) << 8)))
+
             run(mach, labels[:main]; max_ticks = 10000)
             state.all_dirty = true
             update_screen(mach)

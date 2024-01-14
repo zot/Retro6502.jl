@@ -37,6 +37,20 @@ function test()
         step(mach)
     end
     register(print_n, mach, :print_n)
+
+    println("CALLING ASMTEST")
+    reset(mach)
+    mach.cpu.s = 0xfe
+    result = call_6502(mach, :asmtest)
+    print("RESULT: ")
+    diag(result)
+
+    println("CALLING FRTHTEST")
+    reset(mach)
+    mach.cpu.s = 0xfe
+    call_frth(mach, :frthtest_def)
+    println("RESULT: ", A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult] + 1]) << 8)))
+
     run(mach, labels[:main]; max_ticks = 10000)
     diag(mach)
     #display_hex(mach.mem)

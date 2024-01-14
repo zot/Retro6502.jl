@@ -38,11 +38,20 @@
 ;; KERNAL ROUTINES ;;
 ;;;;;;;;;;;;;;;;;;;;;
 
-;;CHRIN       = $FFCF -- read a character, line buffered
-;;CHROUT      = $FFD2 -- output a character
-;;GETIN       = $FFE4 -- get a character
-;;SCNKEY      = $FF9F -- scan keyboard
-;;CINT        = $FF81 -- init screen
+*           = $FFCF ;; read a character, line buffered
+CHRIN
+*           = $FFD2 ;; output a character
+CHROUT
+*           = $FFE4 ;; get a character
+GETIN
+*           = $FF9F ;; scan keyboard
+SCNKEY
+*           = $FF81 ;; init screen
+CINT
+*           = $E544 ;; clear screen
+CLSCR
+*           = $0286 ;; text foreground for CHROUT
+TXTFG
 
 ;;;;;;;;;;;;;;
 ;; prologue ;;
@@ -301,6 +310,16 @@ storlit_2   sta (dp),y          ; store value-l on stack (or value-h if from pus
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;
+;; FRTH Julia support
+;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;
+;; ret ( -- ) return from a fth word
+retstub     #call end
+;;
+;;;;;;;;
+
 ;;;;;;;;;;;;;;;;;;;;
 ;; STD FRTH words ;;
 ;;;;;;;;;;;;;;;;;;;;
@@ -381,13 +400,34 @@ draw_loop   lda msg,x
             bne draw_loop
             jmp next
 
+frthtest    #def
+frthtest_def lda #1
+            sta frthresult
+            lda #2
+            sta frthresult+1
+            jmp next
+
+frthresult  .addr 0
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; test main (called by start) ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+asmtest     
+            lda #1
+            ldx #2
+            ldy #3
+            rts
+
 ;; : main dt2 dt end ;
 
-main        ;jsr print_n
+main        lda #65
+            ldx #7
+            jsr print_n
+            ;;lda #$01
+            ;;sta $0286
+            ;;lda #65
+            ;;jsr CHROUT
             jsr begin
             #call dt2
             #call dt

@@ -156,18 +156,27 @@ mutable struct Machine
     step::Function
     properties::Dict{Any,Any}
     labels::Dict{Symbol,Addr}
+    addrs::Dict{Addr,Symbol}
     fake_base::Addr
     fake_routines::Dict{Addr,Function}
+    verbose::Bool
     Machine() = new()
 end
 
 ### begin system hooks
 
 Base.getindex(mach::Machine, r::AddrRange) = mach.mem[intRange(r)]
-Base.getindex(mach::Machine, addr::Addr) = mach.mem[addr.value]
-Base.setindex!(mach::Machine, byte::UInt8, addr::Addr) = mach.mem[addr.value] = byte
+Base.getindex(mach::Machine, sym::Symbol) = mach[mach.labels[sym]]
 Base.getindex(mach::Machine, addr::Integer) = mach[Addr(addr)]
+Base.getindex(mach::Machine, addr::Addr) = mach.mem[addr.value]
+Base.getindex(::Machine, addr) =
+    error("Memory locations can only hold be accessed with symbols, integers, and addresses")
+Base.setindex!(mach::Machine, byte::UInt8, sym::Symbol) = mach[mach.labels[sym]] = byte
 Base.setindex!(mach::Machine, byte::UInt8, addr::Integer) = mach[Addr(addr)] = byte
+Base.setindex!(mach::Machine, byte::UInt8, addr::Addr) = mach.mem[addr.value] = byte
+Base.setindex!(::Machine, byte, ::Addr) = error("Memory locations can only hold bytes")
+Base.setindex!(::Machine, ::UInt8, addr) =
+    error("Memory locations can only hold be accessed with symbols, integers, and addresses")
 
 Base.getproperty(ctx::Ptr{Context}, prop::Symbol) = getproperty(unsafe_load(ctx), prop)
 
@@ -224,14 +233,20 @@ function call_step(mach::Machine)
     if mach[mach.cpu.pc] === JSR
         # check for fake routine
         addr = A(mach[mach.cpu.pc + 1] + (UInt16(mach[mach.cpu.pc + 2]) << 8))
-        println("JSR $(hex(UInt16(addr.value - 1)))")
+        label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
+        println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
+            println("FAKE ROUTINE")
             mach.fake_routines[addr](mach)
             mach.cpu.pc += 3
             return
+        #elseif ((addr.value - 1) & 0xFF00) == 0xFF00
+        #    println("ROM INST: $(mach.read_mem(mach, UInt16(addr.value - 1)))")
+        #    mach.verbose = true
         end
     end
     mach.step(mach)
+    mach.verbose && diag(mach)
 end
 
 # primitive ctx hooks
@@ -249,23 +264,62 @@ end
 const c_read_mem = @cfunction(read_mem, Cuchar, (Ptr{Context}, Cushort))
 const c_write_mem = @cfunction(write_mem, Cvoid, (Ptr{Context}, Cushort, Cuchar))
 
+function push_stack(mach::Machine, addr::Addr)
+    adr = addr.value - 1
+    mach[A(0x100 + mach.cpu.s)] = UInt8(adr >> 8)
+    mach[A(0x100 + mach.cpu.s - 1)] = UInt8(adr & 0xFF)
+    mach.cpu.s -= 2
+end
+
+call_6502(mach::Machine, sym::Symbol) = call_6502(mach, mach.labels[sym])
+function call_6502(mach::Machine, addr::Addr)
+    oldstate = unsafe_load(mach.ctx)
+    push_stack(mach, A(0x00))
+    mach.cpu.pc = addr.value - 1
+    while mach.cpu.s != oldstate.cpu.s
+        call_step(mach)
+    end
+    newstate = unsafe_load(mach.ctx)
+    unsafe_store!(mach.ctx, oldstate)
+    return newstate
+ end
+
+function call_frth(mach::Machine, sym)
+    # save pc
+    pclo = mach[:pc]
+    pchi = mach[mach.labels[:pc] + 1]
+    # call frth word
+    # set up pc to return to Julia
+    retstub = mach.labels[:retstub].value - 1
+    mach[:pc] = UInt8(retstub & 0xFF)
+    mach[mach.labels[:pc] + 1] = UInt8(retstub >> 8)
+    # call code
+    call_6502(mach, sym)
+    diag(mach)
+    # restore pc
+    mach[:pc] = pclo
+    mach[mach.labels[:pc] + 1] = pchi
+end
+
 function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = step)
     local machine = Machine()
     machine.mem = zeros(UInt8, 64K)
-    machine.read_mem = read_func
-    machine.write_mem = write_func
-    # use default step func for initial reset
+    # use default funcs until after reset
+    machine.read_mem = read_mem
+    machine.write_mem = write_mem
     machine.step = step
     machine.labels = Dict{Symbol,Addr}()
+    machine.addrs = Dict{Addr,Symbol}()
     machine.fake_routines = Dict{Addr,Function}()
     machine.properties = Dict{Any, Any}()
+    machine.verbose = false
     machine.ctx = @ccall $fake6502_init(c_read_mem::Ptr{Cvoid}, c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
     println("CTX ", machine.ctx)
     machine.cpu = Accessor(machine.ctx).cpu
     machine.emu = Accessor(machine.ctx).emu
-    println("c_read_mem ", c_read_mem)
-    println("c_write_mem ", c_write_mem)
     machine.step = step_func
+    machine.read_mem = read_func
+    machine.write_mem = write_func
     machine
 end
 
@@ -274,7 +328,9 @@ function register(func::Function, mach::Machine, addr::Addr)
     mach.fake_routines[addr] = func
 end
 
-diag(mach::Machine) = @printf "pc = %04x s = %02x ticks = %d\n" mach.cpu.pc mach.cpu.s mach.emu.clockticks
+diag(mach::Machine) = diag(unsafe_load(mach.ctx))
+diag(ctx::Context) = diag(ctx.cpu, ctx.emu)
+diag(cpu::CpuState, emu::EmuState) = @printf "a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.s emu.clockticks
 
 run(mach::Machine, addr::Addr; max_ticks = 100) = run(mach, addr; max_ticks)
 
@@ -294,7 +350,6 @@ end
 
 function loadprg(filename, mach::Machine; labelfile="")
     mem = mach.mem
-    labels = mach.labels
     total = 1
     off = 0
     open(filename, "r") do io
@@ -310,11 +365,13 @@ function loadprg(filename, mach::Machine; labelfile="")
         open(labelfile, "r") do io
             for line in readlines(io)
                 (_, addr, name) = split(line)
-                labels[Symbol(name[2:end])] = A(parse(Int, addr; base = 16))
+                sym = Symbol(name[2:end])
+                addr = A(parse(Int, addr; base = 16))
+                mach.labels[sym] = addr
+                mach.addrs[addr] = sym
             end
         end
     end
-    mach.labels = labels
     return off, total-1
 end
 
