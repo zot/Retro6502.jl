@@ -1,6 +1,6 @@
 module C64
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
-using ..Fake6502: ROM, init_rom, Addr, intRange
+using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
@@ -24,6 +24,12 @@ const BANK_SWITCH = A(0x0001)
 const BASIC_ROM = A(0xA000:0xBFFF)
 const CHAR_ROM = A(0xD000:0xDFFF)
 const KERNAL_ROM = A(0xE000:0xFFFF)
+BANK_CHOICES = [
+    (true, BASIC_ROM),
+    (true, KERNAL_ROM),
+    (),
+    (false, CHAR_ROM),
+]
 const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
 const VIC_MEM = A(0xD018)
 const VIC_BANK = A(0xDD00)
@@ -71,7 +77,7 @@ screen2ascii(char) = SCREEN_CODES(UInt8(char))
     dirty_characters::Array{Bool, 1} = zeros(Bool, (40*25,)) # characters that have changed
     dirty_character_defs::Array{Bool, 1} = zeros(Bool, (256,)) # character defs that have changed
     multicolor::Bool = false
-    banks::Set{UnitRange{Int}} = Set{UnitRange{Int}}()
+    banks::Set{AddrRange} = Set{AddrRange}()
     screen_mem::Addr = A(0x400)
     character_mem::Addr = A(0x1000)
     running::Bool = true
@@ -145,47 +151,24 @@ in_bank(addr, bank, banks) = addr ∈ bank && bank ∈ banks
 function switch_banks(mach::Machine, value::UInt8)
     banks = c64(mach).banks
     io = mach[IO_CTL]
-    original_choices = mach[BANK_SWITCH]
-    changed, bank_choices = check_bank(io, original_choices, value, 0x1)
-    if changed # if 0x1 is set, use basic rom
-        if bank_choices & 0x1 != 0
-            push!(banks, BASIC_ROM)
-        else
-            delete!(banks, BASIC_ROM)
+    original = settings = mach[BANK_SWITCH]
+    for bit in (0x01, 0x02, 0x04)
+        if io & bit != 0
+            settings = (settings & ~bit) | bit
+            (on, bank) = BANK_CHOICES[bit]
+            if on
+                push!(banks, bank)
+            else
+                delete!(banks, bank)
+            end
         end
     end
-    changed, bank_choices = check_bank(io, bank_choices, value, 0x2)
-    if changed # if 0x2 is set, use kernal rom
-        if bank_choices & 0x2 != 0
-            push!(banks, KERNAL_ROM)
-        else
-            delete!(banks, KERNAL_ROM)
-        end
-    end
-    changed, bank_choices = check_bank(io, bank_choices, value, 0x4)
-    if changed # if 0x4 is set, use RAM, otherwise use character ROM
-        if bank_choices & 0x4 == 0
-            push!(banks, CHAR_ROM)
-        else
-            delete!(banks, CHAR_ROM)
-        end
-    end
-    if bank_choices != original_choices
+    if settings != original
         println("BANK CHOICES CHANGED")
-        mach[BANK_SWITCH] = bank_choices
+        mach[BANK_SWITCH] = settings
     else
         println("BANK CHOICES DID NOT CHANGE")
     end
-    #mach[BANK_SWITCH] = value
-end
-
-function check_bank(io, bank_choices, value, bit)
-    if io & bit != 0
-        chosen = value & bit
-        bank_choices & bit != chosen &&
-            return true, (bank_choices & 0xFE) | chosen
-    end
-    return false, bank_choices
 end
 
 "choose screen and character mem based on contents of VIC_BANK and "
@@ -256,43 +239,50 @@ function check_close(renderer)
     return evt_ty == SDL_QUIT
 end
 
-function test_c64()
-    #global mach = NewMachine()
-    global mach = NewMachine(; write_func = c64_write_mem)
+function init_c64(mach::Machine)
     mach.mem[intRange(screen)] .= ' '
-    #mach[BG0] = COLORS.Cyan
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
     mach[BG1] = 0x1
     mach[BG2] = 0x2
     mach[BG3] = 0x3
     init_rom()
-    off, total, labels = loadprg("a.out", mach; labelfile="condensed.labels")
+    mach[IO_CTL] = 0x2F
+    switch_banks(mach, 0x07)
+    labels = mach.labels
+    off, total = loadprg("a.out", mach; labelfile="condensed.labels")
     println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")
     print("labels:")
     for name in sort([keys(labels)...])
-        @printf "\n  %04x %s" labels[name] name
+        @printf "\n  %04x %s" labels[name].value-1 name
     end
     println()
-    addrs = Dict(UInt16(addr) => name for (name, addr) in labels)
-    lastlabel = nothing
-    labelcount = 0
-    maxwid = max(length.(keys(labels))...)
+end
+
+function test_c64()
+    #global mach = NewMachine()
+    global mach = NewMachine(; write_func = c64_write_mem)
     with_sdl() do renderer
         state = C64_machine(; renderer)
         mach.properties[:c64] = state
+        init_c64(mach)
+        labels = mach.labels
+        lastlabel = nothing
+        labelcount = 0
+        addrs = Dict(addr => name for (name, addr) in labels)
+        maxwid = max(length.(string.(keys(labels)))...)
         state.all_dirty = true
         update_screen(mach)
         try
             nextupdate = UPDATE_PERIOD
-            run(mach, Base.get(labels, "main", CONDENSE_START); max_ticks = 10000) do _mach
-                label = Base.get(addrs, mach.cpu.pc, nothing)
+            run(mach, labels[:main]; max_ticks = 10000) do _mach
+                label = Base.get(addrs, A(mach.cpu.pc), nothing)
                 if !isnothing(label)
                     if label === lastlabel
                         labelcount === 0 && println("  LOOP...")
                         labelcount += 1
                     else
-                        print(rpad(label * ": ", maxwid + 2))
+                        print(rpad(string(label) * ": ", maxwid + 2))
                         lastlabel = label
                         labelcount = 0
                         diag(mach)

@@ -11,6 +11,11 @@ struct AddrRange
     last::Addr
 end
 
+# 1-based addresses
+A(x::Integer) = Addr(UInt32(x))
+A(v::AbstractRange) = Addr(first(v)):Addr(last(v))
+A(v::AbstractVector) = Addr.(v)
+
 intRange(r::AddrRange) = r.first.value:r.last.value
 Base.in(addr::Addr, r::AddrRange) = addr.value ∈ r.first.value:r.last.value
 Base.:(:)(a::Addr, b::Addr) = AddrRange(a, b)
@@ -29,11 +34,6 @@ Base.:(-)(a::Addr, i::Integer) = Addr(a.value - 1 - i)
 Base.:(-)(i::Integer, a::Addr) = Addr(a.value - 1 - i)
 Base.:(+)(a::Addr, i::Integer) = Addr(a.value - 1 + i)
 Base.:(+)(i::Integer, a::Addr) = Addr(a.value - 1 + i)
-
-# 1-based addresses
-A(x::Integer) = Addr(UInt32(x))
-A(v::AbstractRange) = Addr(first(v)):Addr(last(v))
-A(v::AbstractVector) = Addr.(v)
 
 const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), "..", "..", "fake6502.so"))
 const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
@@ -153,6 +153,7 @@ mutable struct Machine
     read_mem::Function
     write_mem::Function
     properties::Dict{Any,Any}
+    labels::Dict{Symbol,Addr}
     Machine() = new()
 end
 
@@ -230,6 +231,7 @@ function NewMachine(; read_func = read_mem, write_func = write_mem)
     machine.mem = zeros(UInt8, 64K)
     machine.read_mem = read_func
     machine.write_mem = write_func
+    machine.labels = Dict{Symbol,Addr}()
     println("c_read_mem ", c_read_mem)
     println("c_write_mem ", c_write_mem)
     machine.ctx = @ccall $fake6502_init(c_read_mem::Ptr{Cvoid}, c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
@@ -240,21 +242,15 @@ function NewMachine(; read_func = read_mem, write_func = write_mem)
     machine
 end
 
-run(step_func::Function, mach::Machine, addr::Integer; max_ticks = 100) =
-    run(mach, UInt16(addr); max_ticks, step_func)
-
-run(mach::Machine, addr::Integer; max_ticks = 100) = run(mach, UInt16(addr); max_ticks)
-
 diag(mach::Machine) = @printf "pc = %04x s = %02x ticks = %d\n" mach.cpu.pc mach.cpu.s mach.emu.clockticks
 
-run(step_func::Function, mach::Machine, addr::UInt16; max_ticks = 100) =
-    run(mach, addr; max_ticks, step_func)
+run(step_func::Function, mach::Machine, addr::Addr; max_ticks = 100) = run(mach, addr; max_ticks, step_func)
 
-function run(mach::Machine, addr::UInt16; max_ticks = 100, step_func = step)
+function run(mach::Machine, addr::Addr; max_ticks = 100, step_func = step)
     println("RESETTING")
     reset(mach)
     println("FINISHED RESETTING")
-    mach.cpu.pc = addr
+    mach.cpu.pc = addr.value - 1
     mach.cpu.s = 0xfe
     @printf "cpu.a: %d cpu.x: %d cpu.y: %d cpu.flags: %d cpu.s: %d cpu.pc: %d\n" offset(mach.cpu, :a) offset(mach.cpu, :x) offset(mach.cpu, :y) offset(mach.cpu, :flags) offset(mach.cpu, :s) offset(mach.cpu, :pc)
     #diag(mach)
@@ -264,8 +260,9 @@ function run(mach::Machine, addr::UInt16; max_ticks = 100, step_func = step)
     end
 end
 
-loadprg(filename, mach::Machine; labelfile="") = loadprg(filename, mach.mem; labelfile)
-function loadprg(filename, mem::Vector{UInt8}; labelfile="")
+function loadprg(filename, mach::Machine; labelfile="")
+    mem = mach.mem
+    labels = mach.labels
     total = 1
     off = 0
     open(filename, "r") do io
@@ -277,16 +274,16 @@ function loadprg(filename, mem::Vector{UInt8}; labelfile="")
             total += len
         end
     end
-    labels = Dict()
     if isfile(labelfile)
         open(labelfile, "r") do io
             for line in readlines(io)
                 (_, addr, name) = split(line)
-                labels[name[2:end]] = parse(Int, addr; base = 16)
+                labels[Symbol(name[2:end])] = A(parse(Int, addr; base = 16))
             end
         end
     end
-    return off, total-1, labels
+    mach.labels = labels
+    return off, total-1
 end
 
 reset(mach::Machine) = @ccall $fake6502_reset(mach.ctx::Ptr{Context})::Cvoid
