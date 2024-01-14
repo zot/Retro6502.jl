@@ -3,6 +3,7 @@ using Printf
 export reset, step
 
 include("base.jl")
+include("fakes.jl")
 include("c64.jl")
 
 function test()
@@ -35,6 +36,7 @@ function test()
         end
         step(mach)
     end
+    register(print_n, mach, :print_n)
     run(mach, labels[:main]; max_ticks = 10000)
     diag(mach)
     #display_hex(mach.mem)

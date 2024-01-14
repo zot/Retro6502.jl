@@ -257,7 +257,6 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     # use default step func for initial reset
     machine.step = step
     machine.labels = Dict{Symbol,Addr}()
-    machine.fake_base = A(0xCFFF)
     machine.fake_routines = Dict{Addr,Function}()
     machine.properties = Dict{Any, Any}()
     machine.ctx = @ccall $fake6502_init(c_read_mem::Ptr{Cvoid}, c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
@@ -270,9 +269,9 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     machine
 end
 
-function register(func::Function, mach::Machine)
-    mach.fake_routines[mach.fake_base] = func
-    mach.fake_base -= 1
+register(func::Function, mach::Machine, sym::Symbol) = register(func, mach, mach.labels[sym])
+function register(func::Function, mach::Machine, addr::Addr)
+    mach.fake_routines[Addr] = func
 end
 
 diag(mach::Machine) = @printf "pc = %04x s = %02x ticks = %d\n" mach.cpu.pc mach.cpu.s mach.emu.clockticks

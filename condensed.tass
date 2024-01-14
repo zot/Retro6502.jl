@@ -105,8 +105,9 @@ tmp
 *           = $0900             ; quickdef table
 startquick
 nextquick   := startquick       ; next available quickdef entry
-bos         = $cfff             ; highest data stack element (bottom of stack)
-
+*           = $cfff             ; highest data stack element (bottom of stack)
+bos
+nextfake    := bos
 *           = startquick + $100 ; code starts after quickdef table
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -132,6 +133,16 @@ result      = (* & $ff00) | $80 | ((* & $ff) >> 2)
             .endfunction result
 ;;
 ;;;;;;;;
+
+;;;;;;;;
+;; fake -- define a Julia function
+fake        .function;
+tmp         = *
+*           = nextfake
+start
+nextfake    ::= nextfake - 1
+*           = tmp
+            .endfunction start
 
 ;;;;;;;;
 ;; fat -- define a word in the fat table (for the 129th and later words)
@@ -184,6 +195,12 @@ addr        #fat
 ;;
 ;;;;;;;;
 
+;;;;;;;;
+;; List Julia functions here
+print_n     #fake
+;;
+;;;;;;;;
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; basic VM executor
@@ -197,12 +214,17 @@ addr        #fat
 ;; we know whether the current item is 1 or two bytes when we jmp, so inc the PC before the jmp
 ;;
 begin       ; initialize macroforth 
+            ; init dp
+            lda #bos & $FF
+            sta dp
+            lda #bos >> 8
+            sta dp+1
             ; pop addr off stack and put it in the pc
             pla                 ; pop pc-l
             tax
             pla                 ; pop pc-h
             tay
-            jmp storpc
+            jmp storpc          ; finished initialization
 body        pla                 ; called by a primitive word to transition to FRTH code
             tax
             pla
