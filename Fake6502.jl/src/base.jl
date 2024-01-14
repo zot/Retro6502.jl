@@ -272,7 +272,7 @@ function display_hex(mem::Vector{UInt8})
     end
 end
 
-display_chars(screen_mem::Vector{UInt8}) = display_chars(identity, screen_mem)
+display_chars(screen_mem::AbstractArray{T, 1}) where {T <: UInt8} = display_chars(identity, screen_mem)
 
 function display_chars(cvt::Function, screen_mem::AbstractVector{T}) where {T <: UInt8}
     println("+", join((x->"-").(1:40), ""), "+")

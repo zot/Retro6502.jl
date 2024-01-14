@@ -36,7 +36,7 @@ function test()
     end
     diag(mach)
     #display_hex(mach.mem)
-    display_chars(@view mach.mem[screen])
+    display_chars(@view mach.mem[screen]) do c; C64.SCREEN_CODES[c + 1]; end
     println("done testing, ", mach.emu.clockticks, " clock ticks")
 end
 
