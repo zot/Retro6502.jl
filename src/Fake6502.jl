@@ -2,6 +2,10 @@ module Fake6502
 using Printf
 export reset, step
 
+const CDIR=joinpath(dirname(@__FILE__), "..", "C")
+const EDIR=joinpath(dirname(@__FILE__), "..", "examples")
+const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
+
 include("base.jl")
 include("fakes.jl")
 include("c64.jl")
@@ -10,7 +14,7 @@ function test()
     global mach = NewMachine()
     mach.mem[intRange(screen)] .= ' '
     labels = mach.labels
-    off, total = loadprg("a.out", mach; labelfile="condensed.labels")
+    off, total = loadprg("$EDIR/condensed.prg", mach; labelfile="$EDIR/condensed.labels")
     println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")
     print("labels:")
     for name in sort([keys(labels)...])

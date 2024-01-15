@@ -36,7 +36,7 @@ Base.:(+)(a::Addr, i::Integer) = Addr(a.value - 1 + i)
 Base.:(+)(i::Integer, a::Addr) = Addr(a.value - 1 + i)
 
 const JSR = 0x20
-const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), "..", "..", "fake6502.so"))
+const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.so"))
 const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
 const fake6502_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
 const fake6502_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
@@ -45,10 +45,10 @@ const SCREEN_LEN = 40 * 25
 const screen = A(0x0400:0x07FF)
 const colors = A(0xD800:0xDBFF) # color is bits 8-11, color 1 for each character (color 3 in multicolor)
 const ROM_FILES = Dict(
-    A(0x1000:0x1FFF) => "resources/characters.bin", # visible only to VIC-II
-    A(0x9000:0x9FFF) => "resources/characters.bin", # visible only to VIC-II
-    [A(0xA000:0xBFFF), A(0xE000:0xFFFF)] => "resources/basic-kernal.bin", # visible by default
-    A(0xD000:0xDFFF) => "resources/characters.bin", # not visible by default
+    A(0x1000:0x1FFF) => "$RDIR/characters.bin", # visible only to VIC-II
+    A(0x9000:0x9FFF) => "$RDIR/characters.bin", # visible only to VIC-II
+    [A(0xA000:0xBFFF), A(0xE000:0xFFFF)] => "$RDIR/basic-kernal.bin", # visible by default
+    A(0xD000:0xDFFF) => "$RDIR/characters.bin", # not visible by default
 )
 const ROM = zeros(UInt8, 64K)
 rom_initialized = false
@@ -331,8 +331,6 @@ end
 diag(mach::Machine) = diag(unsafe_load(mach.ctx))
 diag(ctx::Context) = diag(ctx.cpu, ctx.emu)
 diag(cpu::CpuState, emu::EmuState) = @printf "a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.s emu.clockticks
-
-run(mach::Machine, addr::Addr; max_ticks = 100) = run(mach, addr; max_ticks)
 
 function run(mach::Machine, addr::Addr; max_ticks = 100)
     println("RESETTING")

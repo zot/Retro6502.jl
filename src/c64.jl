@@ -2,7 +2,7 @@ module C64
 using Base: check_open
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex
-using ..Fake6502: register, print_n, call_6502, call_frth, reset
+using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
@@ -319,7 +319,7 @@ function init_c64(mach::Machine)
     mach[IO_CTL] = 0x2F
     switch_banks(mach, 0x07)
     labels = mach.labels
-    off, total = loadprg("a.out", mach; labelfile="condensed.labels")
+    off, total = loadprg("$EDIR/condensed.prg", mach; labelfile="$EDIR/condensed.labels")
     println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")
     print("labels:")
     for name in sort([keys(labels)...])
