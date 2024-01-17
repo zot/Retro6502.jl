@@ -234,7 +234,7 @@ hex(num::Integer, pad =
     num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base=16), pad, "0")
 
 function call_step(mach::Machine)
-    diag(mach)
+    #diag(mach)
     if USE_GPL && mach[mach.cpu.pc] === JSR
         # check for fake routine
         addr = A(mach[mach.cpu.pc + 1] + (UInt16(mach[mach.cpu.pc + 2]) << 8))

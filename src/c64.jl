@@ -2,7 +2,7 @@ module C64
 using Base: check_open
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex
-using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
+using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR, USE_GPL
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
