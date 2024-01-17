@@ -1,0 +1,24 @@
+;;;;;;;;;;;;;;
+;; prologue ;;
+;;;;;;;;;;;;;;
+
+*       = $0801
+        .word (+), 10  ;pointer, line number
+        .null $9e, format("%d", start) ;will be sys 2061
++       .word 0        ;basic line end
+
+start
+            lda #$00
+            sta $d020
+            sta $d021
+            lda #$01
+            sta $0286
+            ; clear screen and jump to main program
+            jsr $e544
+            ;;; main code
+endless     lda #00
+loop        clc
+            adc #1
+            bne loop
+            jmp endless
+            jmp *

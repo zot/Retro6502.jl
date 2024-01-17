@@ -88,7 +88,7 @@ end
 
 function screen_mem(mach::Machine)
     c = c64(mach)
-    mach[c.screen_mem:c.screen_mem + 999]
+    @view mach.mem[c.screen_mem.value:c.screen_mem.value + 999]
 end    
 
 function character_mem(mach::Machine)
@@ -175,6 +175,7 @@ function switch_banks(mach::Machine, value::UInt8)
     end
     if settings != original
         println("BANK CHOICES CHANGED")
+        settings != value && println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
         mach[BANK_SWITCH] = settings
     else
         println("BANK CHOICES DID NOT CHANGE")
@@ -315,8 +316,15 @@ function init_c64(mach::Machine)
     mach[BG1] = 0x1
     mach[BG2] = 0x2
     mach[BG3] = 0x3
+    mach.newcpu.memory[intRange(screen)] .= ' '
+    mach.newcpu.memory[BORDER.value] = 0xE
+    mach.newcpu.memory[BG0.value] = 0x6
+    mach.newcpu.memory[BG1.value] = 0x1
+    mach.newcpu.memory[BG2.value] = 0x2
+    mach.newcpu.memory[BG3.value] = 0x3
     init_rom()
     mach[IO_CTL] = 0x2F
+    mach.newcpu.memory[IO_CTL.value] = 0x2F
     switch_banks(mach, 0x07)
     labels = mach.labels
     off, total = loadprg("$EDIR/condensed.prg", mach; labelfile="$EDIR/condensed.labels")
@@ -365,6 +373,7 @@ function test_c64()
                 end
                 if check_close(renderer, win, mach)
                     mach.cpu.s = 0
+                    mach.newcpu.sp = 0
                 end
             end
             register(print_n, mach, :print_n)
@@ -372,6 +381,7 @@ function test_c64()
             println("CALLING ASMTEST")
             reset(mach)
             mach.cpu.s = 0xfe
+            mach.newcpu.sp = 0xfe
             result = call_6502(mach, :asmtest)
             print("RESULT: ")
             diag(result)
@@ -379,6 +389,7 @@ function test_c64()
             println("CALLING FRTHTEST")
             reset(mach)
             mach.cpu.s = 0xfe
+            mach.newcpu.sp = 0xfe
             call_frth(mach, :frthtest_def)
             println("RESULT: ", A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult] + 1]) << 8)))
 

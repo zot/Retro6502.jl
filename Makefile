@@ -12,6 +12,9 @@ default: $(SHLIB) $(RESOURCES)
 test: default $(PRGS) FRC
 	julia --project=. -e 'include("src/Fake6502.jl"); Fake6502.test()'
 
+speed: default examples/speed.prg FRC
+	julia --project=. -e 'include("src/Fake6502.jl"); Fake6502.speed_test()'
+
 %.prg: %.tass
 	64tass --vice-labels -a --cbm-prg -o $@ -L $(patsubst %.prg,%.list,$@) -l $(patsubst %.prg,%.labels,$@) $<
 
@@ -40,9 +43,9 @@ $(SHLIB): $(LIBS)
 	$(CC) -rdynamic -shared -o $(SHLIB) $(LIBS)
 
 C/fake6502host.o: $(FAKE6502)
-	$(CC) -c C/fake6502host.c -o $@
+	$(CC) -O3 -c C/fake6502host.c -o $@
 
 C/fake6502.o: $(FAKE6502)
-	$(CC) -DDECIMALMODE -DNMOS6502 -c $(CFLAGS) C/fake6502.c -o $@
+	$(CC) -O3 -DFAKE6502_OPS_STATIC -DDECIMALMODE -DNMOS6502 -c $(CFLAGS) C/fake6502.c -o $@
 
 FRC:
