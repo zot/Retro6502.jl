@@ -122,6 +122,12 @@
 
 module Fake6502m
 
+const TEST_COMPAT = true
+#const TEST_COMPAT = false
+const FAKE_COMPAT = true
+
+const DECIMALMODE = true
+
 const FLAG_CARRY = 0x01
 const FLAG_ZERO = 0x02
 const FLAG_INTERRUPT = 0x04
@@ -136,9 +142,9 @@ const BASE_STACK = 0x100
 
 const K = 1024
 
-abstract type Cpu end
+abstract type AbstractCpu end
 
-@kwdef mutable struct BasicCpu{T} <: Cpu
+@kwdef mutable struct Cpu{T} <: AbstractCpu
     pc::UInt16 = 0
     a::UInt8 = 0
     x::UInt8 = 0
@@ -160,15 +166,16 @@ abstract type Cpu end
     penaltyop::UInt8 = 0
     penaltyaddr::UInt8 = 0
     memory::Vector{UInt8} = zeros(UInt8, 64K)
+    user_data::T
 end
 
-function copy(src::BasicCpu{T}) where {T}
-    new = BasicCpu{T}()
+function copy(src::Cpu{T}) where {T}
+    new = Cpu{T}(; src.user_data)
     copy(src, new)
     new
 end
 
-function copy(src::BasicCpu, dst::BasicCpu)
+function copy(src::Cpu, dst::Cpu)
      dst.pc = src.pc
      dst.a = src.a
      dst.x = src.x
@@ -191,9 +198,9 @@ function copy(src::BasicCpu, dst::BasicCpu)
 end
 
 # Basic Cpu does not interfere with computation
-read6502(cpu::Cpu, addr::UInt16) = cpu.memory[addr + 1]
-write6502(cpu::Cpu, addr::UInt16, value::UInt8) = cpu.memory[addr + 1] = value
-hookexternal(::Cpu) = nothing
+read6502(cpu::AbstractCpu, addr::UInt16) = cpu.memory[addr + 1]
+write6502(cpu::AbstractCpu, addr::UInt16, value::UInt8) = cpu.memory[addr + 1] = value
+hookexternal(::AbstractCpu) = nothing
 
 #/*addressing mode functions, calculate effective addresses*/
 function imp end
@@ -335,23 +342,23 @@ ticktable = UInt32[
 #=F=#      2,    5,    2,    8,    4,    4,    6,    6,    2,    4,    2,    7,    4,    4,    7,    7   #=F=#
 ]
 
-saveaccum(cpu::Cpu, n) = cpu.a = UInt8(n & 0xFF)
+saveaccum(cpu::AbstractCpu, n) = cpu.a = UInt8(n & 0xFF)
 
 #/*flag modifiers*/
-setcarry(cpu::Cpu) = cpu.status |= FLAG_CARRY
-clearcarry(cpu::Cpu) = cpu.status &= (~FLAG_CARRY)
-setzero(cpu::Cpu) = cpu.status |= FLAG_ZERO
-clearzero(cpu::Cpu) = cpu.status &= (~FLAG_ZERO)
-setinterrupt(cpu::Cpu) = cpu.status |= FLAG_INTERRUPT
-clearinterrupt(cpu::Cpu) = cpu.status &= (~FLAG_INTERRUPT)
-setdecimal(cpu::Cpu) = cpu.status |= FLAG_DECIMAL
-cleardecimal(cpu::Cpu) = cpu.status &= (~FLAG_DECIMAL)
-setoverflow(cpu::Cpu) = cpu.status |= FLAG_OVERFLOW
-clearoverflow(cpu::Cpu) = cpu.status &= (~FLAG_OVERFLOW)
-setsign(cpu::Cpu) = cpu.status |= FLAG_SIGN
-clearsign(cpu::Cpu) = cpu.status &= (~FLAG_SIGN)
+setcarry(cpu::AbstractCpu) = cpu.status |= FLAG_CARRY
+clearcarry(cpu::AbstractCpu) = cpu.status &= (~FLAG_CARRY)
+setzero(cpu::AbstractCpu) = cpu.status |= FLAG_ZERO
+clearzero(cpu::AbstractCpu) = cpu.status &= (~FLAG_ZERO)
+setinterrupt(cpu::AbstractCpu) = cpu.status |= FLAG_INTERRUPT
+clearinterrupt(cpu::AbstractCpu) = cpu.status &= (~FLAG_INTERRUPT)
+setdecimal(cpu::AbstractCpu) = cpu.status |= FLAG_DECIMAL
+cleardecimal(cpu::AbstractCpu) = cpu.status &= (~FLAG_DECIMAL)
+setoverflow(cpu::AbstractCpu) = cpu.status |= FLAG_OVERFLOW
+clearoverflow(cpu::AbstractCpu) = cpu.status &= (~FLAG_OVERFLOW)
+setsign(cpu::AbstractCpu) = cpu.status |= FLAG_SIGN
+clearsign(cpu::AbstractCpu) = cpu.status &= (~FLAG_SIGN)
 
-function setzeroif(cpu::Cpu, condition::Bool)
+function setzeroif(cpu::AbstractCpu, condition::Bool)
     if condition
         setzero(cpu)
     else
@@ -359,7 +366,7 @@ function setzeroif(cpu::Cpu, condition::Bool)
     end
 end
 
-function setsignif(cpu::Cpu, condition::Bool)
+function setsignif(cpu::AbstractCpu, condition::Bool)
     if condition
         setsign(cpu)
     else
@@ -367,7 +374,7 @@ function setsignif(cpu::Cpu, condition::Bool)
     end
 end
 
-function setcarryif(cpu::Cpu, condition::Bool)
+function setcarryif(cpu::AbstractCpu, condition::Bool)
     if condition
         setcarry(cpu)
     else
@@ -375,7 +382,7 @@ function setcarryif(cpu::Cpu, condition::Bool)
     end
 end
 
-function setoverflowif(cpu::Cpu, condition::Bool)
+function setoverflowif(cpu::AbstractCpu, condition::Bool)
     if condition
         setoverflow(cpu)
     else
@@ -384,41 +391,41 @@ function setoverflowif(cpu::Cpu, condition::Bool)
 end
 
 #/*flag calculation */
-zerocalc(cpu::Cpu, n) = setzeroif(cpu, (n & 0x00FF) == 0)
-signcalc(cpu::Cpu, n) = setsignif(cpu, (n & 0x0080) != 0)
-carrycalc(cpu::Cpu, n) = setcarryif(cpu, (n & 0xFF00) != 0)
-overflowcalc(cpu::Cpu, result, accumulator, memory) =
+zerocalc(cpu::AbstractCpu, n) = setzeroif(cpu, (n & 0x00FF) == 0)
+signcalc(cpu::AbstractCpu, n) = setsignif(cpu, (n & 0x0080) != 0)
+carrycalc(cpu::AbstractCpu, n) = setcarryif(cpu, (n & 0xFF00) != 0)
+overflowcalc(cpu::AbstractCpu, result, accumulator, memory) =
     setoverflowif(cpu, ((result ⊻ UInt16(accumulator)) & ((result ⊻ memory) & 0x80)) != 0)
 
 #/*a few general functions used by various other functions*/
-function push_6502_16(cpu::Cpu, pushval::UInt16)
+function push_6502_16(cpu::AbstractCpu, pushval::UInt16)
     write6502(cpu, BASE_STACK + cpu.sp, UInt8((pushval >> 8) & 0xFF))
     write6502(cpu, BASE_STACK + UInt16((cpu.sp - 0x1) & 0xFF), UInt8(pushval & 0xFF))
     cpu.sp -= 0x2;
 end
 
-function push_6502_8(cpu::Cpu, pushval::UInt8)
+function push_6502_8(cpu::AbstractCpu, pushval::UInt8)
     write6502(cpu, BASE_STACK + cpu.sp, pushval)
     cpu.sp -= 0x1
 end
 
-function pull_6502_16(cpu::Cpu)
+function pull_6502_16(cpu::AbstractCpu)
     temp16 = read6502(cpu, BASE_STACK + ((cpu.sp + 0x01) & 0xFF)) | (UInt16(read6502(cpu, BASE_STACK + ((cpu.sp + 0x02) & 0xFF))) << 8)
     cpu.sp += 0x2;
     return temp16
 end
 
-function pull_6502_8(cpu::Cpu)
+function pull_6502_8(cpu::AbstractCpu)
     cpu.sp += 0x1
     return read6502(cpu, BASE_STACK + cpu.sp)
 end
 
-function mem_6502_read16(cpu::Cpu, addr::UInt16)
+function mem_6502_read16(cpu::AbstractCpu, addr::UInt16)
     return UInt16(read6502(cpu, addr)) |
         (UInt16(read6502(cpu, addr + 0x1)) << 8)
 end
 
-function reset6502(cpu::Cpu)
+function reset6502(cpu::AbstractCpu)
 #	/*
 #	    pc = (ushort)read6502(0xFFFC) | ((ushort)read6502(0xFFFD) << 8);
 #	    a = 0;
@@ -441,33 +448,35 @@ function reset6502(cpu::Cpu)
 end
 
 #/*addressing mode functions, calculates effective addresses*/
-imp(::Cpu) = nothing
+imp(::AbstractCpu) = nothing
 
 #/*addressing mode functions, calculates effective addresses*/
-acc(::Cpu) = nothing
+function acc(cpu::AbstractCpu)
+    TEST_COMPAT && read6502(cpu, cpu.pc)
+end
 
 #/*addressing mode functions, calculates effective addresses*/
-function imm(cpu::Cpu)
+function imm(cpu::AbstractCpu)
     cpu.ea = cpu.pc
     cpu.pc += 0x1
 end
 
-function zp(cpu::Cpu) # /*zero-page*/
+function zp(cpu::AbstractCpu) # /*zero-page*/
     cpu.ea = UInt16(read6502(cpu, cpu.pc))
     cpu.pc += 0x1
 end
 
-function zpx(cpu::Cpu) # /*zero-page,X*/
+function zpx(cpu::AbstractCpu) # /*zero-page,X*/
     cpu.ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
     cpu.pc += 0x1
 end
 
-function zpy(cpu::Cpu) # /*zero-page,Y*/
+function zpy(cpu::AbstractCpu) # /*zero-page,Y*/
     cpu.ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
     cpu.pc += 0x1
 end
 
-function rel(cpu::Cpu) #/*relative for branch ops (8-bit immediate value, sign-extended)*/
+function rel(cpu::AbstractCpu) #/*relative for branch ops (8-bit immediate value, sign-extended)*/
     cpu.reladdr = UInt16(read6502(cpu, cpu.pc))
     cpu.pc += 0x1
     if (cpu.reladdr & 0x80) != 0
@@ -475,13 +484,13 @@ function rel(cpu::Cpu) #/*relative for branch ops (8-bit immediate value, sign-e
     end
 end
 
-function abso(cpu::Cpu) #/*absolute*/
+function abso(cpu::AbstractCpu) #/*absolute*/
     cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
     cpu.pc += 0x2
 end
 
 
-function absx(cpu::Cpu) #/*absolute,X*/
+function absx(cpu::AbstractCpu) #/*absolute,X*/
     local startpage
     cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
     startpage = cpu.ea & 0xFF00
@@ -494,7 +503,7 @@ function absx(cpu::Cpu) #/*absolute,X*/
     cpu.pc += 0x2
 end
 
-function absy(cpu::Cpu) # /*absolute,Y*/
+function absy(cpu::AbstractCpu) # /*absolute,Y*/
     local startpage
     cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
     startpage = cpu.ea & 0xFF00;
@@ -507,7 +516,7 @@ function absy(cpu::Cpu) # /*absolute,Y*/
     cpu.pc += 0x2;
 end
 
-function ind(cpu::Cpu) # /*indirect*/
+function ind(cpu::AbstractCpu) # /*indirect*/
     local eahelp, eahelp2
     eahelp = UInt16(read6502(cpu, cpu.pc)) | UInt16(UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
     eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*replicate 6502 page-boundary wraparound bug*/
@@ -515,15 +524,17 @@ function ind(cpu::Cpu) # /*indirect*/
     cpu.pc += 0x2;
 end
 
-function indx(cpu::Cpu) # /* (indirect,X)*/
+function indx(cpu::AbstractCpu) # /* (indirect,X)*/
     local eahelp
-    eahelp = UInt16((UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
+    zp = UInt16(read6502(cpu, cpu.pc))
+    TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
+    eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
     cpu.pc += 0x1
     # todo the first and with 0xFF is redundant because of the first line
     cpu.ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8);
 end
 
-function indy(cpu::Cpu) # /* (indirect),Y*/
+function indy(cpu::AbstractCpu) # /* (indirect),Y*/
     local eahelp, eahelp2, startpage
     eahelp = UInt16(read6502(cpu, cpu.pc));
     cpu.pc += 0x1
@@ -534,15 +545,16 @@ function indy(cpu::Cpu) # /* (indirect),Y*/
 
     if startpage != (cpu.ea & 0xFF00) # /*one cycle penlty for page-crossing on some opcodes*/
         cpu.penaltyaddr = 0x1;
+        TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
     end
 end
 
-function getvalue(cpu::Cpu)
+function getvalue(cpu::AbstractCpu)
     addrtable[cpu.opcode + 1] == acc && return UInt16(cpu.a)
     return UInt16(read6502(cpu, cpu.ea));
 end
 
-function getvalue16(cpu::Cpu)
+function getvalue16(cpu::AbstractCpu)
     return UInt16(read6502(cpu, cpu.ea)) | (UInt16(read6502(cpu, UInt16(cpu.ea+0x1))) << 8);
 end
 
@@ -557,7 +569,7 @@ end
 
 #/*instruction handler functions*/
 
-function adc_nes(cpu::Cpu)
+function adc_nes(cpu::AbstractCpu)
     if (cpu.status & FLAG_DECIMAL) != 0
         local AL, A, result_dec;
         cpu.penaltyop = 0x1
@@ -570,12 +582,12 @@ function adc_nes(cpu::Cpu)
             AL = ((AL + 0x06) & 0x0F) + 0x10 # /*SEQ 1B OR SEQ 2B*/
         end
         A = (A & 0xF0) + (cpu.value & 0xF0) + AL # /*SEQ2C OR SEQ 1C*/
-        setsignif(cpu, A & 0x80) # /*SEQ 2E it says "bit 7"*/
+        setsignif(cpu, (A & 0x80) != 0) # /*SEQ 2E it says "bit 7"*/
         if A >= 0xA0
             A += 0x60 # /*SEQ 1E*/
         end
         cpu.result = A # /*1F*/
-        setoverflowif(cpu, A & 0xff80)
+        setoverflowif(cpu, (A & 0xff80) != 0)
         setcarryif(cpu, A >= 0x100) # /*SEQ 1G*/
 		
         zerocalc(cpu, result_dec) # /*Original nmos does zerocalc on the binary result.*/
@@ -585,21 +597,25 @@ function adc_nes(cpu::Cpu)
     end
 end
 
-function adc_non_nes(cpu::Cpu)
+function adc_non_nes(cpu::AbstractCpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
-    carrycalc(cpu, cpu.result)
     zerocalc(cpu, cpu.result)
     overflowcalc(cpu, cpu.result, cpu.a, cpu.value)
     signcalc(cpu, cpu.result)
+    # FAKE: changed for consistency
+    if DECIMALMODE && (cpu.status & FLAG_DECIMAL) != 0
+        cpu.result += ((((cpu.result + 0x66) ⊻ UInt16(cpu.a) ⊻ cpu.value) >> 3) & 0x22) * 3
+    end
+    carrycalc(cpu, cpu.result)
     saveaccum(cpu, cpu.result)
 end
 
 # to emulate NES, make a custom adc method call adc_nes instead of adc_non_nes
-adc(cpu::Cpu) = adc_non_nes(cpu)
+adc(cpu::AbstractCpu) = adc_non_nes(cpu)
 
-function and(cpu::Cpu)
+function and(cpu::AbstractCpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.a) & cpu.value
@@ -610,8 +626,9 @@ function and(cpu::Cpu)
     saveaccum(cpu, cpu.result)
 end
 
-function asl(cpu::Cpu)
+function asl(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
+    TEST_COMPAT && addrtable[cpu.opcode + 1] != acc && putvalue(cpu, cpu.value)
     cpu.result = cpu.value << 1
 
     carrycalc(cpu, cpu.result)
@@ -621,7 +638,7 @@ function asl(cpu::Cpu)
     putvalue(cpu, cpu.result)
 end
 
-function check_cross_page_boundary(cpu::Cpu)
+function check_cross_page_boundary(cpu::AbstractCpu)
     if (cpu.oldpc & 0xFF00) != (cpu.pc & 0xFF00)
         cpu.clockticks6502 += 2 # /*check if jump crossed a page boundary*/
     else
@@ -629,7 +646,7 @@ function check_cross_page_boundary(cpu::Cpu)
     end
 end
 
-function bcc(cpu::Cpu)
+function bcc(cpu::AbstractCpu)
     if cpu.status & FLAG_CARRY == 0
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
@@ -637,7 +654,7 @@ function bcc(cpu::Cpu)
     end
 end
 
-function bcs(cpu::Cpu)
+function bcs(cpu::AbstractCpu)
     if cpu.status & FLAG_CARRY == FLAG_CARRY
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
@@ -645,7 +662,7 @@ function bcs(cpu::Cpu)
     end
 end
 
-function beq(cpu::Cpu)
+function beq(cpu::AbstractCpu)
     if cpu.status & FLAG_ZERO == FLAG_ZERO
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
@@ -654,7 +671,7 @@ function beq(cpu::Cpu)
 end
 
 
-function bit(cpu::Cpu)
+function bit(cpu::AbstractCpu)
     cpu.value = getvalue(cpu);
     cpu.result = UInt16(cpu.a) & cpu.value
    
@@ -662,7 +679,7 @@ function bit(cpu::Cpu)
     cpu.status = (cpu.status & 0x3F) | (UInt8(cpu.value) & 0xC0);
 end
 
-function bmi(cpu::Cpu)
+function bmi(cpu::AbstractCpu)
     if cpu.status & FLAG_SIGN == FLAG_SIGN
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
@@ -674,7 +691,7 @@ function bmi(cpu::Cpu)
     end
 end
 
-function bne(cpu::Cpu)
+function bne(cpu::AbstractCpu)
     if  cpu.status & FLAG_ZERO == 0
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
@@ -682,8 +699,10 @@ function bne(cpu::Cpu)
     end
 end
 
-function bpl(cpu::Cpu)
+function bpl(cpu::AbstractCpu)
     if cpu.status & FLAG_SIGN == 0
+        #TEST_COMPAT && cpu.pc & 0xFF00 != (cpu.pc + cpu.reladdr) & 0xFF00 && read6502(cpu, cpu.pc + 1)
+        #TEST_COMPAT && read6502(cpu, cpu.pc + 0x1)
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
         check_cross_page_boundary(cpu)
@@ -691,6 +710,7 @@ function bpl(cpu::Cpu)
 end
 
 function brk_6502(cpu)
+    TEST_COMPAT && read6502(cpu, cpu.pc)
     cpu.pc += 0x1
     push_6502_16(cpu, cpu.pc)
     push_6502_8(cpu, cpu.status | FLAG_BREAK)
@@ -698,7 +718,7 @@ function brk_6502(cpu)
     cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
 end
 
-function bvc(cpu::Cpu)
+function bvc(cpu::AbstractCpu)
     if cpu.status & FLAG_OVERFLOW == 0
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
@@ -706,7 +726,7 @@ function bvc(cpu::Cpu)
     end
 end
 
-function bvs(cpu::Cpu)
+function bvs(cpu::AbstractCpu)
     if cpu.status & FLAG_OVERFLOW == FLAG_OVERFLOW
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
@@ -715,15 +735,15 @@ function bvs(cpu::Cpu)
 end
 
 
-clc(cpu::Cpu)  = clearcarry(cpu)
+clc(cpu::AbstractCpu)  = clearcarry(cpu)
 
-cld(cpu::Cpu) = cleardecimal(cpu)
+cld(cpu::AbstractCpu) = cleardecimal(cpu)
 
-cli(cpu::Cpu) = clearinterrupt(cpu)
+cli(cpu::AbstractCpu) = clearinterrupt(cpu)
 
-clv(cpu::Cpu) = clearoverflow(cpu)
+clv(cpu::AbstractCpu) = clearoverflow(cpu)
 
-function cmp(cpu::Cpu)
+function cmp(cpu::AbstractCpu)
     cpu.penaltyop = 1
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.a) - cpu.value
@@ -734,7 +754,7 @@ function cmp(cpu::Cpu)
 end
 
 
-function cpx(cpu::Cpu)
+function cpx(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.x) - cpu.value
    
@@ -743,7 +763,7 @@ function cpx(cpu::Cpu)
     signcalc(cpu, cpu.result)
 end
 
-function cpy(cpu::Cpu)
+function cpy(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.y) - cpu.value
    
@@ -752,7 +772,7 @@ function cpy(cpu::Cpu)
     signcalc(cpu, cpu.result)
 end
 
-function dec(cpu::Cpu)
+function dec(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
     cpu.result = cpu.value - 0x1
    
@@ -763,24 +783,24 @@ function dec(cpu::Cpu)
 end
 
 
-function dex(cpu::Cpu)
+function dex(cpu::AbstractCpu)
     cpu.x -= 0x1
    
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
 end
 
-function dey(cpu::Cpu)
+function dey(cpu::AbstractCpu)
     cpu.y -= 0x1
    
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
 end
 
-function eor(cpu::Cpu)
+function eor(cpu::AbstractCpu)
     cpu.penaltyop = 1;
     cpu.value = getvalue(cpu);
-    cpu.result = UInt16(cpu.a) ^ cpu.value;
+    cpu.result = UInt16(cpu.a) ⊻ cpu.value;
    
     zerocalc(cpu, cpu.result);
     signcalc(cpu, cpu.result);
@@ -788,7 +808,7 @@ function eor(cpu::Cpu)
     saveaccum(cpu, cpu.result);
 end
 
-function inc(cpu::Cpu)
+function inc(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
     cpu.result = cpu.value + 0x1
    
@@ -798,28 +818,28 @@ function inc(cpu::Cpu)
     putvalue(cpu, cpu.result)
 end
 
-function inx(cpu::Cpu)
+function inx(cpu::AbstractCpu)
     cpu.x += 0x1
    
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
 end
 
-function iny(cpu::Cpu)
+function iny(cpu::AbstractCpu)
     cpu.y += 0x1
    
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
 end
 
-jmp(cpu::Cpu) = cpu.pc = cpu.ea
+jmp(cpu::AbstractCpu) = cpu.pc = cpu.ea
 
-function jsr(cpu::Cpu)
+function jsr(cpu::AbstractCpu)
     push_6502_16(cpu, cpu.pc - 0x1)
     cpu.pc = cpu.ea
 end
 
-function lda(cpu::Cpu)
+function lda(cpu::AbstractCpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.a = UInt8(cpu.value & 0x00FF)
@@ -828,7 +848,7 @@ function lda(cpu::Cpu)
     signcalc(cpu, cpu.a)
 end
 
-function ldx(cpu::Cpu)
+function ldx(cpu::AbstractCpu)
     cpu.penaltyop = 1
     cpu.value = getvalue(cpu)
     cpu.x = UInt8(cpu.value & 0x00FF)
@@ -837,7 +857,7 @@ function ldx(cpu::Cpu)
     signcalc(cpu, cpu.x)
 end
 
-function ldy(cpu::Cpu)
+function ldy(cpu::AbstractCpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.y = UInt8(cpu.value & 0x00FF)
@@ -846,25 +866,25 @@ function ldy(cpu::Cpu)
     signcalc(cpu, cpu.y)
 end
 
-function lsr(cpu::Cpu)
+function lsr(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
     cpu.result = cpu.value >> 1
    
-    setcarryif(cpu, (cpu.value & 0x1))
+    setcarryif(cpu, (cpu.value & 0x1) != 0)
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
    
     putvalue(cpu, cpu.result)
 end
 
-function nop(cpu::Cpu)
+function nop(cpu::AbstractCpu)
     local op = cpu.opcode
     if op == 0x1C || op == 0x3C || op == 0x5C || op == 0x7C || op == 0xDC || op == 0xFC
         cpu.penaltyop = 0x1
     end
 end
 
-function ora(cpu::Cpu)
+function ora(cpu::AbstractCpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.a) | cpu.value
@@ -875,21 +895,27 @@ function ora(cpu::Cpu)
     saveaccum(cpu, cpu.result)
 end
 
-pha(cpu::Cpu) = push_6502_8(cpu, cpu.a)
+pha(cpu::AbstractCpu) = push_6502_8(cpu, cpu.a)
 
-php(cpu::Cpu) = push_6502_8(cpu, cpu.status | FLAG_BREAK)
+function php(cpu::AbstractCpu)
+    TEST_COMPAT && read6502(cpu, cpu.pc)
+    push_6502_8(cpu, cpu.status | FLAG_BREAK)
+end
 
-function pla(cpu::Cpu)
+function pla(cpu::AbstractCpu)
     cpu.a = pull_6502_8(cpu)
    
     zerocalc(cpu, cpu.a)
     signcalc(cpu, cpu.a)
 end
 
-plp(cpu::Cpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT
+#plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT
+# FAKE: changed for consistency
+plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT | FLAG_BREAK
 
-function rol(cpu::Cpu)
+function rol(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
+    FAKE_COMPAT && putvalue(cpu, cpu.value)
     cpu.result = (cpu.value << 1) | (cpu.status & FLAG_CARRY)
    
     carrycalc(cpu, cpu.result)
@@ -899,35 +925,38 @@ function rol(cpu::Cpu)
     putvalue(cpu, cpu.result)
 end
 
-function ror(cpu::Cpu)
+function ror(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
+    FAKE_COMPAT && putvalue(cpu, cpu.value)
     cpu.result = (cpu.value >> 1) | ((cpu.status & FLAG_CARRY) << 7)
    
-    setcarryif(cpu, (cpu.value & 1))
+    setcarryif(cpu, (cpu.value & 1) != 0)
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
    
     putvalue(cpu, cpu.result)
 end
 
-function rti(cpu::Cpu)
-    cpu.status = pull_6502_8(cpu)
+function rti(cpu::AbstractCpu)
+    #cpu.status = pull_6502_8(cpu)
+    # FAKE: changed for consistency
+    cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT | FLAG_BREAK
     cpu.value = pull_6502_16(cpu)
     cpu.pc = cpu.value;
 end
 
-function rts(cpu::Cpu)
+function rts(cpu::AbstractCpu)
     cpu.value = pull_6502_16(cpu)
     cpu.pc = cpu.value + 0x0001
 end
 
-function sbc_nes(cpu::Cpu)
+function sbc_nes(cpu::AbstractCpu)
     if cpu.status & FLAG_DECIMAL
     	local result_dec, A, AL, B, C;
         cpu.penaltyop = 1
     	A = cpu.a
     	C = UInt16(cpu.status & FLAG_CARRY)
-     	cpu.value = getvalue(cpu);B = cpu.value;cpu.value = cpu.value ^ 0x00FF
+     	cpu.value = getvalue(cpu);B = cpu.value;cpu.value = cpu.value ⊻ 0x00FF
     	result_dec = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY) # /*dec*/
 		#/*Both Cmos and Nmos*/
     	carrycalc(cpu, result_dec)
@@ -951,20 +980,25 @@ function sbc_nes(cpu::Cpu)
     end
 end
 
-function sbc_non_nes(cpu::Cpu)
+function sbc_non_nes(cpu::AbstractCpu)
     cpu.penaltyop = 1
-    cpu.value = getvalue(cpu) ^ 0x00FF
+    cpu.value = getvalue(cpu) ⊻ 0x00FF
+    if DECIMALMODE && (cpu.status & FLAG_DECIMAL) != 0
+        cpu.value -= 0x0066
+    end
     cpu.result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
-	
-    carrycalc(cpu, cpu.result)
     zerocalc(cpu, cpu.result)
     overflowcalc(cpu, cpu.result, cpu.a, cpu.value)
     signcalc(cpu, cpu.result)
+    if DECIMALMODE && (cpu.status & FLAG_DECIMAL) != 0
+        cpu.result += ((((cpu.result + 0x66) ⊻ UInt16(cpu.a) ⊻ cpu.value) >> 3) & 0x22) * 0x3
+    end
+    carrycalc(cpu, cpu.result)
     saveaccum(cpu, cpu.result)
 end
 
 # to emulate NES, make a custom adc method call sbc_nes instead of sbc_non_nes
-sbc(cpu::Cpu) = sbc_non_nes(cpu::Cpu)
+sbc(cpu::AbstractCpu) = sbc_non_nes(cpu::AbstractCpu)
 
 sec(cpu) = setcarry(cpu)
 
@@ -978,37 +1012,37 @@ stx(cpu) = putvalue(cpu, UInt16(cpu.x))
 
 sty(cpu) = putvalue(cpu, UInt16(cpu.y))
 
-function tax(cpu::Cpu)
+function tax(cpu::AbstractCpu)
     cpu.x = cpu.a
    
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
 end
 
-function tay(cpu::Cpu)
+function tay(cpu::AbstractCpu)
     cpu.y = cpu.a
    
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
 end
 
-function tsx(cpu::Cpu)
+function tsx(cpu::AbstractCpu)
     cpu.x = cpu.sp
    
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
 end
 
-function txa(cpu::Cpu)
+function txa(cpu::AbstractCpu)
     cpu.a = cpu.x
    
     zerocalc(cpu, cpu.a)
     signcalc(cpu, cpu.a)
 end
 
-txs(cpu::Cpu) = cpu.sp = cpu.x
+txs(cpu::AbstractCpu) = cpu.sp = cpu.x
 
-function tya(cpu::Cpu)
+function tya(cpu::AbstractCpu)
     cpu.a = cpu.y
    
     zerocalc(cpu, cpu.a)
@@ -1017,12 +1051,12 @@ end
 
 #/*undocumented instructions~~~~~~~~~~~~~~~~~~~~~~~~~*/
 # to disable them, override them to call nop()
-function lax(cpu::Cpu)
+function lax(cpu::AbstractCpu)
     lda(cpu)
     ldx(cpu)
 end
 
-function sax(cpu::Cpu)
+function sax(cpu::AbstractCpu)
     sta(cpu)
     stx(cpu)
     putvalue(cpu, UInt16(cpu.a & cpu.x))
@@ -1031,7 +1065,7 @@ function sax(cpu::Cpu)
     end
 end
 
-function dcp(cpu::Cpu)
+function dcp(cpu::AbstractCpu)
     dec(cpu)
     cmp(cpu)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
@@ -1039,7 +1073,7 @@ function dcp(cpu::Cpu)
     end
 end
 
-function isb(cpu::Cpu)
+function isb(cpu::AbstractCpu)
     inc(cpu)
     sbc(cpu)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
@@ -1047,7 +1081,7 @@ function isb(cpu::Cpu)
     end
 end
 
-function slo(cpu::Cpu)
+function slo(cpu::AbstractCpu)
     asl(cpu)
     ora(cpu)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
@@ -1056,7 +1090,7 @@ function slo(cpu::Cpu)
 end
 
 
-function rla(cpu::Cpu)
+function rla(cpu::AbstractCpu)
     rol(cpu)
     and(cpu)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
@@ -1064,7 +1098,7 @@ function rla(cpu::Cpu)
     end
 end
 
-function sre(cpu::Cpu)
+function sre(cpu::AbstractCpu)
     lsr(cpu)
     eor(cpu)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
@@ -1072,7 +1106,7 @@ function sre(cpu::Cpu)
     end
 end
 
-function rra(cpu::Cpu)
+function rra(cpu::AbstractCpu)
     ror(cpu)
     adc(cpu)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
@@ -1080,7 +1114,7 @@ function rra(cpu::Cpu)
     end
 end
 
-function nmi6502(cpu::Cpu)
+function nmi6502(cpu::AbstractCpu)
     push_6502_16(cpu, cpu.pc)
     push_6502_8(cpu, cpu.status  & ~FLAG_BREAK)
     cpu.status |= FLAG_INTERRUPT
@@ -1103,7 +1137,7 @@ function irq6502(cpu)
     end
 end
 
-function exec6502(cpu::Cpu, tickcount::Int64)
+function exec6502(cpu::AbstractCpu, tickcount::Int64)
 	#/*
 	#	BUG FIX:
 	#	overflow of unsigned 32 bit integer causes emulation to hang.
@@ -1118,9 +1152,9 @@ function exec6502(cpu::Cpu, tickcount::Int64)
     end
 end
 
-function inner_step6502(cpu::Cpu)
-    cpu.opcode = read6502(cpu, cpu.pc);
-    cpu.pc += 1
+function inner_step6502(cpu::AbstractCpu)
+    cpu.opcode = read6502(cpu, cpu.pc)
+    cpu.pc += 0x1
     cpu.status |= FLAG_CONSTANT
     cpu.penaltyop = 0
     cpu.penaltyaddr = 0
@@ -1134,7 +1168,7 @@ function inner_step6502(cpu::Cpu)
     cpu.instructions += 1
 end
 
-function step6502(cpu::Cpu)
+function step6502(cpu::AbstractCpu)
     cpu.penaltyop = 0;
     cpu.penaltyaddr = 0;
 	#cpu.clockticks6502 = 0;

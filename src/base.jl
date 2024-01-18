@@ -1,9 +1,6 @@
 using Printf
 export reset, step
 
-#const USE_GPL = true
-const USE_GPL = false
-
 struct Addr
     value::UInt32
     Addr(a::Integer) = new(a + 1)
@@ -40,9 +37,9 @@ Base.:(+)(i::Integer, a::Addr) = Addr(a.value - 1 + i)
 
 const JSR = 0x20
 const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.so"))
-const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
-const fake6502_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
-const fake6502_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
+#const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
+#const fake6502_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
+#const fake6502_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
 const K = 1024
 const SCREEN_LEN = 40 * 25
 const screen = A(0x0400:0x07FF)
@@ -150,7 +147,7 @@ withptr(::Accessor{T}, ::Ptr{U}) where {T, U} =
     error("Unsafe set: accessor for $T is not compatible with pointer to $U")
 
 mutable struct Machine
-    newcpu::BasicCpu{Nothing}
+    newcpu::Cpu{Nothing}
     ctx::Ptr{Context}
     cpu::Accessor{Context}
     emu::Accessor{Context}
@@ -164,20 +161,27 @@ mutable struct Machine
     fake_base::Addr
     fake_routines::Dict{Addr,Function}
     verbose::Bool
+    c_init::Ptr{Nothing}
+    c_reset::Ptr{Nothing}
+    c_step::Ptr{Nothing}
+    c_read_mem::Ptr{Nothing}
+    c_write_mem::Ptr{Nothing}
     Machine() = new()
 end
 
+mem(mach::Machine) = USE_GPL ? mach.mem : mach.newcpu.memory
+
 ### begin system hooks
 
-Base.getindex(mach::Machine, r::AddrRange) = mach.mem[intRange(r)]
+Base.getindex(mach::Machine, r::AddrRange) = mem(mach)[intRange(r)]
 Base.getindex(mach::Machine, sym::Symbol) = mach[mach.labels[sym]]
 Base.getindex(mach::Machine, addr::Integer) = mach[Addr(addr)]
-Base.getindex(mach::Machine, addr::Addr) = mach.mem[addr.value]
+Base.getindex(mach::Machine, addr::Addr) = mem(mach)[addr.value]
 Base.getindex(::Machine, addr) =
     error("Memory locations can only hold be accessed with symbols, integers, and addresses")
 Base.setindex!(mach::Machine, byte::UInt8, sym::Symbol) = mach[mach.labels[sym]] = byte
 Base.setindex!(mach::Machine, byte::UInt8, addr::Integer) = mach[Addr(addr)] = byte
-Base.setindex!(mach::Machine, byte::UInt8, addr::Addr) = mach.mem[addr.value] = byte
+Base.setindex!(mach::Machine, byte::UInt8, addr::Addr) = mem(mach)[addr.value] = byte
 Base.setindex!(::Machine, byte, ::Addr) = error("Memory locations can only hold bytes")
 Base.setindex!(::Machine, ::UInt8, addr) =
     error("Memory locations can only hold be accessed with symbols, integers, and addresses")
@@ -232,6 +236,9 @@ hex(num::Union{UInt8, Int8}) = hex(num, 2)
 hex(num::Union{UInt16,Int16}) = hex(num, 4)
 hex(num::Integer, pad =
     num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base=16), pad, "0")
+rhex(num::Union{UInt8, Int8}) = rhex(num, 2)
+rhex(num::Union{UInt16,Int16}) = rhex(num, 4)
+rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(string(num; base=16), pad, "0")
 
 function call_step(mach::Machine)
     #diag(mach)
@@ -239,7 +246,7 @@ function call_step(mach::Machine)
         # check for fake routine
         addr = A(mach[mach.cpu.pc + 1] + (UInt16(mach[mach.cpu.pc + 2]) << 8))
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
-        println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
+        #println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
             println("FAKE ROUTINE")
             mach.fake_routines[addr](mach)
@@ -251,11 +258,11 @@ function call_step(mach::Machine)
         #    println("ROM INST: $(mach.read_mem(mach, UInt16(addr.value - 1)))")
         #    mach.verbose = true
         end
-    elseif mach.newcpu.memory[mach.newcpu.pc + 1] === JSR
+    elseif mach[mach.newcpu.pc] === JSR
         # check for fake routine
-        addr = A(mach.newcpu.memory[mach.newcpu.pc + 2] + (UInt16(mach.newcpu.memory[mach.newcpu.pc + 3]) << 8))
+        addr = A(mach[mach.newcpu.pc + 1] + (UInt16(mach[mach.newcpu.pc + 2]) << 8))
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
-        println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
+        #println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
             println("FAKE ROUTINE")
             mach.fake_routines[addr](mach)
@@ -264,7 +271,10 @@ function call_step(mach::Machine)
         end
     end
     Fake6502m.step6502(mach.newcpu)
-    USE_GPL && mach.step(mach)
+    if USE_GPL
+        stepfunc = mach.c_step
+        @ccall $stepfunc(mach.ctx::Ptr{Context})::Cvoid
+    end
     check_cpu(mach)
     mach.verbose && diag(mach)
 end
@@ -304,17 +314,17 @@ function compare_registers(mach::Machine, c_prop::Symbol, j_prop::Symbol, label 
 end
 
 function check_cpu(mach::Machine, label = "")
-    if USE_GPL
-        for prop in (:a, :x, :y, :pc)
-            compare_registers(mach, prop, prop, label)
-        end
-        compare_registers(mach, :s, :sp, label)
-        compare_registers(mach, :flags, :status, label)
-        for i in 1:length(mach.mem)
-            mach.mem[i] != mach.newcpu.memory[i] &&
-                error("Memory differs at address($(A(i))): $(mach.mem[i]) != $(mach.newcpu.memory[i])")
-        end
-    end
+    #if USE_GPL
+    #    for prop in (:a, :x, :y, :pc)
+    #        compare_registers(mach, prop, prop, label)
+    #    end
+    #    compare_registers(mach, :s, :sp, label)
+    #    compare_registers(mach, :flags, :status, label)
+    #    for i in 1:length(mach.mem)
+    #        mach.mem[i] != mach.newcpu.memory[i] &&
+    #            error("Memory differs at address($(A(i))): $(mach.mem[i]) != $(mach.newcpu.memory[i])")
+    #    end
+    #end
 end
 
 call_6502(mach::Machine, sym::Symbol) = call_6502(mach, mach.labels[sym])
@@ -349,13 +359,8 @@ function call_6502(mach::Machine, addr::Addr)
 function call_frth(mach::Machine, sym)
     pc = mach.labels[:pc]
     # save pc
-    if USE_GPL
-        pclo = mach[:pc]
-        pchi = mach[mach.labels[:pc] + 1]
-    else
-        pclo = mach.newcpu.memory[pc.value]
-        pchi = mach.newcpu.memory[pc.value + 1]
-    end
+    pclo = mach[:pc]
+    pchi = mach[mach.labels[:pc] + 1]
     # call frth word
     # set up pc to return to Julia
     retstub = mach.labels[:retstub].value - 1
@@ -378,8 +383,15 @@ function call_frth(mach::Machine, sym)
 end
 
 function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = step)
+    lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.so"))
     local machine = Machine()
-    machine.newcpu = BasicCpu{Nothing}()
+    initfunc = machine.c_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
+    println("INIT: $(typeof(machine.c_init))")
+    machine.c_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
+    machine.c_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
+    machine.c_read_mem = @cfunction(read_mem, Cuchar, (Ptr{Context}, Cushort))
+    machine.c_write_mem = @cfunction(write_mem, Cvoid, (Ptr{Context}, Cushort, Cuchar))
+    machine.newcpu = Cpu{Nothing}(; user_data = nothing)
     machine.mem = zeros(UInt8, 64K)
     # use default funcs until after reset
     machine.read_mem = read_mem
@@ -390,7 +402,7 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     machine.fake_routines = Dict{Addr,Function}()
     machine.properties = Dict{Any, Any}()
     machine.verbose = false
-    machine.ctx = @ccall $fake6502_init(c_read_mem::Ptr{Cvoid}, c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
+    machine.ctx = @ccall $initfunc(machine.c_read_mem::Ptr{Cvoid}, machine.c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
     Fake6502m.reset6502(machine.newcpu)
     println("CTX ", machine.ctx)
     machine.cpu = Accessor(machine.ctx).cpu
@@ -416,7 +428,7 @@ function diag(mach::Machine, label = "")
 end
 diag(ctx::Context) = diag(ctx.cpu, ctx.emu)
 diag(cpu::CpuState, emu::EmuState) = @printf "OLD a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.s emu.clockticks
-diag(cpu::BasicCpu) = @printf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.sp cpu.clockticks6502
+diag(cpu::Cpu) = @printf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.sp cpu.clockticks6502
 
 run(mach::Machine, sym::Symbol; max_ticks = 100) = run(mach, mach.labels[sym]; max_ticks)
 function run(mach::Machine, addr::Addr; max_ticks = 100)
@@ -472,7 +484,8 @@ function loadprg(filename, mach::Machine; labelfile="")
 end
 
 function reset(mach::Machine)
-    @ccall $fake6502_reset(mach.ctx::Ptr{Context})::Cvoid
+    resetfunc = mach.c_reset
+    @ccall $resetfunc(mach.ctx::Ptr{Context})::Cvoid
     Fake6502m.reset6502(mach.newcpu)
     mach.cpu.flags = 0
     mach.cpu.a = 0
@@ -485,7 +498,10 @@ function reset(mach::Machine)
     check_cpu(mach, "RESET: ")
 end
 
-step(mach::Machine) = @ccall $fake6502_step(mach.ctx::Ptr{Context})::Cvoid
+function step(mach::Machine)
+    stepfunc = mach.c_step
+    @ccall $stepfunc(mach.ctx::Ptr{Context})::Cvoid
+end
 
 function display_hex(mem::Vector{UInt8})
     area = mem[screen]

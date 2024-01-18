@@ -1,8 +1,8 @@
 module C64
-using Base: check_open
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR, USE_GPL
+using ..Fake6502: Fake6502m.Cpu
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
@@ -88,12 +88,13 @@ end
 
 function screen_mem(mach::Machine)
     c = c64(mach)
-    @view mach.mem[c.screen_mem.value:c.screen_mem.value + 999]
+    screen = USE_GPL ? mach.mem : mach.newcpu.memory
+    @view screen[c.screen_mem.value:c.screen_mem.value + 999]
 end    
 
 function character_mem(mach::Machine)
     c = c64(mach)
-    characters = c.character_mem ∈ VIC_SETS ? ROM : mach.mem
+    characters = c.character_mem ∈ VIC_SETS ? ROM : USE_GPL ? mach.mem : mach.newcpu.memory
     @view characters[c.character_mem.value:c.character_mem.value + 0x7FF]
 end
 
@@ -115,14 +116,56 @@ function with_sdl(func::Function)
     end
 end
 
+function read6502(cpu::Cpu{C64_machine}, addr::UInt16)
+    state = c64(cpu)
+    banks = state.banks
+    adr = A(addr)
+    for bank in banks
+        adr ∈ bank &&
+            return ROM[adr.value]
+    end
+    cpu.memory[adr]
+end
+
+function write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
+    state = c64(cpu)
+    adr = A(addr)
+    adr ∈ state.screen_mem:state.screen_mem+999 &&
+        println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
+    if adr == BANK_SWITCH
+        # writing to bank switcher
+        println("WRITE TO BANK SWITCH")
+        switch_banks(state, byte)
+        return
+    elseif adr == VIC_MEM || adr == VIC_BANK
+        cpu.memory[adr.value] == byte && return
+        cpu.memory[adr.value] = byte
+        update_vic_bank(cpu.memory, state)
+        println("WRITE TO VIC MEM")
+        return
+    elseif any(in_bank.(Ref(adr), (CHAR_ROM, KERNAL_ROM, BASIC_ROM), Ref(state.banks)))
+        # skip it, it's ROM
+        println("WRITE TO ROM")
+        return
+    elseif state.screen_mem <= adr < state.screen_mem + 1000
+        # writing to screen
+        state.dirty_characters[adr - state.screen_mem + 1] = true
+    elseif state.character_mem <= adr < state.character_mem + 0x800
+        # writing to character data
+        state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
+    end
+    cpu.memory[adr] = byte
+end
+
 function c64_read_mem(mach::Machine, addr::UInt16)
     state = c64(mach)
     banks = state.banks
+    adr = A(addr)
     for bank in banks
-        addr ∈ bank &&
-            return ROM[addr.value]
+        adr ∈ bank &&
+            return ROM[adr.value]
     end
-    return mach[addr]
+    return mach[adr]
 end
 
 function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
@@ -148,10 +191,10 @@ function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
         return
     elseif state.screen_mem <= adr < state.screen_mem + 1000
         # writing to screen
-        mach.properties[:c64].dirty_characters[adr - state.screen_mem + 1] = true
+        state.dirty_characters[adr - state.screen_mem + 1] = true
     elseif state.character_mem <= adr < state.character_mem + 0x800
         # writing to character data
-        mach.properties[:c64].dirty_character_defs[(adr - state.character_mem) >> 8] = true
+        state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
     end
     mach[addr] = byte
 end
@@ -190,6 +233,8 @@ function update_vic_bank(mem::Vector{UInt8}, state::C64_machine)
     state.character_mem = offset + ((mem[VIC_MEM] & 0x0E) << 11)
 end
 
+c64(cpu::Cpu{C64_machine}) = cpu.user_data
+
 c64(mach::Machine)::C64_machine = mach.properties[:c64]
 
 function update_screen(mach::Machine, win)
@@ -214,6 +259,8 @@ function update_screen(mach::Machine, win)
         return false
     scr_mem = screen_mem(mach)
     char_mem = character_mem(mach)
+    # NOTE: CHANGE THIS TO USE SDL_LockTexture
+    #       Coalesce rectangles to reduce the number of calls?
     for col in 0:39
         for pixel in 0 : 7
             x = col * 8 + pixel
@@ -310,21 +357,29 @@ check(func::Function) = (args...)-> begin
 end
 
 function init_c64(mach::Machine)
-    mach.mem[intRange(screen)] .= ' '
+    if USE_GPL
+        mach.mem[intRange(screen)] .= ' '
+    else
+        mach.newcpu.memory[intRange(screen)] .= ' '
+    end
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
     mach[BG1] = 0x1
     mach[BG2] = 0x2
     mach[BG3] = 0x3
-    mach.newcpu.memory[intRange(screen)] .= ' '
-    mach.newcpu.memory[BORDER.value] = 0xE
-    mach.newcpu.memory[BG0.value] = 0x6
-    mach.newcpu.memory[BG1.value] = 0x1
-    mach.newcpu.memory[BG2.value] = 0x2
-    mach.newcpu.memory[BG3.value] = 0x3
+    if USE_GPL
+        mach.newcpu.memory[intRange(screen)] .= ' '
+        mach.newcpu.memory[BORDER.value] = 0xE
+        mach.newcpu.memory[BG0.value] = 0x6
+        mach.newcpu.memory[BG1.value] = 0x1
+        mach.newcpu.memory[BG2.value] = 0x2
+        mach.newcpu.memory[BG3.value] = 0x3
+    end
     init_rom()
     mach[IO_CTL] = 0x2F
-    mach.newcpu.memory[IO_CTL.value] = 0x2F
+    if USE_GPL
+        mach.newcpu.memory[IO_CTL.value] = 0x2F
+    end
     switch_banks(mach, 0x07)
     labels = mach.labels
     off, total = loadprg("$EDIR/condensed.prg", mach; labelfile="$EDIR/condensed.labels")

@@ -253,6 +253,8 @@ next        ldy #$00            ; continue execution -- get current threaded ins
             rol
             bcs checkprefix     ; prefix 0 for quick addresses
 quickword   tay                 ; instr is already doubled from rol
+                                ;; NOTE: switch to pha/rts to cost 20 cycles instead of 21
+                                ;;       requires storing addr-1 in quick table
             lda startquick,y    ; store quickfunc addr low byte in qaddr
             sta qaddr
             lda startquick+1,y  ; store quickfunc addr high byte in qaddr

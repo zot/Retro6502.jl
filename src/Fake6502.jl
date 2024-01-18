@@ -2,12 +2,14 @@ module Fake6502
 using Printf
 export reset, step
 
+#const USE_GPL = true
+const USE_GPL = false
 const CDIR=joinpath(dirname(@__FILE__), "..", "C")
 const EDIR=joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
 
 include("emu.jl")
-import .Fake6502m: BasicCpu
+import .Fake6502m: Cpu
 include("base.jl")
 include("fakes.jl")
 include("c64.jl")
