@@ -1,0 +1,66 @@
+These test files are from Thommyh on Reddit
+https://www.reddit.com/r/EmuDev/comments/prq29l/comment/hdqh7rc/?utm_source=share&utm_medium=web2x&context=3
+Located at https://drive.google.com/file/d/1XpRo4GvdGKiSCljx2cHzAtxp9TAt7Pfw/view?usp=sharing
+Text of his post:
+
+Then please grab this archive and give it a whirl. It is 10,000 randomly-generated tests per 6502 opcode, stored as JSON, one file per opcode for an on-disk total of just over 1gb and a compressed total of around 200mb. A sample test case (reformatted for us humans) is:
+
+{
+	"name": "1e 19 ec",
+	"initial": {
+		"pc": 27928,
+		"s": 23,
+		"a": 208,
+		"x": 46,
+		"y": 132,
+		"p": 108,
+		"ram": [
+			[27928, 30],
+			[27929, 25],
+			[27930, 236],
+			[60487, 18],
+			[27931, 157]
+		]
+	},
+	"final": {
+		"pc": 27931,
+		"s": 23,
+		"a": 208,
+		"x": 46,
+		"y": 132,
+		"p": 108,
+		"ram": [
+			[27928, 30],
+			[27929, 25],
+			[27930, 236],
+			[27931, 157],
+			[60487, 36]
+		]
+	},
+	"cycles": [
+		[27928, 30, "read"],
+		[27929, 25, "read"],
+		[27930, 236, "read"],
+		[60487, 18, "read"],
+		[60487, 18, "read"],
+		[60487, 18, "write"],
+		[60487, 36, "write"]
+	]
+},
+The name is just the opcode plus the two random suffix bytes. Right now it's perfectly possible for names to collide, but that should achieve 99% of the task of disambiguating should we need to discuss specific tests. It's just for us humans and might be generated some other way in the future.
+
+initial and final are the before and after machine states. So each has values for the 6502 registers — the PC, stack pointer, A, X, Y, and the flags, printed above in that order.
+
+The ram entry in the initial dictionary tells you all the memory locations you needs to set up to run this test. The ram in the final dictionary tells you the final state of all memory that was touched during the test.
+
+Each entry in a ram array is just [ address, value ], and the arrays are unordered as a figment of the underlying implementation.
+
+The cycles array gives you the cycle-by-cycle breakdown of 6502 activity, and is formed as [ address, value, type ] where type is either read or write.
+
+So as a side-effect you can get instruction length by taking the length of the cycles array.
+
+The only slight contortion in putting these together was that — much like a real 6502 — my emulator doesn't do "execute for one instruction". So I executed until the second sighting of the SYNC output, then chopped off the final cycle and regressed the program counter. I think that should be correct but check it out.
+
+Feedback would be extremely helpful; if these tests prove to be useful and properly formed then I'll throw them into a repository and announce them properly.
+
+EDIT: make that: ran for two SYNCs or until the processor became JAMmed. All opcodes are included, even the ones that just kill further processing.
