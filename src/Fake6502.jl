@@ -32,7 +32,7 @@ function run2(mach::Machine, addr::Addr; max_ticks = 100)
 end
 
 function speed_test()
-    global mach = NewMachine()
+    global mach = NewMachine(; user_data = nothing)
     mach.mem[intRange(screen)] .= ' '
     labels = mach.labels
     off, total = loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
@@ -44,7 +44,7 @@ function speed_test()
 end
 
 function test()
-    global mach = NewMachine()
+    global mach = NewMachine(; user_data = nothing)
     mach.mem[intRange(screen)] .= ' '
     mach.newcpu.memory[intRange(screen)] .= ' '
     labels = mach.labels

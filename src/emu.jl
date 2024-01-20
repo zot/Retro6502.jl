@@ -145,26 +145,26 @@ const K = 1024
 abstract type AbstractCpu end
 
 @kwdef mutable struct Cpu{T} <: AbstractCpu
-    pc::UInt16 = 0
-    a::UInt8 = 0
-    x::UInt8 = 0
-    y::UInt8 = 0
-    sp::UInt8 = 0
-    status::UInt8 = 0
+    pc::UInt16 = 0x0000
+    a::UInt8 = 0x00
+    x::UInt8 = 0x00
+    y::UInt8 = 0x00
+    sp::UInt8 = 0x00
+    status::UInt8 = 0x00
     instructions::Int64 = 0
     clockticks6502::Int64 = 0
     clockgoal6502::Int64 = 0
-    oldpc::UInt16 = 0
+    oldpc::UInt16 = 0x0000
     # addressing
-    ea::UInt16 = 0
-    reladdr::UInt16 = 0
+    ea::UInt16 = 0x0000
+    reladdr::UInt16 = 0x0000
     # temporary values
-    value::UInt16 = 0
-    result::UInt16 = 0
-    opcode::UInt8 = 0
-    oldstatus::UInt8 = 0
-    penaltyop::UInt8 = 0
-    penaltyaddr::UInt8 = 0
+    value::UInt16 = 0x0000
+    result::UInt16 = 0x0000
+    opcode::UInt8 = 0x00
+    oldstatus::UInt8 = 0x00
+    penaltyop::UInt8 = 0x00
+    penaltyaddr::UInt8 = 0x00
     memory::Vector{UInt8} = zeros(UInt8, 64K)
     user_data::T
 end

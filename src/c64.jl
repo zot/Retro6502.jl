@@ -1,8 +1,11 @@
 module C64
+using ..Fake6502
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR, USE_GPL
-using ..Fake6502: Fake6502m.Cpu
+import ..Fake6502: Fake6502m, mem
+using ..Fake6502.Fake6502m: Cpu
+import ..Fake6502.Fake6502m: read6502, write6502
 using SimpleDirectMediaLayer
 using SimpleDirectMediaLayer.LibSDL2
 using Printf
@@ -88,13 +91,13 @@ end
 
 function screen_mem(mach::Machine)
     c = c64(mach)
-    screen = USE_GPL ? mach.mem : mach.newcpu.memory
+    screen = mem(mach)
     @view screen[c.screen_mem.value:c.screen_mem.value + 999]
 end    
 
 function character_mem(mach::Machine)
     c = c64(mach)
-    characters = c.character_mem ∈ VIC_SETS ? ROM : USE_GPL ? mach.mem : mach.newcpu.memory
+    characters = c.character_mem ∈ VIC_SETS ? ROM : mem(mach)
     @view characters[c.character_mem.value:c.character_mem.value + 0x7FF]
 end
 
@@ -116,7 +119,7 @@ function with_sdl(func::Function)
     end
 end
 
-function read6502(cpu::Cpu{C64_machine}, addr::UInt16)
+function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
     state = c64(cpu)
     banks = state.banks
     adr = A(addr)
@@ -124,10 +127,11 @@ function read6502(cpu::Cpu{C64_machine}, addr::UInt16)
         adr ∈ bank &&
             return ROM[adr.value]
     end
-    cpu.memory[adr]
+    cpu.memory[adr.value]
 end
 
-function write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
+function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
+    println("WRITE BYTE")
     state = c64(cpu)
     adr = A(addr)
     adr ∈ state.screen_mem:state.screen_mem+999 &&
@@ -154,7 +158,7 @@ function write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
         # writing to character data
         state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
     end
-    cpu.memory[adr] = byte
+    cpu.memory[adr.value] = byte
 end
 
 function c64_read_mem(mach::Machine, addr::UInt16)
@@ -182,7 +186,7 @@ function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
     elseif adr == VIC_MEM || adr == VIC_BANK
         mach[adr] == byte && return
         mach[adr] = byte
-        update_vic_bank(mach.mem, state)
+        update_vic_bank(mem(mach), state)
         println("WRITE TO VIC MEM")
         return
     elseif any(in_bank.(Ref(adr), (CHAR_ROM, KERNAL_ROM, BASIC_ROM), Ref(state.banks)))
@@ -357,11 +361,7 @@ check(func::Function) = (args...)-> begin
 end
 
 function init_c64(mach::Machine)
-    if USE_GPL
-        mach.mem[intRange(screen)] .= ' '
-    else
-        mach.newcpu.memory[intRange(screen)] .= ' '
-    end
+    mem(mach)[intRange(screen)] .= ' '
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
     mach[BG1] = 0x1
@@ -392,10 +392,10 @@ function init_c64(mach::Machine)
 end
 
 function test_c64()
-    global mach = NewMachine(; write_func = c64_write_mem)
     with_sdl() do renderer, win
         screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, SCREEN_WIDTH, SCREEN_HEIGHT)
         state = C64_machine(; renderer, screen)
+        global mach = NewMachine(; write_func = c64_write_mem, user_data = state)
         mach.properties[:c64] = state
         init_c64(mach)
         println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))

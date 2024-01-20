@@ -146,8 +146,8 @@ withptr(a::Accessor{T}, ptr::Ptr{T}) where T = Accessor(access(a), ptr)
 withptr(::Accessor{T}, ::Ptr{U}) where {T, U} =
     error("Unsafe set: accessor for $T is not compatible with pointer to $U")
 
-mutable struct Machine
-    newcpu::Cpu{Nothing}
+mutable struct Machine{T}
+    newcpu::Cpu{T}
     ctx::Ptr{Context}
     cpu::Accessor{Context}
     emu::Accessor{Context}
@@ -166,7 +166,7 @@ mutable struct Machine
     c_step::Ptr{Nothing}
     c_read_mem::Ptr{Nothing}
     c_write_mem::Ptr{Nothing}
-    Machine() = new()
+    Machine{T}() where {T} = new{T}()
 end
 
 mem(mach::Machine) = USE_GPL ? mach.mem : mach.newcpu.memory
@@ -382,16 +382,16 @@ function call_frth(mach::Machine, sym)
     mach.newcpu.memory[pc.value + 1] = pchi
 end
 
-function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = step)
+function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = step, user_data::T) where T
     lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.so"))
-    local machine = Machine()
+    local machine = Machine{T}()
     initfunc = machine.c_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
     println("INIT: $(typeof(machine.c_init))")
     machine.c_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
     machine.c_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
     machine.c_read_mem = @cfunction(read_mem, Cuchar, (Ptr{Context}, Cushort))
     machine.c_write_mem = @cfunction(write_mem, Cvoid, (Ptr{Context}, Cushort, Cuchar))
-    machine.newcpu = Cpu{Nothing}(; user_data = nothing)
+    machine.newcpu = Cpu(; user_data)
     machine.mem = zeros(UInt8, 64K)
     # use default funcs until after reset
     machine.read_mem = read_mem
