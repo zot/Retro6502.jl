@@ -14,20 +14,13 @@ include("base.jl")
 include("fakes.jl")
 include("c64.jl")
 
-run2(mach::Machine, sym::Symbol; max_ticks = 100) = run(mach, mach.labels[sym]; max_ticks)
+run2(mach::Machine, sym::Symbol; max_ticks = 100) = run2(mach, mach.labels[sym]; max_ticks)
 function run2(mach::Machine, addr::Addr; max_ticks = 100)
-    println("RESETTING")
-    reset(mach)
-    println("FINISHED RESETTING")
-    if USE_GPL
-        mach.cpu.pc = addr.value - 1
-        mach.cpu.s = 0xfe
-    end
-    mach.newcpu.pc = addr.value - 1
-    mach.newcpu.sp = 0xfe
-    diag(mach)
-    while mach.emu.clockticks < max_ticks
-        call_step(mach)
+    cpu = mach.newcpu
+    cpu.pc = addr.value - 1
+    cpu.sp = 0xfe
+    while cpu.clockticks6502 < max_ticks
+        Fake6502m.inner_step6502(cpu)
     end
 end
 
@@ -36,7 +29,9 @@ function speed_test()
     mach.mem[intRange(screen)] .= ' '
     labels = mach.labels
     off, total = loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
-    run2(mach, :endless; max_ticks = 100)
+    println("warm up")
+    run2(mach, :endless; max_ticks = 1000)
+    println("running benchmark")
     start = time()
     run2(mach, :endless; max_ticks = 1000000)
     finish = time()

@@ -2,7 +2,7 @@
 
 julia_version = "1.9.4"
 manifest_format = "2.0"
-project_hash = "7a8d5f31df46dcff818c9cff3da200bdc5ff6620"
+project_hash = "4f4ededa88dedd719f283bf3ae6bf4af78e5c526"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -106,7 +106,7 @@ uuid = "1d38b3a6-207b-531b-80e8-c83f48dafa73"
 version = "1.3.4+2"
 
 [[deps.Fake6502]]
-deps = ["Printf", "SimpleDirectMediaLayer"]
+deps = ["Printf", "SimpleDirectMediaLayer", "StaticArrays"]
 path = ".."
 uuid = "16df6505-bdad-4007-bcaf-2ff60a42e0d9"
 version = "0.1.0"
@@ -517,6 +517,25 @@ deps = ["Libdl", "Pkg"]
 git-tree-sha1 = "ecc65cb4a4e77f624deae8d881787c789af6deaf"
 uuid = "f2f9631b-9a4e-5b48-9975-88f638ec36a7"
 version = "1.2.0+0"
+
+[[deps.StaticArrays]]
+deps = ["LinearAlgebra", "PrecompileTools", "Random", "StaticArraysCore"]
+git-tree-sha1 = "f68dd04d131d9a8a8eb836173ee8f105c360b0c5"
+uuid = "90137ffa-7385-5640-81b9-e52037218182"
+version = "1.9.1"
+
+    [deps.StaticArrays.extensions]
+    StaticArraysChainRulesCoreExt = "ChainRulesCore"
+    StaticArraysStatisticsExt = "Statistics"
+
+    [deps.StaticArrays.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[[deps.StaticArraysCore]]
+git-tree-sha1 = "36b3d696ce6366023a0ea192b4cd442268995a0d"
+uuid = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
+version = "1.4.2"
 
 [[deps.Statistics]]
 deps = ["LinearAlgebra", "SparseArrays"]

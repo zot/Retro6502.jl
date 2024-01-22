@@ -6,10 +6,11 @@ version = "0.1.0"
 [deps]
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 SimpleDirectMediaLayer = "98e33af6-2ee5-5afd-9e75-cbc738b767c4"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test", "JSON3"]

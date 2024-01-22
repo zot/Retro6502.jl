@@ -3,7 +3,7 @@ CFLAGS=-g -Werror -pedantic -fPIC
 LIBS=C/fake6502.o C/fake6502host.o
 FAKE6502=C/fake6502.c C/fake6502.h
 SHLIB=C/fake6502.so
-RESOURCES=resources/characters.bin resources/basic-kernal.bin
+RESOURCES=resources resources/characters.bin resources/basic-kernal.bin
 PRGS=examples/condensed.prg
 DERIVED=C/*.o C/*.so C/LICENSE.* C/fake6502.c C/fake6502.h resources
 
@@ -11,6 +11,12 @@ default: $(SHLIB) $(RESOURCES)
 
 test: default $(PRGS) FRC
 	julia --project=. -e 'include("src/Fake6502.jl"); Fake6502.test()'
+
+cspeed: C/speedtest
+	C/speedtest
+
+C/speedtest: default
+	$(CC) -O3 -o C/speedtest C/speedtest.c C/fake6502.o
 
 speed: default examples/speed.prg FRC
 	julia --project=. -e 'include("src/Fake6502.jl"); Fake6502.speed_test()'
@@ -30,10 +36,10 @@ c64: default $(PRGS) FRC
 resources:
 	mkdir -p resources
 
-resources/characters.bin: resources
+resources/characters.bin:
 	curl https://www.zimmers.net/anonftp/pub/cbm/firmware/characters/c64.bin > $@
 
-resources/basic-kernal.bin: resources
+resources/basic-kernal.bin:
 	curl https://www.zimmers.net/anonftp/pub/cbm/firmware/computers/c64/64c.251913-01.bin > $@
 
 clean: FRC
