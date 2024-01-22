@@ -56,7 +56,7 @@ using Test
 using Printf
 using Fake6502
 using Fake6502: rhex, Fake6502m, NewMachine, Machine
-import .Fake6502m: Cpu, step6502, read6502, write6502
+import .Fake6502m: Cpu, step6502, read6502, write6502, addrtable, optable
 
 const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp, :s, :s), (:status, :p, :flags))
 
@@ -97,15 +97,29 @@ function teststr(test)
     buf = []
     testcondstr(buf, test.initial)
     testcondstr(buf, test.final)
-    for (addr, val, type) in test.cycles
-        push!(buf, @sprintf "%-5s %04x %02x" type addr val)
+    push!(buf, @sprintf "%-15s%s" "EXPECTED" "ACTUAL")
+    for i in 1:max(length(test.cycles), length(CYCLES))
+        local str1 = if i <= length(test.cycles)
+            local (addr, val, type) = test.cycles[i]
+            @sprintf "%-5s %04x %02x  " type addr val
+        else
+            lpad("", 15)
+        end
+        local str2 = if i <= length(CYCLES)
+            local (addr, val, type) = CYCLES[i]
+            @sprintf "%-5s %04x %02x  " type addr val
+        else
+            lpad("", 15)
+        end
+        push!(buf, str1 * str2)
     end
     join(buf, "\n")
 end
 
-function fail(test, file, number, msg)
+function fail(cpu::Cpu, test, file, number, msg)
     #@error "$(sprint() do io; JSON3.pretty(io, JSON3.write(test)); end)\n$file:$number:Error in test $(test.name)\n  $msg"
-    @error "$file:$number:Error in test $(test.name)\n$msg\n$(teststr(test))"
+    op = cpu.opcode + 1
+    @error "$file:$number:Error in test $(test.name) ($(optable[op]) $(addrtable[op]))\n$msg\n$(teststr(test))"
     @test "$file:$number" === "FAILED"
 end
 
@@ -138,10 +152,10 @@ function run_fake_test(machine::Cpu, fake::Machine, test, file, number)
     extra = setdiff(cycles, FAKE_CYCLES)
     !isempty(extra) && push!(errs, "Extra activity: $(cyclestr(extra))")
     !isempty(missing) && push!(errs, "Missing activity: $(cyclestr(missing))")
-    empty!(FAKE_CYCLES)
     if !isempty(errs)
-        fail(test, file, number, join(errs, "\n  "))
+        fail(machine, test, file, number, join(errs, "\n  "))
     end
+    empty!(FAKE_CYCLES)
 end
 
 function run_data_test(machine::Cpu, test, file, number)
@@ -156,14 +170,13 @@ function run_data_test(machine::Cpu, test, file, number)
     Fake6502m.step6502(machine)
     errs = []
     cycles = [CYCLES...]
-    empty!(CYCLES)
     #machine.clockticks6502 != length(cycles) &&
     #    push!(errs, "estimated cycles != actual cycles")
     #machine.clockticks6502 != length(test.cycles) &&
     #    push!(errs, "estimated cycles != test cycles")
     for (new, std) in REGISTERS
         if getfield(machine, new) != test.final[std]
-            push!(errs, "$new != $std")
+            push!(errs, "$new ($(rhex(getfield(machine, new)))) != $std ($(rhex(test.final[std])))")
         end
     end
     for (addr, value) in test.final.ram
@@ -176,8 +189,9 @@ function run_data_test(machine::Cpu, test, file, number)
     !isempty(extra) && push!(errs, "Extra activity: $(cyclestr(extra))")
     !isempty(missing) && push!(errs, "Missing activity: $(cyclestr(missing))")
     if !isempty(errs)
-        fail(test, file, number, join(errs, "\n  "))
+        fail(machine, test, file, number, join(errs, "\n  "))
     end
+    empty!(CYCLES)
 end
 
 function cyclestr(cyc)
@@ -222,16 +236,16 @@ const ILLEGAL = [
     0xE2, 0xE3, 0xFF, 0xE7, 0xFF, 0xEB, 0xEC, 0xEF,
     0xF2, 0xF3, 0xF4, 0xF7, 0xFA, 0xFB, 0xFC, 0xFF,
 ]
-const DONE = 0x00:0xE0
+const DONE = 0x00:0x0b
 const SKIP = [0x10]
 
 function runtests(dir; mode=:data)
     println("DIR: ", dir)
-    machine = Cpu{TestCpu}()
+    machine = Cpu(; user_data = TestCpu())
     for inst in 0x00:0xFF
-        inst ∈ ILLEGAL && continue
+        #inst ∈ ILLEGAL && continue
         #inst ∈ DONE && continue
-        inst ∈ SKIP && continue
+        #inst ∈ SKIP && continue
         runtests(machine, dir, inst; mode)
     end
 end

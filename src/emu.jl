@@ -122,9 +122,12 @@
 
 module Fake6502m
 
+using Printf
+
 const TEST_COMPAT = true
 #const TEST_COMPAT = false
-const FAKE_COMPAT = true
+#const FAKE_COMPAT = true
+const FAKE_COMPAT = false
 
 const DECIMALMODE = true
 
@@ -238,6 +241,7 @@ addrtable = Function[
 ]
 
 function adc end
+function anc end
 function and end
 function asl end
 function bcc end
@@ -264,6 +268,7 @@ function eor end
 function inc end
 function inx end
 function iny end
+function jam end
 function jmp end
 function jsr end
 function lda end
@@ -304,14 +309,14 @@ function rra end
 
 optable = Function[
 #        |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  A  |  B  |  C  |  D  |  E  |  F  |
-#=0=# brk_6502,  ora,  nop,  slo,  nop,  ora,  asl,  slo,  php,  ora,  asl,  nop,  nop,  ora,  asl,  slo, #=0=#
-#=1=#      bpl,  ora,  nop,  slo,  nop,  ora,  asl,  slo,  clc,  ora,  nop,  slo,  nop,  ora,  asl,  slo, #=1=#
-#=2=#      jsr,  and,  nop,  rla,  bit,  and,  rol,  rla,  plp,  and,  rol,  nop,  bit,  and,  rol,  rla, #=2=#
-#=3=#      bmi,  and,  nop,  rla,  nop,  and,  rol,  rla,  sec,  and,  nop,  rla,  nop,  and,  rol,  rla, #=3=#
-#=4=#      rti,  eor,  nop,  sre,  nop,  eor,  lsr,  sre,  pha,  eor,  lsr,  nop,  jmp,  eor,  lsr,  sre, #=4=#
-#=5=#      bvc,  eor,  nop,  sre,  nop,  eor,  lsr,  sre,  cli,  eor,  nop,  sre,  nop,  eor,  lsr,  sre, #=5=#
-#=6=#      rts,  adc,  nop,  rra,  nop,  adc,  ror,  rra,  pla,  adc,  ror,  nop,  jmp,  adc,  ror,  rra, #=6=#
-#=7=#      bvs,  adc,  nop,  rra,  nop,  adc,  ror,  rra,  sei,  adc,  nop,  rra,  nop,  adc,  ror,  rra, #=7=#
+#=0=# brk_6502,  ora,  jam,  slo,  nop,  ora,  asl,  slo,  php,  ora,  asl,  anc,  nop,  ora,  asl,  slo, #=0=#
+#=1=#      bpl,  ora,  jam,  slo,  nop,  ora,  asl,  slo,  clc,  ora,  nop,  slo,  nop,  ora,  asl,  slo, #=1=#
+#=2=#      jsr,  and,  jam,  rla,  bit,  and,  rol,  rla,  plp,  and,  rol,  nop,  bit,  and,  rol,  rla, #=2=#
+#=3=#      bmi,  and,  jam,  rla,  nop,  and,  rol,  rla,  sec,  and,  nop,  rla,  nop,  and,  rol,  rla, #=3=#
+#=4=#      rti,  eor,  jam,  sre,  nop,  eor,  lsr,  sre,  pha,  eor,  lsr,  nop,  jmp,  eor,  lsr,  sre, #=4=#
+#=5=#      bvc,  eor,  jam,  sre,  nop,  eor,  lsr,  sre,  cli,  eor,  nop,  sre,  nop,  eor,  lsr,  sre, #=5=#
+#=6=#      rts,  adc,  jam,  rra,  nop,  adc,  ror,  rra,  pla,  adc,  ror,  nop,  jmp,  adc,  ror,  rra, #=6=#
+#=7=#      bvs,  adc,  jam,  rra,  nop,  adc,  ror,  rra,  sei,  adc,  nop,  rra,  nop,  adc,  ror,  rra, #=7=#
 #=8=#      nop,  sta,  nop,  sax,  sty,  sta,  stx,  sax,  dey,  nop,  txa,  nop,  sty,  sta,  stx,  sax, #=8=#
 #=9=#      bcc,  sta,  nop,  nop,  sty,  sta,  stx,  sax,  tya,  sta,  txs,  nop,  nop,  sta,  nop,  nop, #=9=#
 #=A=#      ldy,  lda,  ldx,  lax,  ldy,  lda,  ldx,  lax,  tay,  lda,  tax,  nop,  ldy,  lda,  ldx,  lax, #=A=#
@@ -448,7 +453,10 @@ function reset6502(cpu::AbstractCpu)
 end
 
 #/*addressing mode functions, calculates effective addresses*/
-imp(::AbstractCpu) = nothing
+function imp(cpu::AbstractCpu)
+    TEST_COMPAT && read6502(cpu, cpu.pc)
+    nothing
+end
 
 #/*addressing mode functions, calculates effective addresses*/
 function acc(cpu::AbstractCpu)
@@ -467,7 +475,9 @@ function zp(cpu::AbstractCpu) # /*zero-page*/
 end
 
 function zpx(cpu::AbstractCpu) # /*zero-page,X*/
-    cpu.ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
+    local zp = UInt16(read6502(cpu, cpu.pc))
+    TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
+    cpu.ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
     cpu.pc += 0x1
 end
 
@@ -492,11 +502,13 @@ end
 
 function absx(cpu::AbstractCpu) #/*absolute,X*/
     local startpage
-    cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    local addr = UInt16(read6502(cpu, cpu.pc))
+    cpu.ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
     startpage = cpu.ea & 0xFF00
     cpu.ea += UInt16(cpu.x)
 
     if (startpage != (cpu.ea & 0xFF00)) #/*one cycle penlty for page-crossing on some opcodes*/
+        TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
         cpu.penaltyaddr = 0x1
     end
 
@@ -505,11 +517,13 @@ end
 
 function absy(cpu::AbstractCpu) # /*absolute,Y*/
     local startpage
-    cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
+    local addr = UInt16(read6502(cpu, cpu.pc))
+    cpu.ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
     startpage = cpu.ea & 0xFF00;
     cpu.ea += UInt16(cpu.y)
 
     if (startpage != (cpu.ea & 0xFF00)) # /*one cycle penlty for page-crossing on some opcodes*/
+        TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
         cpu.penaltyaddr = 0x1;
     end
 
@@ -526,7 +540,7 @@ end
 
 function indx(cpu::AbstractCpu) # /* (indirect,X)*/
     local eahelp
-    zp = UInt16(read6502(cpu, cpu.pc))
+    local zp = UInt16(read6502(cpu, cpu.pc))
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
     eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
     cpu.pc += 0x1
@@ -564,6 +578,9 @@ function putvalue(cpu, saveval::UInt16)
         cpu.a = UInt8(saveval & 0x00FF);
     else
         write6502(cpu, cpu.ea, UInt8(saveval & 0x00FF))
+    end
+    if TEST_COMPAT
+        cpu.value = saveval
     end
 end
 
@@ -615,9 +632,17 @@ end
 # to emulate NES, make a custom adc method call adc_nes instead of adc_non_nes
 adc(cpu::AbstractCpu) = adc_non_nes(cpu)
 
-function and(cpu::AbstractCpu)
+# AND oper + set C as ASL, immediate only
+function anc(cpu::AbstractCpu)
+    and(cpu)
+    carrycalc(cpu, cpu.result << 1)
+end
+
+function and(cpu::AbstractCpu, reuse_value = false)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu)
+    if !reuse_value
+        cpu.value = getvalue(cpu)
+    end
     cpu.result = UInt16(cpu.a) & cpu.value
    
     zerocalc(cpu, cpu.result)
@@ -639,8 +664,13 @@ function asl(cpu::AbstractCpu)
 end
 
 function check_cross_page_boundary(cpu::AbstractCpu)
+    TEST_COMPAT &&
+        read6502(cpu, cpu.oldpc)
     if (cpu.oldpc & 0xFF00) != (cpu.pc & 0xFF00)
         cpu.clockticks6502 += 2 # /*check if jump crossed a page boundary*/
+        if TEST_COMPAT
+            read6502(cpu, (cpu.oldpc & 0xFF00) | (cpu.pc & 0xFF))
+        end
     else
         cpu.clockticks6502 += 1
     end
@@ -701,8 +731,6 @@ end
 
 function bpl(cpu::AbstractCpu)
     if cpu.status & FLAG_SIGN == 0
-        #TEST_COMPAT && cpu.pc & 0xFF00 != (cpu.pc + cpu.reladdr) & 0xFF00 && read6502(cpu, cpu.pc + 1)
-        #TEST_COMPAT && read6502(cpu, cpu.pc + 0x1)
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
         check_cross_page_boundary(cpu)
@@ -832,10 +860,20 @@ function iny(cpu::AbstractCpu)
     signcalc(cpu, cpu.y)
 end
 
+function jam(cpu::AbstractCpu)
+    cpu.pc -= 1
+end
+
 jmp(cpu::AbstractCpu) = cpu.pc = cpu.ea
 
 function jsr(cpu::AbstractCpu)
+    local oldsp = cpu.sp
+    TEST_COMPAT && (cpu.pc - 0x1) != 0x0100 | oldsp && # not in page zero
+        read6502(cpu, 0x0100 | oldsp)
     push_6502_16(cpu, cpu.pc - 0x1)
+    if TEST_COMPAT && (cpu.pc - 1) == 0x0100 | oldsp # in page zero
+        cpu.ea = (cpu.ea & 0xFF) | (UInt16(read6502(cpu, 0x0100 | oldsp)) << 8)
+    end
     cpu.pc = cpu.ea
 end
 
@@ -882,11 +920,23 @@ function nop(cpu::AbstractCpu)
     if op == 0x1C || op == 0x3C || op == 0x5C || op == 0x7C || op == 0xDC || op == 0xFC
         cpu.penaltyop = 0x1
     end
+    addr = addrtable[op + 1]
+    #@printf "op: %02x addr: %s\n" op string(addr)
+    if TEST_COMPAT
+        if addr == absx || addr == absy
+            cpu.penaltyaddr == 0 &&
+                getvalue(cpu)
+        elseif addr != imm && addr != abso && addr != imp
+            getvalue(cpu)
+        end
+    end
 end
 
-function ora(cpu::AbstractCpu)
+function ora(cpu::AbstractCpu, reuse_value = false)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu)
+    if !reuse_value
+        cpu.value = getvalue(cpu)
+    end
     cpu.result = UInt16(cpu.a) | cpu.value
    
     zerocalc(cpu, cpu.result)
@@ -909,9 +959,9 @@ function pla(cpu::AbstractCpu)
     signcalc(cpu, cpu.a)
 end
 
-#plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT
+plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT
 # FAKE: changed for consistency
-plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT | FLAG_BREAK
+#plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT | FLAG_BREAK
 
 function rol(cpu::AbstractCpu)
     cpu.value = getvalue(cpu)
@@ -1083,7 +1133,7 @@ end
 
 function slo(cpu::AbstractCpu)
     asl(cpu)
-    ora(cpu)
+    ora(cpu, true)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
     end
@@ -1092,7 +1142,7 @@ end
 
 function rla(cpu::AbstractCpu)
     rol(cpu)
-    and(cpu)
+    and(cpu, true)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
     end
