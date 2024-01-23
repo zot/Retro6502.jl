@@ -156,7 +156,6 @@ abstract type AbstractCpu end
     status::UInt8 = 0x00
     instructions::Int64 = 0
     clockticks6502::Int64 = 0
-    clockgoal6502::Int64 = 0
     oldpc::UInt16 = 0x0000
     # addressing
     ea::UInt16 = 0x0000
@@ -187,7 +186,6 @@ function copy(src::Cpu, dst::Cpu)
      dst.status = src.status
      dst.instructions = src.instructions
      dst.clockticks6502 = src.clockticks6502
-     dst.clockgoal6502 = src.clockgoal6502
      dst.oldpc = src.oldpc
      dst.ea = src.ea
      dst.reladdr = src.reladdr
@@ -402,7 +400,7 @@ function absy(cpu::AbstractCpu) # /*absolute,Y*/
 
     if (startpage != (cpu.ea & 0xFF00)) # /*one cycle penlty for page-crossing on some opcodes*/
         TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
-        cpu.penaltyaddr = 0x1;
+        cpu.penaltyaddr = 0x1
     end
 
     cpu.pc += 0x2;
@@ -436,13 +434,18 @@ function indy(cpu::AbstractCpu) # /* (indirect),Y*/
     cpu.ea += UInt16(cpu.y)
 
     if startpage != (cpu.ea & 0xFF00) # /*one cycle penlty for page-crossing on some opcodes*/
-        cpu.penaltyaddr = 0x1;
+        cpu.penaltyaddr = 0x1
         TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
     end
 end
 
 function getvalue(cpu::AbstractCpu)
     addrsyms[cpu.opcode + 1] == :acc && return UInt16(cpu.a)
+    #cpu.opcode & 0x9F == 0xA && return UInt16(cpu.a)
+    #if cpu.opcode == 0x0A || cpu.opcode == 0x2A || cpu.opcode == 0x4A || cpu.opcode == 0x6A
+    #    # addr mode == acc
+    #    return UInt16(cpu.a)
+    #end
     return UInt16(read6502(cpu, cpu.ea));
 end
 
@@ -452,6 +455,8 @@ end
 
 
 function putvalue(cpu, saveval::UInt16)
+    #if cpu.opcode == 0x0A || cpu.opcode == 0x2A || cpu.opcode == 0x4A || cpu.opcode == 0x6A
+    #    # addr mode == acc
     if addrsyms[cpu.opcode + 1] == :acc
         cpu.a = UInt8(saveval & 0x00FF);
     else
@@ -650,7 +655,7 @@ cli(cpu::AbstractCpu) = clearinterrupt(cpu)
 clv(cpu::AbstractCpu) = clearoverflow(cpu)
 
 function cmp(cpu::AbstractCpu)
-    cpu.penaltyop = 1
+    cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.a) - cpu.value
    
@@ -704,7 +709,7 @@ function dey(cpu::AbstractCpu)
 end
 
 function eor(cpu::AbstractCpu)
-    cpu.penaltyop = 1;
+    cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu);
     cpu.result = UInt16(cpu.a) ⊻ cpu.value;
    
@@ -765,7 +770,7 @@ function lda(cpu::AbstractCpu)
 end
 
 function ldx(cpu::AbstractCpu)
-    cpu.penaltyop = 1
+    cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.x = UInt8(cpu.value & 0x00FF)
    
@@ -881,7 +886,7 @@ end
 function sbc_nes(cpu::AbstractCpu)
     if cpu.status & FLAG_DECIMAL
     	local result_dec, A, AL, B, C;
-        cpu.penaltyop = 1
+        cpu.penaltyop = 0x1
     	A = cpu.a
     	C = UInt16(cpu.status & FLAG_CARRY)
      	cpu.value = getvalue(cpu);B = cpu.value;cpu.value = cpu.value ⊻ 0x00FF
@@ -909,7 +914,7 @@ function sbc_nes(cpu::AbstractCpu)
 end
 
 function sbc_non_nes(cpu::AbstractCpu)
-    cpu.penaltyop = 1
+    cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu) ⊻ 0x00FF
     if DECIMALMODE && (cpu.status & FLAG_DECIMAL) != 0
         cpu.value -= 0x0066
@@ -1072,11 +1077,15 @@ function exec6502(cpu::AbstractCpu, tickcount::Int64)
 
 	#	The system is changed so that now clockticks 6502 is reset every single time that exec is called.
 	#*/
-    cpu.clockgoal6502 = tickcount;
-    cpu.clockticks6502 = 0;
-    while cpu.clockticks6502 < cpu.clockgoal6502
-        inner_step6502(cpu)
+    cpu.clockticks6502 = 0
+    cpu.instructions = 0
+    local base_ticks = 0
+    while cpu.clockticks6502 + base_ticks < tickcount
+        base_ticks += inner_step6502(cpu)
+        instructions += 1
     end
+    cpu.clockticks6502 += base_ticks
+    cpu.instructions = instructions
 end
 
 const addrsyms = SVector(
@@ -1265,12 +1274,12 @@ function inner_step6502(cpu::AbstractCpu)
     cpu.penaltyaddr = 0
     address(cpu)
     opcode(cpu)
-    cpu.clockticks6502 += ticktable[cpu.opcode + 1]
+    local base_ticks = ticktable[cpu.opcode + 1]
     #/*The is commented out in Mike Chamber's usage of the 6502 emulator for MOARNES*/
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
-        cpu.clockticks6502 += 1
+        base_ticks += 1
     end
-    cpu.instructions += 1
+    base_ticks
 end
 
 function step6502(cpu::AbstractCpu)

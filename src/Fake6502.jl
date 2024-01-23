@@ -1,5 +1,6 @@
 module Fake6502
-using Printf
+using Printf, ProfileView
+
 export reset, step
 
 #const USE_GPL = true
@@ -19,12 +20,32 @@ function run2(mach::Machine, addr::Addr; max_ticks = 100)
     cpu = mach.newcpu
     cpu.pc = addr.value - 1
     cpu.sp = 0xfe
+    local original_max = max_ticks
     while cpu.clockticks6502 < max_ticks
-        Fake6502m.inner_step6502(cpu)
+        max_ticks -= Fake6502m.inner_step6502(cpu)
+    end
+    return cpu.clockticks6502 + original_max - max_ticks
+end
+
+function speed_test(; profile = true)
+    global mach = NewMachine(; user_data = nothing)
+    mach.mem[intRange(screen)] .= ' '
+    labels = mach.labels
+    off, total = loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
+    println("warm up")
+    run2(mach, :endless; max_ticks = 1000)
+    println("running benchmark")
+    if profile
+        @profview run2(mach, :endless; max_ticks = 1000000)
+    else
+        start = time()
+        local ticks = run2(mach, :endless; max_ticks = 1000000)
+        finish = time()
+        println("$ticks clock cycles took $(finish - start) seconds")
     end
 end
 
-function speed_test()
+function prof()
     global mach = NewMachine(; user_data = nothing)
     mach.mem[intRange(screen)] .= ' '
     labels = mach.labels
@@ -33,7 +54,7 @@ function speed_test()
     run2(mach, :endless; max_ticks = 1000)
     println("running benchmark")
     start = time()
-    run2(mach, :endless; max_ticks = 1000000)
+    @profview run2(mach, :endless; max_ticks = 1000000)
     finish = time()
     println("One million clock cycles took $(finish - start) seconds")
 end
