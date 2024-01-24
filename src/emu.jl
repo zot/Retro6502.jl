@@ -124,13 +124,14 @@ module Fake6502m
 
 using Printf, StaticArrays
 
-#const TEST_COMPAT = true
-const TEST_COMPAT = false
-const FAKE_COMPAT = true
-#const FAKE_COMPAT = false
+const TEST_COMPAT = true
+#const TEST_COMPAT = false
+#const FAKE_COMPAT = true
+const FAKE_COMPAT = false
 
 const DECIMALMODE = true
 
+# STATUS: NV-BDIZC
 const FLAG_CARRY = 0x01
 const FLAG_ZERO = 0x02
 const FLAG_INTERRUPT = 0x04
@@ -165,6 +166,7 @@ abstract type AbstractCpu end
     result::UInt16 = 0x0000
     opcode::UInt8 = 0x00
     oldstatus::UInt8 = 0x00
+    # making these booleans is slower than using UInt8
     penaltyop::UInt8 = 0x00
     penaltyaddr::UInt8 = 0x00
     memory::MVector{64K, UInt8} = zeros(MVector{64K, UInt8})
@@ -420,7 +422,6 @@ function indx(cpu::AbstractCpu) # /* (indirect,X)*/
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
     eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
     cpu.pc += 0x1
-    # todo the first and with 0xFF is redundant because of the first line
     cpu.ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8);
 end
 
@@ -457,7 +458,7 @@ end
 function putvalue(cpu, saveval::UInt16)
     #if cpu.opcode == 0x0A || cpu.opcode == 0x2A || cpu.opcode == 0x4A || cpu.opcode == 0x6A
     #    # addr mode == acc
-    if addrsyms[cpu.opcode + 1] == :acc
+    if addrsyms[cpu.opcode + 1] == :acc || addrsyms[cpu.opcode + 1] == :imm
         cpu.a = UInt8(saveval & 0x00FF);
     else
         write6502(cpu, cpu.ea, UInt8(saveval & 0x00FF))
@@ -469,12 +470,14 @@ end
 
 #/*instruction handler functions*/
 
-function adc_nes(cpu::AbstractCpu)
+function adc_nes(cpu::AbstractCpu, reuse_value)
     if (cpu.status & FLAG_DECIMAL) != 0
         local AL, A, result_dec;
         cpu.penaltyop = 0x1
         A = cpu.a
-        cpu.value = getvalue(cpu)
+        if !reuse_value
+            cpu.value = getvalue(cpu)
+        end
         result_dec = UInt16(A) + cpu.value + UInt16(cpu.status & FLAG_CARRY) # /*dec*/
         
         AL = (A & 0x0F) + (cpu.value & 0x0F) + UInt16(cpu.status & FLAG_CARRY) # /*SEQ 1A OR 2A*/
@@ -497,9 +500,11 @@ function adc_nes(cpu::AbstractCpu)
     end
 end
 
-function adc_non_nes(cpu::AbstractCpu)
+function adc_non_nes(cpu::AbstractCpu, reuse_value)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu)
+    if !reuse_value
+        cpu.value = getvalue(cpu)
+    end
     cpu.result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
     zerocalc(cpu, cpu.result)
     overflowcalc(cpu, cpu.result, cpu.a, cpu.value)
@@ -513,7 +518,7 @@ function adc_non_nes(cpu::AbstractCpu)
 end
 
 # to emulate NES, make a custom adc method call adc_nes instead of adc_non_nes
-adc(cpu::AbstractCpu) = adc_non_nes(cpu)
+adc(cpu::AbstractCpu, reuse_value = false) = adc_non_nes(cpu, reuse_value)
 
 # AND oper + set C as ASL, immediate only
 function anc(cpu::AbstractCpu)
@@ -525,6 +530,8 @@ function and(cpu::AbstractCpu, reuse_value = false)
     cpu.penaltyop = 0x1
     if !reuse_value
         cpu.value = getvalue(cpu)
+        #TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc &&
+        #    putvalue(cpu, cpu.ea)
     end
     cpu.result = UInt16(cpu.a) & cpu.value
    
@@ -744,7 +751,7 @@ function iny(cpu::AbstractCpu)
 end
 
 function jam(cpu::AbstractCpu)
-    cpu.pc -= 1
+    cpu.pc -= 0x1
 end
 
 jmp(cpu::AbstractCpu) = cpu.pc = cpu.ea
@@ -787,8 +794,10 @@ function ldy(cpu::AbstractCpu)
     signcalc(cpu, cpu.y)
 end
 
-function lsr(cpu::AbstractCpu)
-    cpu.value = getvalue(cpu)
+function lsr(cpu::AbstractCpu, reuse_value = false)
+    if !reuse_value
+        cpu.value = getvalue(cpu)
+    end
     cpu.result = cpu.value >> 1
    
     setcarryif(cpu, (cpu.value & 0x1) != 0)
@@ -842,7 +851,7 @@ function pla(cpu::AbstractCpu)
     signcalc(cpu, cpu.a)
 end
 
-plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT
+plp(cpu::AbstractCpu) = cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
 # FAKE: changed for consistency
 #plp(cpu::AbstractCpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT | FLAG_BREAK
 
@@ -858,8 +867,10 @@ function rol(cpu::AbstractCpu)
     putvalue(cpu, cpu.result)
 end
 
-function ror(cpu::AbstractCpu)
-    cpu.value = getvalue(cpu)
+function ror(cpu::AbstractCpu, reuse_value = false)
+    if !reuse_value
+        cpu.value = getvalue(cpu)
+    end
     FAKE_COMPAT && putvalue(cpu, cpu.value)
     cpu.result = (cpu.value >> 1) | ((cpu.status & FLAG_CARRY) << 7)
    
@@ -873,7 +884,7 @@ end
 function rti(cpu::AbstractCpu)
     #cpu.status = pull_6502_8(cpu)
     # FAKE: changed for consistency
-    cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT | FLAG_BREAK
+    cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
     cpu.value = pull_6502_16(cpu)
     cpu.pc = cpu.value;
 end
@@ -984,6 +995,31 @@ end
 
 #/*undocumented instructions~~~~~~~~~~~~~~~~~~~~~~~~~*/
 # to disable them, override them to call nop()
+
+# AND oper + LSR
+function alr(cpu::AbstractCpu)
+    and(cpu)
+    cpu.value = UInt16(cpu.a)
+    lsr(cpu, true)
+end
+
+# AND X + AND oper
+# A' = (A \/ EE) /\ X /\ M
+function ane(cpu::AbstractCpu)
+    cpu.a = (cpu.a | 0xEE) & cpu.x & getvalue(cpu)
+    cpu.status = (cpu.a & 0x80) | (cpu.status & 0x7D) | (cpu.a == 0 ? 0x02 : 0)
+end
+
+signed(val::UInt8) = Int16(reinterpret(Int8, val))
+
+# A' = ((A /\ M) >> 1) + (C * 80)
+# status: N, Z, C = A'6, V = (A6 /\ M6) \^/ (A7 /\ M7)
+function arr(cpu::AbstractCpu)
+    local newa = ((cpu.a & getvalue(cpu)) >> 1) + (cpu.status & 0x1) * 0x80
+    cpu.status = newa & 0x80 | (newa ⊻ (newa << 1)) & 0x40 | (cpu.status & 0x2C) | (newa == 0 ? 0x02 : 0) | ((newa & 0x40) >> 6)
+    cpu.a = newa
+end
+
 function lax(cpu::AbstractCpu)
     lda(cpu)
     ldx(cpu)
@@ -1040,7 +1076,7 @@ end
 
 function rra(cpu::AbstractCpu)
     ror(cpu)
-    adc(cpu)
+    adc(cpu, true)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
     end
@@ -1069,25 +1105,6 @@ function irq6502(cpu)
     end
 end
 
-function exec6502(cpu::AbstractCpu, tickcount::Int64)
-	#/*
-	#	BUG FIX:
-	#	overflow of unsigned 32 bit integer causes emulation to hang.
-	#	An instruction might cause the tick count to wrap around into the billions.
-
-	#	The system is changed so that now clockticks 6502 is reset every single time that exec is called.
-	#*/
-    cpu.clockticks6502 = 0
-    cpu.instructions = 0
-    local base_ticks = 0
-    while cpu.clockticks6502 + base_ticks < tickcount
-        base_ticks += inner_step6502(cpu)
-        instructions += 1
-    end
-    cpu.clockticks6502 += base_ticks
-    cpu.instructions = instructions
-end
-
 const addrsyms = SVector(
 #    |  0  |  1  |  2 |  3  |  4 |  5 |  6 |  7 |  8 |  9  |  A |  B  |  C  |  D  |  E  |  F  |
 #=0=#  :imp,:indx,:imp,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:acc, :imm,:abso,:abso,:abso,:abso,  #0
@@ -1108,9 +1125,9 @@ const addrsyms = SVector(
 #=F=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #F
 )
 
-function address(c)
+function address(c) #::AbstractCpu)
     o = c.opcode
-    if     o==0x00  imp(c) elseif o==0x01  indx(c) elseif o==0x02  imp(c) elseif o==0x03  imp(c)
+    if     o==0x00  imp(c) elseif o==0x01  indx(c) elseif o==0x02  imp(c) elseif o==0x03 indx(c)
     elseif o==0x04   zp(c) elseif o==0x05    zp(c) elseif o==0x06   zp(c) elseif o==0x07   zp(c)
     elseif o==0x08  imp(c) elseif o==0x09   imm(c) elseif o==0x0A  acc(c) elseif o==0x0B  imm(c)
     elseif o==0x0C abso(c) elseif o==0x0D  abso(c) elseif o==0x0E abso(c) elseif o==0x0F abso(c)
@@ -1177,27 +1194,27 @@ function address(c)
     end
 end
 
-#opsyms = SVector(
-#      |  0  |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |  A |  B |  C |  D |  E |  F |
-# 0 :brk_6502,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:php,:ora,:asl,:anc,:nop,:ora,:asl,:slo, # 0
-# 1      :bpl,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:clc,:ora,:nop,:slo,:nop,:ora,:asl,:slo, # 1
-# 2      :jsr,:and,:jam,:rla,:bit,:and,:rol,:rla,:plp,:and,:rol,:nop,:bit,:and,:rol,:rla, # 2
-# 3      :bmi,:and,:jam,:rla,:nop,:and,:rol,:rla,:sec,:and,:nop,:rla,:nop,:and,:rol,:rla, # 3
-# 4      :rti,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:pha,:eor,:lsr,:nop,:jmp,:eor,:lsr,:sre, # 4
-# 5      :bvc,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:cli,:eor,:nop,:sre,:nop,:eor,:lsr,:sre, # 5
-# 6      :rts,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:pla,:adc,:ror,:nop,:jmp,:adc,:ror,:rra, # 6
-# 7      :bvs,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:sei,:adc,:nop,:rra,:nop,:adc,:ror,:rra, # 7
-# 8      :nop,:sta,:nop,:sax,:sty,:sta,:stx,:sax,:dey,:nop,:txa,:nop,:sty,:sta,:stx,:sax, # 8
-# 9      :bcc,:sta,:nop,:nop,:sty,:sta,:stx,:sax,:tya,:sta,:txs,:nop,:nop,:sta,:nop,:nop, # 9
-# A      :ldy,:lda,:ldx,:lax,:ldy,:lda,:ldx,:lax,:tay,:lda,:tax,:nop,:ldy,:lda,:ldx,:lax, # A
-# B      :bcs,:lda,:nop,:lax,:ldy,:lda,:ldx,:lax,:clv,:lda,:tsx,:lax,:ldy,:lda,:ldx,:lax, # B
-# C      :cpy,:cmp,:nop,:dcp,:cpy,:cmp,:dec,:dcp,:iny,:cmp,:dex,:nop,:cpy,:cmp,:dec,:dcp, # C
-# D      :bne,:cmp,:nop,:dcp,:nop,:cmp,:dec,:dcp,:cld,:cmp,:nop,:dcp,:nop,:cmp,:dec,:dcp, # D
-# E      :cpx,:sbc,:nop,:isb,:cpx,:sbc,:inc,:isb,:inx,:sbc,:nop,:sbc,:cpx,:sbc,:inc,:isb, # E
-# F      :beq,:sbc,:nop,:isb,:nop,:sbc,:inc,:isb,:sed,:sbc,:nop,:isb,:nop,:sbc,:inc,:isb  # F
-#)
+opsyms = SVector(
+#        |  0  |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |  A |  B |  C |  D |  E |  F |
+#=0=# :brk_6502,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:php,:ora,:asl,:anc,:nop,:ora,:asl,:slo, # 0
+#=1=#      :bpl,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:clc,:ora,:nop,:slo,:nop,:ora,:asl,:slo, # 1
+#=2=#      :jsr,:and,:jam,:rla,:bit,:and,:rol,:rla,:plp,:and,:rol,:anc,:bit,:and,:rol,:rla, # 2
+#=3=#      :bmi,:and,:jam,:rla,:nop,:and,:rol,:rla,:sec,:and,:nop,:rla,:nop,:and,:rol,:rla, # 3
+#=4=#      :rti,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:pha,:eor,:lsr,:alr,:jmp,:eor,:lsr,:sre, # 4
+#=5=#      :bvc,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:cli,:eor,:nop,:sre,:nop,:eor,:lsr,:sre, # 5
+#=6=#      :rts,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:pla,:adc,:ror,:arr,:jmp,:adc,:ror,:rra, # 6
+#=7=#      :bvs,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:sei,:adc,:nop,:rra,:nop,:adc,:ror,:rra, # 7
+#=8=#      :nop,:sta,:nop,:sax,:sty,:sta,:stx,:sax,:dey,:nop,:txa,:ane,:sty,:sta,:stx,:sax, # 8
+#=9=#      :bcc,:sta,:nop,:nop,:sty,:sta,:stx,:sax,:tya,:sta,:txs,:nop,:nop,:sta,:nop,:nop, # 9
+#=A=#      :ldy,:lda,:ldx,:lax,:ldy,:lda,:ldx,:lax,:tay,:lda,:tax,:nop,:ldy,:lda,:ldx,:lax, # A
+#=B=#      :bcs,:lda,:nop,:lax,:ldy,:lda,:ldx,:lax,:clv,:lda,:tsx,:lax,:ldy,:lda,:ldx,:lax, # B
+#=C=#      :cpy,:cmp,:nop,:dcp,:cpy,:cmp,:dec,:dcp,:iny,:cmp,:dex,:nop,:cpy,:cmp,:dec,:dcp, # C
+#=D=#      :bne,:cmp,:nop,:dcp,:nop,:cmp,:dec,:dcp,:cld,:cmp,:nop,:dcp,:nop,:cmp,:dec,:dcp, # D
+#=E=#      :cpx,:sbc,:nop,:isb,:cpx,:sbc,:inc,:isb,:inx,:sbc,:nop,:sbc,:cpx,:sbc,:inc,:isb, # E
+#=F=#      :beq,:sbc,:nop,:isb,:nop,:sbc,:inc,:isb,:sed,:sbc,:nop,:isb,:nop,:sbc,:inc,:isb  # F
+)
 
-function opcode(c)
+function opcode(c) #::AbstractCpu)
     o = c.opcode
     if o==0x00 brk_6502(c) elseif o==0x01 ora(c) elseif o==0x02 jam(c) elseif o==0x03 slo(c)
     elseif o==0x04  nop(c) elseif o==0x05 ora(c) elseif o==0x06 asl(c) elseif o==0x07 slo(c)
@@ -1209,7 +1226,7 @@ function opcode(c)
     elseif o==0x1C  nop(c) elseif o==0x1D ora(c) elseif o==0x1E asl(c) elseif o==0x1F slo(c)
     elseif o==0x20  jsr(c) elseif o==0x21 and(c) elseif o==0x22 jam(c) elseif o==0x23 rla(c)
     elseif o==0x24  bit(c) elseif o==0x25 and(c) elseif o==0x26 rol(c) elseif o==0x27 rla(c)
-    elseif o==0x28  pla(c) elseif o==0x29 and(c) elseif o==0x2A rol(c) elseif o==0x2B nop(c)
+    elseif o==0x28  plp(c) elseif o==0x29 and(c) elseif o==0x2A rol(c) elseif o==0x2B anc(c)
     elseif o==0x2C  bit(c) elseif o==0x2D and(c) elseif o==0x2E rol(c) elseif o==0x2F rla(c)
     elseif o==0x30  bmi(c) elseif o==0x31 and(c) elseif o==0x32 jam(c) elseif o==0x33 rla(c)
     elseif o==0x34  nop(c) elseif o==0x35 and(c) elseif o==0x36 rol(c) elseif o==0x37 rla(c)
@@ -1217,7 +1234,7 @@ function opcode(c)
     elseif o==0x3C  nop(c) elseif o==0x3D and(c) elseif o==0x3E rol(c) elseif o==0x3F rla(c)
     elseif o==0x40  rti(c) elseif o==0x41 eor(c) elseif o==0x42 jam(c) elseif o==0x43 sre(c)
     elseif o==0x44  nop(c) elseif o==0x45 eor(c) elseif o==0x46 lsr(c) elseif o==0x47 sre(c)
-    elseif o==0x48  pha(c) elseif o==0x49 eor(c) elseif o==0x4A lsr(c) elseif o==0x4B nop(c)
+    elseif o==0x48  pha(c) elseif o==0x49 eor(c) elseif o==0x4A lsr(c) elseif o==0x4B alr(c)
     elseif o==0x4C  jmp(c) elseif o==0x4D eor(c) elseif o==0x4E lsr(c) elseif o==0x4F sre(c)
     elseif o==0x50  bvc(c) elseif o==0x51 eor(c) elseif o==0x52 jam(c) elseif o==0x53 sre(c)
     elseif o==0x54  nop(c) elseif o==0x55 eor(c) elseif o==0x56 lsr(c) elseif o==0x57 sre(c)
@@ -1225,7 +1242,7 @@ function opcode(c)
     elseif o==0x5C  nop(c) elseif o==0x5D eor(c) elseif o==0x5E lsr(c) elseif o==0x5F sre(c)
     elseif o==0x60  rts(c) elseif o==0x61 adc(c) elseif o==0x62 jam(c) elseif o==0x63 rra(c)
     elseif o==0x64  nop(c) elseif o==0x65 adc(c) elseif o==0x66 ror(c) elseif o==0x67 rra(c)
-    elseif o==0x68  pla(c) elseif o==0x69 adc(c) elseif o==0x6A ror(c) elseif o==0x6B nop(c)
+    elseif o==0x68  pla(c) elseif o==0x69 adc(c) elseif o==0x6A ror(c) elseif o==0x6B arr(c)
     elseif o==0x6C  jmp(c) elseif o==0x6D adc(c) elseif o==0x6E ror(c) elseif o==0x6F rra(c)
     elseif o==0x70  bvs(c) elseif o==0x71 adc(c) elseif o==0x72 jam(c) elseif o==0x73 rra(c)
     elseif o==0x74  nop(c) elseif o==0x75 adc(c) elseif o==0x76 ror(c) elseif o==0x77 rra(c)
@@ -1233,7 +1250,7 @@ function opcode(c)
     elseif o==0x7C  nop(c) elseif o==0x7D adc(c) elseif o==0x7E ror(c) elseif o==0x7F rra(c)
     elseif o==0x80  nop(c) elseif o==0x81 sta(c) elseif o==0x82 nop(c) elseif o==0x83 sax(c)
     elseif o==0x84  sty(c) elseif o==0x85 sta(c) elseif o==0x86 stx(c) elseif o==0x87 sax(c)
-    elseif o==0x88  dey(c) elseif o==0x89 nop(c) elseif o==0x8A txa(c) elseif o==0x8B nop(c)
+    elseif o==0x88  dey(c) elseif o==0x89 nop(c) elseif o==0x8A txa(c) elseif o==0x8B ane(c)
     elseif o==0x8C  sty(c) elseif o==0x8D sta(c) elseif o==0x8E stx(c) elseif o==0x8F sax(c)
     elseif o==0x90  bcc(c) elseif o==0x91 sta(c) elseif o==0x92 nop(c) elseif o==0x93 nop(c)
     elseif o==0x94  sty(c) elseif o==0x95 sta(c) elseif o==0x96 stx(c) elseif o==0x97 sax(c)
@@ -1266,6 +1283,25 @@ function opcode(c)
     end
 end
 
+function exec6502(cpu::AbstractCpu, tickcount::Int64)
+	#/*
+	#	BUG FIX:
+	#	overflow of unsigned 32 bit integer causes emulation to hang.
+	#	An instruction might cause the tick count to wrap around into the billions.
+
+	#	The system is changed so that now clockticks 6502 is reset every single time that exec is called.
+	#*/
+    local instructions = 0
+    local base_ticks = 0
+    cpu.clockticks6502 = 0
+    while cpu.clockticks6502 + base_ticks < tickcount
+        base_ticks += inner_step6502(cpu)
+        instructions += 1
+    end
+    cpu.clockticks6502 += base_ticks
+    cpu.instructions = instructions
+end
+
 function inner_step6502(cpu::AbstractCpu)
     cpu.opcode = read6502(cpu, cpu.pc)
     cpu.pc += 0x1
@@ -1283,10 +1319,8 @@ function inner_step6502(cpu::AbstractCpu)
 end
 
 function step6502(cpu::AbstractCpu)
-    cpu.penaltyop = 0;
-    cpu.penaltyaddr = 0;
-	#cpu.clockticks6502 = 0;
-    inner_step6502(cpu)
+	cpu.clockticks6502 = 0;
+    cpu.clockticks6502 += inner_step6502(cpu)
 end
 
 end # module Fake6502

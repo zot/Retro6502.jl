@@ -1,5 +1,6 @@
 module Fake6502
-using Printf, ProfileView
+using Printf
+#using ProfileView
 
 export reset, step
 
@@ -15,48 +16,39 @@ include("base.jl")
 include("fakes.jl")
 include("c64.jl")
 
-run2(mach::Machine, sym::Symbol; max_ticks = 100) = run2(mach, mach.labels[sym]; max_ticks)
-function run2(mach::Machine, addr::Addr; max_ticks = 100)
+run2(mach::Machine, sym::Symbol, max_ticks = 100) = run2(mach, mach.labels[sym], max_ticks)
+function run2(mach::Machine, addr::Addr, max_ticks = 100)
     cpu = mach.newcpu
     cpu.pc = addr.value - 1
     cpu.sp = 0xfe
     local original_max = max_ticks
+    println("max_ticks type: ", typeof(max_ticks))
     while cpu.clockticks6502 < max_ticks
         max_ticks -= Fake6502m.inner_step6502(cpu)
     end
     return cpu.clockticks6502 + original_max - max_ticks
 end
 
-function speed_test(; profile = true)
-    global mach = NewMachine(; user_data = nothing)
+function init_speed()
+    mach = NewMachine(; user_data = nothing)
     mach.mem[intRange(screen)] .= ' '
-    labels = mach.labels
-    off, total = loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
-    println("warm up")
-    run2(mach, :endless; max_ticks = 1000)
-    println("running benchmark")
-    if profile
-        @profview run2(mach, :endless; max_ticks = 1000000)
-    else
-        start = time()
-        local ticks = run2(mach, :endless; max_ticks = 1000000)
-        finish = time()
-        println("$ticks clock cycles took $(finish - start) seconds")
-    end
+    loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
+    mach
 end
 
-function prof()
-    global mach = NewMachine(; user_data = nothing)
-    mach.mem[intRange(screen)] .= ' '
-    labels = mach.labels
-    off, total = loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
+function speed_test(; profile = false)
+    global mach = init_speed()
     println("warm up")
-    run2(mach, :endless; max_ticks = 1000)
+    run2(mach, :endless, 10000)
     println("running benchmark")
-    start = time()
-    @profview run2(mach, :endless; max_ticks = 1000000)
-    finish = time()
-    println("One million clock cycles took $(finish - start) seconds")
+    #if profile
+    #    @profview run2(mach, :endless; max_ticks = 1000000)
+    #else
+        start = time()
+        local ticks = run2(mach, :endless, 1000000)
+        finish = time()
+        println("$ticks clock cycles took $(finish - start) seconds")
+    #end
 end
 
 function test()
