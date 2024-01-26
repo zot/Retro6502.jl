@@ -162,7 +162,6 @@ const K = 1024
     reladdr::UInt16 = 0x0000
     # temporary values
     value::UInt16 = 0x0000
-    result::UInt16 = 0x0000
     opcode::UInt8 = 0x00
     oldstatus::UInt8 = 0x00
     # making these booleans is slower than using UInt8
@@ -503,12 +502,12 @@ function adc_nes(cpu, reuse_value)
     if !reuse_value
         cpu.value = getvalue(cpu)
     end
-    cpu.result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
-    carrycalc(cpu, cpu.result)
-    zerocalc(cpu, cpu.result)
-    overflowcalc(cpu, cpu.result, cpu.a, cpu.value)
-    signcalc(cpu, cpu.result)
-    saveaccum(cpu, cpu.result)
+    local result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
+    carrycalc(cpu, result)
+    zerocalc(cpu, result)
+    overflowcalc(cpu, result, cpu.a, cpu.value)
+    signcalc(cpu, result)
+    saveaccum(cpu, result)
 end
 
 # to emulate NES, make a custom adc method call adc_nes instead of adc_non_nes
@@ -528,20 +527,20 @@ function and(cpu, reuse_value = false)
     if !reuse_value
         cpu.value = getvalue(cpu)
     end
-    cpu.result = UInt16(cpu.a) & cpu.value
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    saveaccum(cpu, cpu.result)
+    local result = UInt16(cpu.a) & cpu.value
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    saveaccum(cpu, result)
 end
 
 function asl(cpu)
     cpu.value = getvalue(cpu)
     TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc && putvalue(cpu, cpu.value)
-    cpu.result = cpu.value << 1
-    carrycalc(cpu, cpu.result)
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    putvalue(cpu, cpu.result)
+    local result = cpu.value << 1
+    carrycalc(cpu, result)
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    putvalue(cpu, result)
 end
 
 function check_cross_page_boundary(cpu)
@@ -584,8 +583,8 @@ end
 
 function bit(cpu)
     cpu.value = getvalue(cpu);
-    cpu.result = UInt16(cpu.a) & cpu.value
-    zerocalc(cpu, cpu.result)
+    local result = UInt16(cpu.a) & cpu.value
+    zerocalc(cpu, result)
     cpu.status = (cpu.status & 0x3F) | (UInt8(cpu.value) & 0xC0);
 end
 
@@ -654,35 +653,35 @@ clv(cpu) = clearoverflow(cpu)
 function cmp(cpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
-    cpu.result = UInt16(cpu.a) - cpu.value
+    local result = UInt16(cpu.a) - cpu.value
     setcarryif(cpu, cpu.a >= UInt8(cpu.value & 0x00FF))
     setzeroif(cpu, cpu.a == UInt8(cpu.value & 0x00FF))
-    signcalc(cpu, cpu.result)
+    signcalc(cpu, result)
 end
 
 
 function cpx(cpu)
     cpu.value = getvalue(cpu)
-    cpu.result = UInt16(cpu.x) - cpu.value
+    local result = UInt16(cpu.x) - cpu.value
     setcarryif(cpu, cpu.x >= UInt8(cpu.value & 0x00FF))
     setzeroif(cpu, cpu.x == UInt8(cpu.value & 0x00FF))
-    signcalc(cpu, cpu.result)
+    signcalc(cpu, result)
 end
 
 function cpy(cpu)
     cpu.value = getvalue(cpu)
-    cpu.result = UInt16(cpu.y) - cpu.value
+    local result = UInt16(cpu.y) - cpu.value
     setcarryif(cpu, cpu.y >= UInt8(cpu.value & 0x00FF))
     setzeroif(cpu, cpu.y == UInt8(cpu.value & 0x00FF))
-    signcalc(cpu, cpu.result)
+    signcalc(cpu, result)
 end
 
 function dec(cpu)
     cpu.value = getvalue(cpu)
-    cpu.result = cpu.value - 0x1
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    putvalue(cpu, cpu.result)
+    local result = cpu.value - 0x1
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    putvalue(cpu, result)
 end
 
 
@@ -701,19 +700,19 @@ end
 function eor(cpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu);
-    cpu.result = UInt16(cpu.a) ⊻ cpu.value;
-    zerocalc(cpu, cpu.result);
-    signcalc(cpu, cpu.result);
-    saveaccum(cpu, cpu.result);
+    local result = UInt16(cpu.a) ⊻ cpu.value;
+    zerocalc(cpu, result);
+    signcalc(cpu, result);
+    saveaccum(cpu, result);
 end
 
 function inc(cpu)
     cpu.value = getvalue(cpu)
-    cpu.result = cpu.value + 0x1
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    putvalue(cpu, cpu.result)
-    cpu.result
+    local result = cpu.value + 0x1
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    putvalue(cpu, result)
+    result
 end
 
 function inx(cpu)
@@ -777,11 +776,11 @@ function lsr(cpu, reuse_value = false)
     if !reuse_value
         cpu.value = getvalue(cpu)
     end
-    cpu.result = cpu.value >> 1
+    local result = cpu.value >> 1
     setcarryif(cpu, (cpu.value & 0x1) != 0)
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    putvalue(cpu, cpu.result)
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    putvalue(cpu, result)
 end
 
 function nop(cpu)
@@ -805,10 +804,10 @@ function ora(cpu, reuse_value = false)
     if !reuse_value
         cpu.value = getvalue(cpu)
     end
-    cpu.result = UInt16(cpu.a) | cpu.value
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    saveaccum(cpu, cpu.result)
+    local result = UInt16(cpu.a) | cpu.value
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    saveaccum(cpu, result)
 end
 
 pha(cpu) = push_6502_8(cpu, cpu.a)
@@ -830,11 +829,11 @@ plp(cpu) = cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
 function rol(cpu)
     cpu.value = getvalue(cpu)
     FAKE_COMPAT && putvalue(cpu, cpu.value)
-    cpu.result = (cpu.value << 1) | (cpu.status & FLAG_CARRY)
-    carrycalc(cpu, cpu.result)
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    putvalue(cpu, cpu.result)
+    local result = (cpu.value << 1) | (cpu.status & FLAG_CARRY)
+    carrycalc(cpu, result)
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    putvalue(cpu, result)
 end
 
 function ror(cpu, reuse_value = false)
@@ -842,12 +841,12 @@ function ror(cpu, reuse_value = false)
         cpu.value = getvalue(cpu)
     end
     FAKE_COMPAT && putvalue(cpu, cpu.value)
-    cpu.result = (cpu.value >> 1) | ((cpu.status & FLAG_CARRY) << 7)
+    local result = (cpu.value >> 1) | ((cpu.status & FLAG_CARRY) << 7)
     setcarryif(cpu, (cpu.value & 1) != 0)
-    zerocalc(cpu, cpu.result)
-    signcalc(cpu, cpu.result)
-    putvalue(cpu, cpu.result)
-    cpu.result
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    putvalue(cpu, result)
+    result
 end
 
 function rti(cpu)
@@ -893,12 +892,12 @@ function sbc_nes(cpu, reuse_value)
     else
         cpu.value ⊻= 0x00FF
     end
-    cpu.result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
-    zerocalc(cpu, cpu.result)
-    overflowcalc(cpu, cpu.result, cpu.a, cpu.value)
-    signcalc(cpu, cpu.result)
-    carrycalc(cpu, cpu.result)
-    saveaccum(cpu, cpu.result)
+    local result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
+    zerocalc(cpu, result)
+    overflowcalc(cpu, result, cpu.a, cpu.value)
+    signcalc(cpu, result)
+    carrycalc(cpu, result)
+    saveaccum(cpu, result)
 end
 
 # to emulate NES, make a custom adc method call sbc_nes instead of sbc_non_nes
