@@ -1,5 +1,7 @@
 CC=gcc
 CFLAGS=-g -Werror -pedantic -fPIC
+SPEEDFLAGS=-O3 -DFAKE6502_OPS_STATIC -DDECIMALMODE -DNMOS6502
+#SPEEDFLAGS=-DFAKE6502_OPS_STATIC -DDECIMALMODE -DNMOS6502
 LIBS=C/fake6502.o C/fake6502host.o
 FAKE6502=C/fake6502.c C/fake6502.h
 SHLIB=C/fake6502.so
@@ -16,7 +18,7 @@ cspeed: C/speedtest
 	C/speedtest
 
 C/speedtest: default
-	$(CC) -O3 -o C/speedtest C/speedtest.c C/fake6502.o
+	$(CC) $(SPEEDFLAGS) -o C/speedtest C/speedtest.c C/fake6502.c
 
 speed: default examples/speed.prg FRC
 	julia --project=. -e 'include("src/Fake6502.jl"); Fake6502.speed_test()'

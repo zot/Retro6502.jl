@@ -62,8 +62,9 @@ const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp
 
 const CYCLES = []
 const FAKE_CYCLES = []
-#const CYCLE_ACCURATE = true
-const CYCLE_ACCURATE = false
+#const CYCLE_ACCURACY = :complete
+#const CYCLE_ACCURACY = :counts
+const CYCLE_ACCURACY = :none
 
 struct TestCpu end
 
@@ -208,17 +209,22 @@ function run_data_test(machine::Cpu, test, file, number)
             push!(errs, @sprintf "[%04x %02x] != %02x" addr machine.memory[addr + 1] value)
         end
     end
-    if CYCLE_ACCURATE
+    if CYCLE_ACCURACY == :complete
         missing = setdiff(test.cycles, cycles)
         extra = setdiff(cycles, test.cycles)
         !isempty(extra) && push!(errs, "Extra activity: $(cyclestr(extra))")
         !isempty(missing) && push!(errs, "Missing activity: $(cyclestr(missing))")
+    elseif CYCLE_ACCURACY == :counts && machine.clockticks6502 != length(test.cycles)
+        op = machine.opcode + 1
+        @error "$file:$number:test $(test.name) ($(opsyms[op]) $(addrsyms[op])) WARNING: clock ticks $(machine.clockticks6502) != $(length(test.cycles))"
     end
     if !isempty(errs)
         #fail(machine, test, file, number, join(errs, "\n  "))
         local op = first([val for (addr, val) in test.initial.ram if addr == test.initial.pc])
-        bcd = opsyms[op + 1] ∈ (:adc,:rra,:arr) && test.initial.p & FLAG_DECIMAL != 0
-        fail(machine, test, file, number, join(errs, "\n  "), !bcd)
+        #bcd = test.initial.p & FLAG_DECIMAL != 0 && opsyms[op + 1] ∈ (:adc,:sbc,:rra,:arr,:isc)
+        bcd = test.initial.p & FLAG_DECIMAL != 0 && opsyms[op + 1] ∈ (:sbc,:rra,:arr,:isc)
+        #fail(machine, test, file, number, join(errs, "\n  "), !bcd)
+        fail(machine, test, file, number, join(errs, "\n  "))
     end
     empty!(CYCLES)
 end
@@ -232,7 +238,6 @@ function runtests(machine::Cpu, dir, inst; mode=:data)
     println(name, "...")
     file = joinpath(dir, "$name.json")
     count = 1
-    println("FILE: ", file)
     fake = if mode === :fake
         NewMachine(; read_func = fake_read_mem, write_func = fake_write_mem)
     end
@@ -266,7 +271,7 @@ const ILLEGAL = [
     0xE2, 0xE3, 0xFF, 0xE7, 0xFF, 0xEB, 0xEC, 0xEF,
     0xF2, 0xF3, 0xF4, 0xF7, 0xFA, 0xFB, 0xFC, 0xFF,
 ]
-const DONE = 0x00:0x91
+const DONE = 0x00:0x6A
 const SKIP = [0x10]
 
 function runtests(dir; mode=:data)
@@ -274,7 +279,7 @@ function runtests(dir; mode=:data)
     machine = Cpu(; user_data = TestCpu())
     for inst in 0x00:0xFF
         #inst ∈ ILLEGAL && continue
-        inst ∈ DONE && continue
+        #inst ∈ DONE && continue
         #inst ∈ SKIP && continue
         runtests(machine, dir, inst; mode)
     end

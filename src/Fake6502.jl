@@ -1,6 +1,7 @@
 module Fake6502
 using Printf
 #using ProfileView
+#using ProfileCanvas
 
 export reset, step
 
@@ -16,17 +17,18 @@ include("base.jl")
 include("fakes.jl")
 include("c64.jl")
 
-run2(mach::Machine, sym::Symbol, max_ticks = 100) = run2(mach, mach.labels[sym], max_ticks)
-function run2(mach::Machine, addr::Addr, max_ticks = 100)
-    cpu = mach.newcpu
+run2(mach::Machine, sym::Symbol, max_ticks::Int64) = run2(mach, mach.labels[sym], max_ticks)
+run2(mach::Machine, addr::Addr, max_ticks::Int64) = run2(mach.newcpu, addr, max_ticks)
+function run2(cpu::Cpu, addr::Addr, max_ticks::Int64)
     cpu.pc = addr.value - 1
     cpu.sp = 0xfe
     local original_max = max_ticks
-    println("max_ticks type: ", typeof(max_ticks))
-    while cpu.clockticks6502 < max_ticks
-        max_ticks -= Fake6502m.inner_step6502(cpu)
+    local m::Int64 = max_ticks
+    #println("max_ticks type: ", typeof(max_ticks))
+    while cpu.clockticks6502 < m
+        m -= Fake6502m.inner_step6502(cpu)
     end
-    return cpu.clockticks6502 + original_max - max_ticks
+    return cpu.clockticks6502 + original_max - m
 end
 
 function init_speed()
@@ -36,19 +38,25 @@ function init_speed()
     mach
 end
 
-function speed_test(; profile = false)
+function speed_test(; profile = :none)
     global mach = init_speed()
     println("warm up")
     run2(mach, :endless, 10000)
+    run2(mach, :endless, 10000)
+    run2(mach, :endless, 10000)
     println("running benchmark")
-    #if profile
-    #    @profview run2(mach, :endless; max_ticks = 1000000)
-    #else
+    if profile == :alloc
+        error("No profiler installed")
+#        @profview_allocs run2(mach, :endless, 10000000)
+    elseif profile == :cpu
+        error("No profiler installed")
+#        @profview run2(mach, :endless, 10000000)
+    else
         start = time()
         local ticks = run2(mach, :endless, 1000000)
         finish = time()
-        println("$ticks clock cycles took $(finish - start) seconds")
-    #end
+        println("$ticks clock cycles took $((finish - start) * 1000) milliseconds")
+    end
 end
 
 function test()
