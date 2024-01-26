@@ -190,10 +190,6 @@ function run_data_test(machine::Cpu, test, file, number)
     Fake6502m.step6502(machine)
     errs = []
     cycles = [CYCLES...]
-    #machine.clockticks6502 != length(cycles) &&
-    #    push!(errs, "estimated cycles != actual cycles")
-    #machine.clockticks6502 != length(test.cycles) &&
-    #    push!(errs, "estimated cycles != test cycles")
     for (new, std) in REGISTERS
         if getfield(machine, new) != test.final[std]
             if new == :status
@@ -219,11 +215,7 @@ function run_data_test(machine::Cpu, test, file, number)
         @error "$file:$number:test $(test.name) ($(opsyms[op]) $(addrsyms[op])) WARNING: clock ticks $(machine.clockticks6502) != $(length(test.cycles))"
     end
     if !isempty(errs)
-        #fail(machine, test, file, number, join(errs, "\n  "))
         local op = first([val for (addr, val) in test.initial.ram if addr == test.initial.pc])
-        #bcd = test.initial.p & FLAG_DECIMAL != 0 && opsyms[op + 1] ∈ (:adc,:sbc,:rra,:arr,:isc)
-        bcd = test.initial.p & FLAG_DECIMAL != 0 && opsyms[op + 1] ∈ (:sbc,:rra,:arr,:isc)
-        #fail(machine, test, file, number, join(errs, "\n  "), !bcd)
         fail(machine, test, file, number, join(errs, "\n  "))
     end
     empty!(CYCLES)
@@ -271,7 +263,7 @@ const ILLEGAL = [
     0xE2, 0xE3, 0xFF, 0xE7, 0xFF, 0xEB, 0xEC, 0xEF,
     0xF2, 0xF3, 0xF4, 0xF7, 0xFA, 0xFB, 0xFC, 0xFF,
 ]
-const DONE = 0x00:0x6A
+const DONE = 0x00:0xE0
 const SKIP = [0x10]
 
 function runtests(dir; mode=:data)

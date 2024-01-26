@@ -201,10 +201,8 @@ function copy(src::Cpu, dst::Cpu)
 end
 
 # Basic Cpu does not interfere with computation
-#read6502(cpu, addr::UInt16) = cpu.memory[addr + 1]
-#write6502(cpu, addr::UInt16, value::UInt8) = cpu.memory[addr + 1] = value
-read6502(cpu, addr::UInt16) = getfield(cpu, :memory)[addr + 1]
-write6502(cpu, addr::UInt16, value::UInt8) = getfield(cpu, :memory)[addr + 1] = value
+read6502(cpu, addr::UInt16) = cpu.memory[addr + 1]
+write6502(cpu, addr::UInt16, value::UInt8) = cpu.memory[addr + 1] = value
 hookexternal() = nothing
 
 const ticktable = SVector(
@@ -447,12 +445,6 @@ function indy(cpu) # /* (indirect),Y*/
 end
 
 function getvalue(cpu)
-    #cpu.opcode & 0x9F == 0xA && return UInt16(cpu.a)
-    #if cpu.opcode == 0x0A || cpu.opcode == 0x2A || cpu.opcode == 0x4A || cpu.opcode == 0x6A
-    #    # addr mode == acc
-    #    return UInt16(cpu.a)
-    #end
-    #addrsyms[cpu.opcode + 1] == :acc && return UInt16(cpu.a)
     is_acc(cpu.opcode) && return UInt16(cpu.a)
     return UInt16(read6502(cpu, cpu.ea));
 end
@@ -462,7 +454,6 @@ function getvalue16(cpu)
 end
 
 function putvalue(cpu, saveval::UInt16)
-    #if cpu.opcode == 0x0A || cpu.opcode == 0x2A || cpu.opcode == 0x4A || cpu.opcode == 0x6A
     if is_acc(cpu.opcode)
         # addr mode is acc
         cpu.a = UInt8(saveval & 0x00FF);
@@ -479,6 +470,7 @@ end
 signed(i::UInt8) = Int16(reinterpret(Int8, i))
 signed(i::UInt16) = reinterpret(Int16, i)
 
+# Thanks to Bruce Clark: http://www.6502.org/tutorials/decimal_mode.html
 function adc_non_nes(cpu, reuse_value)
     (cpu.status & FLAG_DECIMAL) == 0 &&
         return adc_nes(cpu, reuse_value)
@@ -486,7 +478,6 @@ function adc_non_nes(cpu, reuse_value)
     if !reuse_value
         cpu.value = getvalue(cpu)
     end
-    # from 6502.org
     local A::UInt8 = cpu.a
     local B::UInt8 = cpu.value
     local C::UInt8 = cpu.status & 0x0001
@@ -495,7 +486,7 @@ function adc_non_nes(cpu, reuse_value)
         AL = ((AL + 0x06) & 0x0F) + 0x10
     end
     local result::UInt16 = UInt16(A & 0xF0) + UInt16(B & 0xF0) + AL
-    # UNSIGNED_A can be over 0xFF at this point
+    # result can be over 0xFF at this point
     if result >= 0xA0
         result += 0x60
     end
@@ -533,8 +524,6 @@ function and(cpu, reuse_value = false)
     cpu.penaltyop = 0x1
     if !reuse_value
         cpu.value = getvalue(cpu)
-        #TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc &&
-        #    putvalue(cpu, cpu.ea)
     end
     cpu.result = UInt16(cpu.a) & cpu.value
    
@@ -678,7 +667,6 @@ end
 function cpx(cpu)
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.x) - cpu.value
-   
     setcarryif(cpu, cpu.x >= UInt8(cpu.value & 0x00FF))
     setzeroif(cpu, cpu.x == UInt8(cpu.value & 0x00FF))
     signcalc(cpu, cpu.result)
@@ -687,7 +675,6 @@ end
 function cpy(cpu)
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.y) - cpu.value
-   
     setcarryif(cpu, cpu.y >= UInt8(cpu.value & 0x00FF))
     setzeroif(cpu, cpu.y == UInt8(cpu.value & 0x00FF))
     signcalc(cpu, cpu.result)
@@ -696,24 +683,20 @@ end
 function dec(cpu)
     cpu.value = getvalue(cpu)
     cpu.result = cpu.value - 0x1
-   
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     putvalue(cpu, cpu.result)
 end
 
 
 function dex(cpu)
     cpu.x -= 0x1
-   
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
 end
 
 function dey(cpu)
     cpu.y -= 0x1
-   
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
 end
@@ -722,38 +705,33 @@ function eor(cpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu);
     cpu.result = UInt16(cpu.a) ⊻ cpu.value;
-   
     zerocalc(cpu, cpu.result);
     signcalc(cpu, cpu.result);
-   
     saveaccum(cpu, cpu.result);
 end
 
 function inc(cpu)
     cpu.value = getvalue(cpu)
     cpu.result = cpu.value + 0x1
-   
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     putvalue(cpu, cpu.result)
 end
 
 function inx(cpu)
     cpu.x += 0x1
-   
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
 end
 
 function iny(cpu)
     cpu.y += 0x1
-   
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
 end
 
 function jam(cpu)
+    cpu.clockticks6502 += 1
     cpu.pc -= 0x1
 end
 
@@ -817,7 +795,6 @@ function nop(cpu)
     end
     if TEST_COMPAT
         addr = addrsyms[op + 1]
-        #@printf "op: %02x addr: %s\n" op string(addr)
         if addr == :absx || addr == :absy
             cpu.penaltyaddr == 0x0 &&
                 getvalue(cpu)
@@ -855,8 +832,6 @@ function pla(cpu)
 end
 
 plp(cpu) = cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
-# FAKE: changed for consistency
-#plp(cpu) = cpu.status = pull_6502_8(cpu) | FLAG_CONSTANT | FLAG_BREAK
 
 function rol(cpu)
     cpu.value = getvalue(cpu)
@@ -885,8 +860,6 @@ function ror(cpu, reuse_value = false)
 end
 
 function rti(cpu)
-    #cpu.status = pull_6502_8(cpu)
-    # FAKE: changed for consistency
     cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
     cpu.value = pull_6502_16(cpu)
     cpu.pc = cpu.value;
@@ -897,56 +870,42 @@ function rts(cpu)
     cpu.pc = cpu.value + 0x0001
 end
 
-function sbc_nes(cpu, reuse_value)
-    if cpu.status & FLAG_DECIMAL
-    	local result_dec, A, AL, B, C;
-        cpu.penaltyop = 0x1
-    	A = cpu.a
-    	C = UInt16(cpu.status & FLAG_CARRY)
-        if !reuse_value
-     	    cpu.value = getvalue(cpu);
-        end
-        B = cpu.value;cpu.value = cpu.value ⊻ 0x00FF
-    	result_dec = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY) # /*dec*/
-		#/*Both Cmos and Nmos*/
-    	carrycalc(cpu, result_dec)
-    	overflowcalc(cpu, result_dec, cpu.a, cpu.value)
-    	#/*NMOS ONLY*/
-    	signcalc(cpu, result_dec)
-    	zerocalc(cpu, result_dec)
-		#/*Sequence 3 is NMOS ONLY*/
-    	AL = (A & 0x0F) - (B & 0x0F) + C -1 # /* 3a*/
-    	if AL & 0x8000 != 0
-            AL = ((AL - 0x06) & 0x0F) - 0x10 # /*3b*/
-        end
-    	A = (A & 0xF0) - (B & 0xF0) + AL # /*3c*/
-    	if A & 0x8000 != 0
-            A = A - 0x60 # /*3d*/
-        end
-    	cpu.result = A # /*3e*/
-        saveaccum(cpu, cpu.result)
-    else 
-        sbc_non_nes(cpu)
+# Thanks to Bruce Clark: http://www.6502.org/tutorials/decimal_mode.html
+function sbc_non_nes(cpu, reuse_value)
+    isstatusclear(cpu, FLAG_DECIMAL) &&
+        return sbc_nes(cpu, reuse_value)
+    cpu.penaltyop = 0x1
+    local A::Int16 = Int16(cpu.a)
+    local B::UInt8 = (reuse_value ? cpu.value : getvalue(cpu)) & 0xFF
+    local C::UInt8 = cpu.status & FLAG_CARRY
+    local AL::Int16 = (A & 0x0F) - Int8(B & 0x0F) + Int8(C) - Int16(0x0001)
+    if AL < 0
+        AL = ((AL - Int16(0x0006)) & 0x0F) - Int16(0x0010)
     end
+    A = (A & 0xF0) - (B & 0xF0) + AL
+    if A < 0
+        A -= 0x60
+    end
+    local fb = B ⊻ 0x00FF
+    local fresult = UInt16(cpu.a) + fb + UInt16(cpu.status & FLAG_CARRY)
+    zerocalc(cpu, fresult)
+    signcalc(cpu, fresult)
+    overflowcalc(cpu, fresult, cpu.a, fb)
+    carrycalc(cpu, fresult)
+    saveaccum(cpu, reinterpret(UInt16, A))
 end
 
-function sbc_non_nes(cpu, reuse_value)
+function sbc_nes(cpu, reuse_value)
     cpu.penaltyop = 0x1
     if !reuse_value
         cpu.value = getvalue(cpu) ⊻ 0x00FF
     else
         cpu.value ⊻= 0x00FF
     end
-    if DECIMALMODE && (cpu.status & FLAG_DECIMAL) != 0
-        cpu.value -= 0x0066
-    end
     cpu.result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
     zerocalc(cpu, cpu.result)
     overflowcalc(cpu, cpu.result, cpu.a, cpu.value)
     signcalc(cpu, cpu.result)
-    if DECIMALMODE && (cpu.status & FLAG_DECIMAL) != 0
-        cpu.result += ((((cpu.result + 0x66) ⊻ UInt16(cpu.a) ⊻ cpu.value) >> 3) & 0x22) * 0x3
-    end
     carrycalc(cpu, cpu.result)
     saveaccum(cpu, cpu.result)
 end
@@ -1008,9 +967,14 @@ end
 
 # AND oper + LSR
 function alr(cpu)
-    and(cpu)
-    cpu.value = UInt16(cpu.a)
-    lsr(cpu, true)
+    local M = getvalue(cpu)
+    local anded = cpu.a & M
+    local A = anded >> 1
+    local N = A & SIGN
+    local Z = A == 0x00 ? FLAG_ZERO : 0
+    local C = anded & FLAG_CARRY
+    cpu.a = A
+    setstatus(cpu, FLAG_SIGN | FLAG_ZERO | FLAG_CARRY, N | Z | C)
 end
 
 # AND X + AND oper
@@ -1068,7 +1032,6 @@ function lax(cpu)
 end
 
 function lxa(cpu)
-    #local value = getvalue(cpu) & cpu.a
     local value = getvalue(cpu) & (cpu.a | 0xEE)
     cpu.a = value
     cpu.x = value
@@ -1220,8 +1183,7 @@ is_imm(op::UInt8) =
     (op & 0x10 == 0x00 && (op & 0x0F == 0x09 || op & 0x0F == 0x0B))
 
 function address(c) #::Cpu)
-    #o = c.opcode
-    o = getfield(c, :opcode)
+    o = c.opcode
     if     o==0x00  imp(c) elseif o==0x01  indx(c) elseif o==0x02  imp(c) elseif o==0x03 indx(c)
     elseif o==0x04   zp(c) elseif o==0x05    zp(c) elseif o==0x06   zp(c) elseif o==0x07   zp(c)
     elseif o==0x08  imp(c) elseif o==0x09   imm(c) elseif o==0x0A  acc(c) elseif o==0x0B  imm(c)
@@ -1421,8 +1383,6 @@ function exec6502(cpu, tickcount::Int64)
 end
 
 function inner_step6502(cpu)
-#inner_step6502(cpu) = inner_step6502(cpu, ticktable)
-#function inner_step6502(cpu, ticktable::SVector{256,Int64})
     cpu.opcode = read6502(cpu, cpu.pc)
     cpu.pc += 0x1
     cpu.status |= FLAG_CONSTANT
