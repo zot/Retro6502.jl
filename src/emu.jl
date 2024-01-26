@@ -516,8 +516,11 @@ adc(cpu, reuse_value = false) = adc_non_nes(cpu, reuse_value)
 
 # AND oper + set C as ASL, immediate only
 function anc(cpu)
-    and(cpu)
-    carrycalc(cpu, cpu.result << 1)
+    local A = cpu.a & getvalue(cpu)
+    zerocalc(cpu, A)
+    signcalc(cpu, A)
+    setstatus(cpu, FLAG_CARRY, A >> 7)
+    saveaccum(cpu, A)
 end
 
 function and(cpu, reuse_value = false)
@@ -526,10 +529,8 @@ function and(cpu, reuse_value = false)
         cpu.value = getvalue(cpu)
     end
     cpu.result = UInt16(cpu.a) & cpu.value
-   
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     saveaccum(cpu, cpu.result)
 end
 
@@ -537,11 +538,9 @@ function asl(cpu)
     cpu.value = getvalue(cpu)
     TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc && putvalue(cpu, cpu.value)
     cpu.result = cpu.value << 1
-
     carrycalc(cpu, cpu.result)
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     putvalue(cpu, cpu.result)
 end
 
@@ -586,7 +585,6 @@ end
 function bit(cpu)
     cpu.value = getvalue(cpu);
     cpu.result = UInt16(cpu.a) & cpu.value
-   
     zerocalc(cpu, cpu.result)
     cpu.status = (cpu.status & 0x3F) | (UInt8(cpu.value) & 0xC0);
 end
@@ -657,7 +655,6 @@ function cmp(cpu)
     cpu.penaltyop = 0x1
     cpu.value = getvalue(cpu)
     cpu.result = UInt16(cpu.a) - cpu.value
-   
     setcarryif(cpu, cpu.a >= UInt8(cpu.value & 0x00FF))
     setzeroif(cpu, cpu.a == UInt8(cpu.value & 0x00FF))
     signcalc(cpu, cpu.result)
@@ -716,6 +713,7 @@ function inc(cpu)
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
     putvalue(cpu, cpu.result)
+    cpu.result
 end
 
 function inx(cpu)
@@ -780,11 +778,9 @@ function lsr(cpu, reuse_value = false)
         cpu.value = getvalue(cpu)
     end
     cpu.result = cpu.value >> 1
-   
     setcarryif(cpu, (cpu.value & 0x1) != 0)
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     putvalue(cpu, cpu.result)
 end
 
@@ -810,10 +806,8 @@ function ora(cpu, reuse_value = false)
         cpu.value = getvalue(cpu)
     end
     cpu.result = UInt16(cpu.a) | cpu.value
-   
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     saveaccum(cpu, cpu.result)
 end
 
@@ -837,11 +831,9 @@ function rol(cpu)
     cpu.value = getvalue(cpu)
     FAKE_COMPAT && putvalue(cpu, cpu.value)
     cpu.result = (cpu.value << 1) | (cpu.status & FLAG_CARRY)
-   
     carrycalc(cpu, cpu.result)
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     putvalue(cpu, cpu.result)
 end
 
@@ -851,12 +843,11 @@ function ror(cpu, reuse_value = false)
     end
     FAKE_COMPAT && putvalue(cpu, cpu.value)
     cpu.result = (cpu.value >> 1) | ((cpu.status & FLAG_CARRY) << 7)
-   
     setcarryif(cpu, (cpu.value & 1) != 0)
     zerocalc(cpu, cpu.result)
     signcalc(cpu, cpu.result)
-   
     putvalue(cpu, cpu.result)
+    cpu.result
 end
 
 function rti(cpu)
@@ -1066,8 +1057,7 @@ function dcp(cpu)
 end
 
 function isc(cpu)
-    inc(cpu)
-    cpu.value = cpu.result
+    cpu.value = inc(cpu)
     sbc(cpu, true)
 end
 
@@ -1100,8 +1090,7 @@ function rla(cpu)
 end
 
 function rra(cpu)
-    ror(cpu)
-    cpu.value = cpu.result
+    cpu.value = ror(cpu)
     adc(cpu, true)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
