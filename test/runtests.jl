@@ -56,7 +56,7 @@ using Test
 using Printf
 using Fake6502
 using Fake6502: rhex, Fake6502m, NewMachine, Machine
-import .Fake6502m: Cpu, step6502, read6502, write6502, addrsyms, opsyms, FLAG_DECIMAL
+import .Fake6502m: Cpu, step6502, read6502, write6502, addrsyms, opsyms, FLAG_DECIMAL, Temps
 
 const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp, :s, :s), (:status, :p, :flags))
 
@@ -186,8 +186,7 @@ function run_data_test(machine::Cpu, test, file, number)
     for (addr, value) in test.initial.ram
         machine.memory[addr + 1] = value
     end
-    machine.clockticks6502 = 0
-    Fake6502m.step6502(machine)
+    temps = Fake6502m.step6502(machine, Temps())
     errs = []
     cycles = [CYCLES...]
     for (new, std) in REGISTERS
@@ -210,9 +209,9 @@ function run_data_test(machine::Cpu, test, file, number)
         extra = setdiff(cycles, test.cycles)
         !isempty(extra) && push!(errs, "Extra activity: $(cyclestr(extra))")
         !isempty(missing) && push!(errs, "Missing activity: $(cyclestr(missing))")
-    elseif CYCLE_ACCURACY == :counts && machine.clockticks6502 != length(test.cycles)
+    elseif CYCLE_ACCURACY == :counts && temps.clockticks6502 != length(test.cycles)
         op = machine.opcode + 1
-        @error "$file:$number:test $(test.name) ($(opsyms[op]) $(addrsyms[op])) WARNING: clock ticks $(machine.clockticks6502) != $(length(test.cycles))"
+        @error "$file:$number:test $(test.name) ($(opsyms[op]) $(addrsyms[op])) WARNING: clock ticks $(temps.clockticks6502) != $(length(test.cycles))"
     end
     if !isempty(errs)
         local op = first([val for (addr, val) in test.initial.ram if addr == test.initial.pc])
@@ -263,7 +262,7 @@ const ILLEGAL = [
     0xE2, 0xE3, 0xFF, 0xE7, 0xFF, 0xEB, 0xEC, 0xEF,
     0xF2, 0xF3, 0xF4, 0xF7, 0xFA, 0xFB, 0xFC, 0xFF,
 ]
-const DONE = 0x00:0xE2
+const DONE = 0x00:0x1C
 const SKIP = [0x10]
 
 function runtests(dir; mode=:data)
@@ -271,7 +270,7 @@ function runtests(dir; mode=:data)
     machine = Cpu(; user_data = TestCpu())
     for inst in 0x00:0xFF
         #inst ∈ ILLEGAL && continue
-        #inst ∈ DONE && continue
+        inst ∈ DONE && continue
         #inst ∈ SKIP && continue
         runtests(machine, dir, inst; mode)
     end

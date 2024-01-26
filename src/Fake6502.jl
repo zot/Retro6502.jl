@@ -1,6 +1,5 @@
 module Fake6502
 using Printf
-#using ProfileView
 #using ProfileCanvas
 
 export reset, step
@@ -12,23 +11,27 @@ const EDIR=joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
 
 include("emu.jl")
-import .Fake6502m: Cpu
+import .Fake6502m: Cpu, Temps, setticks, ticks
 include("base.jl")
 include("fakes.jl")
 include("c64.jl")
 
-run2(mach::Machine, sym::Symbol, max_ticks::Int64) = run2(mach, mach.labels[sym], max_ticks)
-run2(mach::Machine, addr::Addr, max_ticks::Int64) = run2(mach.newcpu, addr, max_ticks)
-function run2(cpu::Cpu, addr::Addr, max_ticks::Int64)
+run2(mach::Machine, temps::Temps, sym::Symbol, max_ticks::Int64) =
+    run2(mach, temps, mach.labels[sym], max_ticks)
+run2(mach::Machine, temps::Temps, addr::Addr, max_ticks::Int64) =
+    run2(mach.newcpu, temps, addr, max_ticks)
+function run2(cpu::Cpu, temps::Temps, addr::Addr, max_ticks::Int64)
     cpu.pc = addr.value - 1
+    @printf "pc: %04x opcode: %02x\n" cpu.pc Fake6502m.read6502(cpu, cpu.pc)
     cpu.sp = 0xfe
     local original_max = max_ticks
     local m::Int64 = max_ticks
+    temps = setticks(cpu, temps, 0)
     #println("max_ticks type: ", typeof(max_ticks))
-    while cpu.clockticks6502 < m
-        m -= Fake6502m.inner_step6502(cpu)
+    while ticks(cpu, temps) < m
+        temps = Fake6502m.inner_step6502(cpu, temps)
     end
-    return cpu.clockticks6502 + original_max - m
+    return temps, ticks(cpu, temps) + original_max - m
 end
 
 function init_speed()
@@ -40,22 +43,26 @@ end
 
 function speed_test(; profile = :none)
     global mach = init_speed()
+    local ticks
+    local temps = Temps(mach.newcpu)
     println("warm up")
-    run2(mach, :endless, 10000)
-    run2(mach, :endless, 10000)
-    run2(mach, :endless, 10000)
+    run2(mach, temps, :endless, 10000)
+    run2(mach, temps, :endless, 10000)
+    run2(mach, temps, :endless, 10000)
     println("running benchmark")
     if profile == :alloc
         error("No profiler installed")
-#        @profview_allocs run2(mach, :endless, 10000000)
+        #@profview_allocs run2(mach, temps, :endless, 100000000)
     elseif profile == :cpu
         error("No profiler installed")
-#        @profview run2(mach, :endless, 10000000)
+        #@profview run2(mach, temps, :endless, 100000000)
     else
-        start = time()
-        local ticks = run2(mach, :endless, 1000000)
-        finish = time()
-        println("$ticks clock cycles took $((finish - start) * 1000) milliseconds")
+        for i in 1:10
+            start = time()
+            temps, ticks = run2(mach, temps, :endless, 1000000)
+            finish = time()
+            println("$ticks clock cycles took $((finish - start) * 1000) milliseconds")
+        end
     end
 end
 

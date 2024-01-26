@@ -148,6 +148,7 @@ withptr(::Accessor{T}, ::Ptr{U}) where {T, U} =
 
 mutable struct Machine{T}
     newcpu::Cpu{T}
+    temps::Temps
     ctx::Ptr{Context}
     cpu::Accessor{Context}
     emu::Accessor{Context}
@@ -403,7 +404,7 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     machine.properties = Dict{Any, Any}()
     machine.verbose = false
     machine.ctx = @ccall $initfunc(machine.c_read_mem::Ptr{Cvoid}, machine.c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
-    Fake6502m.reset6502(machine.newcpu)
+    machine.temps = Fake6502m.reset6502(machine.newcpu, Temps(machine.newcpu))
     println("CTX ", machine.ctx)
     machine.cpu = Accessor(machine.ctx).cpu
     machine.emu = Accessor(machine.ctx).emu
@@ -486,7 +487,7 @@ end
 function reset(mach::Machine)
     resetfunc = mach.c_reset
     @ccall $resetfunc(mach.ctx::Ptr{Context})::Cvoid
-    Fake6502m.reset6502(mach.newcpu)
+    mach.temps = Fake6502m.reset6502(mach.newcpu, mach.temps)
     mach.cpu.flags = 0
     mach.cpu.a = 0
     mach.cpu.x = 0

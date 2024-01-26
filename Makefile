@@ -21,7 +21,10 @@ C/speedtest: default
 	$(CC) $(SPEEDFLAGS) -o C/speedtest C/speedtest.c C/fake6502.c
 
 speed: default examples/speed.prg FRC
-	julia --project=. -e 'include("src/Fake6502.jl"); Fake6502.speed_test()'
+	julia +release -O3 --project=. -e 'include("src/Fake6502.jl"); Fake6502.speed_test()'
+
+speed2: default examples/speed.prg FRC
+	julia +release --project=. -e 'include("src/Fake6502.jl"); Fake6502.speed_test()'
 
 %.prg: %.tass
 	64tass --vice-labels -a --cbm-prg -o $@ -L $(patsubst %.prg,%.list,$@) -l $(patsubst %.prg,%.labels,$@) $<

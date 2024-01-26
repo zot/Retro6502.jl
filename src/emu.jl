@@ -158,9 +158,10 @@ const K = 1024
     clockticks6502::Int64 = 0
     oldpc::UInt16 = 0x0000
     # addressing
-    #ea::UInt16 = 0x0000
+    ea::UInt16 = 0x0000
     reladdr::UInt16 = 0x0000
     # temporary values
+    result::UInt8 = 0x00
     opcode::UInt8 = 0x00
     # making these booleans is slower than using UInt8
     penaltyop::UInt8 = 0x00
@@ -171,8 +172,16 @@ const K = 1024
 end
 
 @kwdef struct Temps
-    ea::UInt16 = 0x0000
-    result::UInt16 = 0x0000
+    # registers
+    #pc::UInt16 = 0x0000
+    #status::UInt8 = 0x00
+    #clockticks6502::Int64 = 0
+    # addressing
+    #ea::UInt16 = 0x0000
+    #memory::Vector{UInt8} = zeros(UInt8, 64K)
+    # temps
+    #opcode::UInt8 = 0x00
+    #result::UInt16 = 0x0000
     #reladdr::UInt16 = 0x0000
     ## temporary values
     #opcode::UInt8 = 0x00
@@ -181,7 +190,35 @@ end
     #penaltyaddr::UInt8 = 0x00
 end
 
-Temps(t::Temps; ea = t.ea, result = t.result) = Temps(; ea, result)
+ticks(cpu, ::Temps) = cpu.clockticks6502
+
+function setticks(cpu, temps::Temps, ticks)
+    cpu.clockticks6502 = ticks
+    temps
+end
+
+function addticks(cpu, temps::Temps, ticks)
+    cpu.clockticks6502 += ticks
+    temps
+end
+
+#penaltyddr(temps::Temps) = Temps(temps; penaltyaddr = 0x01)
+#penaltyop(temps::Temps) = Temps(temps; penaltyop = 0x01)
+
+#add(t::Temps; clockticks6502 = 0) = Temps(t; clockticks6502 = t.clockticks6502 + clockticks6502)
+
+#Temps(t::Temps; ea = t.ea, result = t.result, clockticks6502 = t.clockticks6502) =
+#    Temps(t; ea, result, clockticks6502)
+#Temps(t::Temps; ea = t.ea, opcode = t.opcode, penaltyop = t.penaltyop, penaltyaddr = t.penaltyaddr) =
+#    Temps(t; ea, opcode, penaltyop, penaltyaddr)
+#Temps(t::Temps; ea = t.ea, opcode = t.opcode, memory = t.memory) = Temps(t; ea, opcode, memory)
+#Temps(t::Temps; ea = t.ea, opcode = t.opcode) = Temps(t; ea, opcode)
+#Temps(t::Temps; ea = t.ea) = Temps(t; ea)
+Temps(t::Temps; ea = nothing) = t
+#Temps(t::Temps) = t
+
+#Temps(cpu::Cpu) = Temps(; memory = cpu.memory)
+Temps(::Cpu) = Temps()
 
 function copy(src::Cpu{T}) where {T}
     new = Cpu{T}(; src.user_data)
@@ -197,15 +234,15 @@ function copy(src::Cpu, dst::Cpu)
      dst.sp = src.sp
      dst.status = src.status
      dst.instructions = src.instructions
-     dst.clockticks6502 = src.clockticks6502
+     #dst.clockticks6502 = src.clockticks6502
      dst.oldpc = src.oldpc
      dst.ea = src.ea
      dst.reladdr = src.reladdr
-     dst.value = src.value
-     dst.result = src.result
+     #dst.value = src.value
+     #dst.result = src.result
      dst.opcode = src.opcode
-     dst.penaltyop = src.penaltyop
-     dst.penaltyaddr = src.penaltyaddr
+     #dst.penaltyop = src.penaltyop
+     #dst.penaltyaddr = src.penaltyaddr
      dst.memory = src.memory
 end
 
@@ -286,10 +323,11 @@ function setoverflowif(cpu, condition::Bool)
 end
 
 #/*flag calculation */
-zerocalc(cpu, n::UInt8) = setzeroif(cpu, n == 0)
-zerocalc(cpu, n::UInt16) = setzeroif(cpu, (n & 0x00FF) == 0)
-signcalc(cpu, n) = setsignif(cpu, (n & 0x0080) != 0)
-carrycalc(cpu, n) = setcarryif(cpu, (n & 0xFF00) != 0)
+zerocalc(cpu, n::UInt8) = setzeroif(cpu, n == 0x00)
+zerocalc(cpu, n::UInt16) = setzeroif(cpu, (n & 0x00FF) == 0x0000)
+signcalc(cpu, n::UInt16) = setsignif(cpu, (n & 0x0080) != 0x0000)
+signcalc(cpu, n::UInt8) = setsignif(cpu, (n & 0x80) != 0x00)
+carrycalc(cpu, n::UInt16) = setcarryif(cpu, (n & 0xFF00) != 0x0000)
 overflowcalc(cpu, result, accumulator, memory) =
     setoverflowif(cpu, ((result ⊻ UInt16(accumulator)) & ((result ⊻ memory) & SIGN)) != 0)
 
@@ -301,8 +339,8 @@ function push_6502_16(cpu, pushval::UInt16)
 end
 
 function push_6502_8(cpu, pushval::UInt8)
-    write6502(cpu, BASE_STACK + cpu.sp, pushval)
-    cpu.sp -= 0x1
+    write6502(cpu, BASE_STACK + UInt16(cpu.sp), pushval)
+    cpu.sp -= 0x01
 end
 
 function pull_6502_16(cpu)
@@ -321,7 +359,7 @@ function mem_6502_read16(cpu, addr::UInt16)
         (UInt16(read6502(cpu, addr + 0x1)) << 8)
 end
 
-function reset6502(cpu)
+function reset6502(cpu, temps)
 #	/*
 #	    pc = (ushort)read6502(0xFFFC) | ((ushort)read6502(0xFFFD) << 8);
 #	    a = 0;
@@ -336,69 +374,79 @@ function reset6502(cpu)
     read6502(cpu, 0x0100)
     read6502(cpu, 0x01ff)
     read6502(cpu, 0x01fe)
-    cpu.clockticks6502 = 0
     cpu.instructions = 0
     cpu.pc = mem_6502_read16(cpu, 0xfffc)
     cpu.sp = 0xfd
     cpu.status |= FLAG_CONSTANT | FLAG_INTERRUPT
+    setticks(cpu, temps, 0)
 end
 
 #/*addressing mode functions, calculates effective addresses*/
-function imp(cpu)
+function imp(cpu, temps)
     TEST_COMPAT && read6502(cpu, cpu.pc)
-    Temps()
+    temps
 end
 
 #/*addressing mode functions, calculates effective addresses*/
-function acc(cpu)
+function acc(cpu, temps)
     TEST_COMPAT && read6502(cpu, cpu.pc)
-    Temps()
+    temps
 end
 
 #/*addressing mode functions, calculates effective addresses*/
-function imm(cpu)
-    local ea = cpu.pc
+function imm(cpu, temps)
+    #local ea = cpu.pc
+    cpu.ea = cpu.pc
     cpu.pc += 0x1
-    Temps(; ea)
+    #Temps(temps; ea)
+    temps
 end
 
-function zp(cpu) # /*zero-page*/
-    local ea = UInt16(read6502(cpu, cpu.pc))
+function zp(cpu, temps) # /*zero-page*/
+    #local ea = UInt16(read6502(cpu, cpu.pc))
+    cpu.ea = UInt16(read6502(cpu, cpu.pc))
     cpu.pc += 0x1
-    Temps(; ea)
+    #Temps(temps; ea)
+    temps
 end
 
-function zpx(cpu) # /*zero-page,X*/
+function zpx(cpu, temps) # /*zero-page,X*/
     local zp = UInt16(read6502(cpu, cpu.pc))
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
-    local ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
+    #local ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
+    cpu.ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
     cpu.pc += 0x1
-    Temps(; ea)
+    #Temps(temps; ea)
+    temps
 end
 
-function zpy(cpu) # /*zero-page,Y*/
-    local ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
+function zpy(cpu, temps) # /*zero-page,Y*/
+    #local ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
+    cpu.ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
     cpu.pc += 0x1
-    Temps(; ea)
+    #Temps(temps; ea)
+    temps
 end
 
-function rel(cpu) #/*relative for branch ops (8-bit immediate value, sign-extended)*/
+function rel(cpu, temps) #/*relative for branch ops (8-bit immediate value, sign-extended)*/
     cpu.reladdr = UInt16(read6502(cpu, cpu.pc))
     cpu.pc += 0x1
-    if (cpu.reladdr & SIGN) != 0
+    if (cpu.reladdr & SIGN) != 0x0000
         cpu.reladdr |= 0xFF00
     end
-    Temps()
+    temps
 end
 
-function abso(cpu) #/*absolute*/
-    local ea  =UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+function abso(cpu, temps) #/*absolute*/
+    #local ea  =UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
     cpu.pc += 0x2
-    Temps(; ea)
+    #Temps(temps; ea)
+    temps
 end
 
 
-function absx(cpu) #/*absolute,X*/
+function absx(cpu, temps) #/*absolute,X*/
     local startpage
     local addr = UInt16(read6502(cpu, cpu.pc))
     local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
@@ -407,12 +455,14 @@ function absx(cpu) #/*absolute,X*/
     if (startpage != (ea & 0xFF00)) #/*one cycle penlty for page-crossing on some opcodes*/
         TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
         cpu.penaltyaddr = 0x1
+        #temps = penaltyaddr(temps)
     end
     cpu.pc += 0x2
-    Temps(; ea)
+    cpu.ea=  ea
+    Temps(temps; ea)
 end
 
-function absy(cpu) # /*absolute,Y*/
+function absy(cpu, temps) # /*absolute,Y*/
     local startpage
     local addr = UInt16(read6502(cpu, cpu.pc))
     local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
@@ -421,30 +471,37 @@ function absy(cpu) # /*absolute,Y*/
     if (startpage != (ea & 0xFF00)) # /*one cycle penlty for page-crossing on some opcodes*/
         TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
         cpu.penaltyaddr = 0x1
+        #temps = penaltyaddr(temps)
     end
     cpu.pc += 0x2;
-    Temps(; ea)
+    cpu.ea = ea
+    #Temps(temps; ea)
+    temps
 end
 
-function ind(cpu) # /*indirect*/
+function ind(cpu, temps) # /*indirect*/
     local eahelp, eahelp2
     eahelp = UInt16(read6502(cpu, cpu.pc)) | UInt16(UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
     eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*replicate 6502 page-boundary wraparound bug*/
-    local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
+    #local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
+    cpu.ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
     cpu.pc += 0x2;
-    Temps(; ea)
+    #Temps(temps; ea)
+    temps
 end
 
-function indx(cpu) # /* (indirect,X)*/
+function indx(cpu, temps) # /* (indirect,X)*/
     local zp = UInt16(read6502(cpu, cpu.pc))
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
     local eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
     cpu.pc += 0x1
-    local ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
-    Temps(; ea)
+    #local ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
+    cpu.ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
+    #Temps(temps; ea)
+    temps
 end
 
-function indy(cpu) # /* (indirect),Y*/
+function indy(cpu, temps) # /* (indirect),Y*/
     local eahelp = UInt16(read6502(cpu, cpu.pc));
     cpu.pc += 0x1
     local eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*zero-page wraparound*/
@@ -453,26 +510,34 @@ function indy(cpu) # /* (indirect),Y*/
     ea += UInt16(cpu.y)
     if startpage != (ea & 0xFF00) # /*one cycle penlty for page-crossing on some opcodes*/
         cpu.penaltyaddr = 0x1
+        #temps = penaltyaddr(temps)
         TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
     end
-    Temps(; ea)
+    cpu.ea = ea
+    #Temps(temps; ea)
+    temps
 end
 
 function getvalue(cpu, temps)
     is_acc(cpu.opcode) && return UInt16(cpu.a)
-    return UInt16(read6502(cpu, temps.ea));
+    #is_acc(temps.opcode) && return UInt16(cpu.a)
+    return UInt16(read6502(cpu, cpu.ea));
+    #return UInt16(read6502(cpu, temps.ea));
 end
 
 function getvalue16(cpu, temps)
-    return UInt16(read6502(cpu, temps.ea)) | (UInt16(read6502(cpu, UInt16(temps.ea+0x1))) << 8);
+    return UInt16(read6502(cpu, cpu.ea)) | (UInt16(read6502(cpu, UInt16(cpu.ea+0x1))) << 8);
+    #return UInt16(read6502(cpu, temps.ea)) | (UInt16(read6502(cpu, UInt16(temps.ea+0x1))) << 8);
 end
 
 function putvalue(cpu, temps, saveval::UInt16)
     if is_acc(cpu.opcode)
+    #if is_acc(temps.opcode)
         # addr mode is acc
         cpu.a = UInt8(saveval & 0x00FF);
     else
-        write6502(cpu, temps.ea, UInt8(saveval & 0x00FF))
+        write6502(cpu, cpu.ea, UInt8(saveval & 0x00FF))
+        #write6502(cpu, temps.ea, UInt8(saveval & 0x00FF))
     end
 end
 
@@ -486,6 +551,7 @@ function adc_non_nes(cpu, temps, value)
     (cpu.status & FLAG_DECIMAL) == 0 &&
         return adc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local A::UInt8 = cpu.a
     local B::UInt8 = value
     local C::UInt8 = cpu.status & 0x0001
@@ -509,6 +575,7 @@ end
 
 function adc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local result = UInt16(cpu.a) + value + UInt16(cpu.status & FLAG_CARRY)
     carrycalc(cpu, result)
     zerocalc(cpu, result)
@@ -533,6 +600,7 @@ end
 
 function and(cpu, temps)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     value = getvalue(cpu, temps)
     local result = UInt16(cpu.a) & value
     zerocalc(cpu, result)
@@ -544,6 +612,7 @@ end
 function asl(cpu, temps)
     local value = getvalue(cpu, temps)
     TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc && putvalue(cpu, temps, value)
+    #TEST_COMPAT && addrsyms[temps.opcode + 1] != :acc && putvalue(cpu, temps, value)
     local result = value << 1
     carrycalc(cpu, result)
     zerocalc(cpu, result)
@@ -556,14 +625,14 @@ function check_cross_page_boundary(cpu, temps)
     TEST_COMPAT &&
         read6502(cpu, cpu.oldpc)
     if cpu.oldpc & 0xFF00 != cpu.pc & 0xFF00
-        cpu.clockticks6502 += 2 # /*check if jump crossed a page boundary*/
+        # /*check if jump crossed a page boundary*/
         if TEST_COMPAT
             read6502(cpu, (cpu.oldpc & 0xFF00) | (cpu.pc & 0x00FF))
         end
+        addticks(cpu, temps, 2)
     else
-        cpu.clockticks6502 += 1
+        addticks(cpu, temps, 1)
     end
-    temps
 end
 
 function bcc(cpu, temps)
@@ -686,6 +755,7 @@ end
 
 function cmp(cpu, temps)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local value = getvalue(cpu, temps)
     local result = UInt16(cpu.a) - value
     setcarryif(cpu, cpu.a >= UInt8(value & 0x00FF))
@@ -739,6 +809,7 @@ end
 
 function eor(cpu, temps)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local value = getvalue(cpu, temps);
     local result = UInt16(cpu.a) ⊻ value;
     zerocalc(cpu, result);
@@ -753,7 +824,8 @@ function inc(cpu, temps)
     zerocalc(cpu, result)
     signcalc(cpu, result)
     putvalue(cpu, temps, result)
-    Temps(temps; result)
+    cpu.result = result
+    temps
 end
 
 function inx(cpu, temps)
@@ -771,13 +843,13 @@ function iny(cpu, temps)
 end
 
 function jam(cpu, temps)
-    cpu.clockticks6502 += 1
     cpu.pc -= 0x1
-    temps
+    addticks(cpu, temps, 1)
 end
 
 function jmp(cpu, temps)
-    cpu.pc = temps.ea
+    cpu.pc = cpu.ea
+    #cpu.pc = temps.ea
     temps
 end
 
@@ -786,16 +858,20 @@ function jsr(cpu, temps)
     TEST_COMPAT && (cpu.pc - 0x0001) != 0x0100 | oldsp && # not in page zero
         read6502(cpu, 0x0100 | oldsp)
     push_6502_16(cpu, cpu.pc - 0x1)
-    local ea = temps.ea
+    local ea = cpu.ea
+    #local ea = temps.ea
     if (cpu.pc - 0x0001) == 0x0100 | oldsp # in page zero
         ea = (ea & 0xFF) | (UInt16(read6502(cpu, 0x0100 | oldsp)) << 8)
+        cpu.ea = ea
     end
     cpu.pc = ea
-    Temps(temps)
+    #Temps(temps; ea)
+    temps
 end
 
 function lda(cpu, temps)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local value = getvalue(cpu, temps)
     cpu.a = UInt8(value & 0x00FF)
     zerocalc(cpu, cpu.a)
@@ -805,6 +881,7 @@ end
 
 function ldx(cpu, temps)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local value = getvalue(cpu, temps)
     cpu.x = UInt8(value & 0x00FF)
    
@@ -815,6 +892,7 @@ end
 
 function ldy(cpu, temps)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local value = getvalue(cpu, temps)
     cpu.y = UInt8(value & 0x00FF)
    
@@ -835,13 +913,16 @@ end
 
 function nop(cpu, temps)
     local op = cpu.opcode
+    #local op = temps.opcode
     if op == 0x1C || op == 0x3C || op == 0x5C || op == 0x7C || op == 0xDC || op == 0xFC
         cpu.penaltyop = 0x1
+        #temps = penaltyop(temps)
     end
     if TEST_COMPAT
         addr = addrsyms[op + 1]
         if addr == :absx || addr == :absy
             cpu.penaltyaddr == 0x0 &&
+            #temps.penaltyaddr == 0x0 &&
                 getvalue(cpu, temps)
         elseif addr != :imm && addr != :abso && addr != :imp
             getvalue(cpu, temps)
@@ -852,6 +933,7 @@ end
 
 function ora(cpu, temps)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local value = getvalue(cpu, temps)
     local result = UInt16(cpu.a) | value
     zerocalc(cpu, result)
@@ -923,6 +1005,7 @@ function sbc_non_nes(cpu, temps, value)
     isstatusclear(cpu, FLAG_DECIMAL) &&
         return sbc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     local A::Int16 = Int16(cpu.a)
     local B::UInt8 = value & 0xFF
     local C::UInt8 = cpu.status & FLAG_CARRY
@@ -946,6 +1029,7 @@ end
 
 function sbc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
+    #temps = penaltyop(temps)
     value ⊻= 0x00FF
     local result = UInt16(cpu.a) + value + UInt16(cpu.status & FLAG_CARRY)
     zerocalc(cpu, result)
@@ -1114,10 +1198,7 @@ function sax(cpu, temps)
     temps = sta(cpu, temps)
     temps = stx(cpu, temps)
     putvalue(cpu, temps, UInt16(cpu.a & cpu.x))
-    if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
-        cpu.clockticks6502 -= 1
-    end
-    temps
+    checkpenalty(cpu, temps)
 end
 
 function sbx(cpu, temps)
@@ -1134,16 +1215,12 @@ end
 function dcp(cpu, temps)
     temps = dec(cpu, temps)
     temps = cmp(cpu, temps)
-    if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
-        cpu.clockticks6502 -= 1
-    end
-    temps
+    checkpenalty(cpu, temps)
 end
 
 function isc(cpu, temps)
-    local value
     temps = inc(cpu, temps)
-    sbc(cpu, temps, temps.result)
+    sbc(cpu, temps, cpu.result)
 end
 
 function slo(cpu, temps)
@@ -1153,12 +1230,9 @@ function slo(cpu, temps)
     local N = A & SIGN
     local Z = A == 0x00 ? FLAG_ZERO : 0
     local C = UInt8(M >> 8)
-    if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
-        cpu.clockticks6502 -= 1
-    end
     cpu.a = A
     setstatus(cpu, FLAG_SIGN | FLAG_ZERO | FLAG_CARRY, N | Z | C)
-    temps
+    checkpenalty(cpu, temps)
 end
 
 function rla(cpu, temps)
@@ -1168,51 +1242,55 @@ function rla(cpu, temps)
     local N = A & SIGN
     local Z = A == 0x00 ? FLAG_ZERO : 0
     local C = UInt8(M >> 8)
-    if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
-        cpu.clockticks6502 -= 1
-    end
     cpu.a = A
     setstatus(cpu, FLAG_SIGN | FLAG_ZERO | FLAG_CARRY, N | Z | C)
-    temps
+    checkpenalty(cpu, temps)
 end
 
 function rra(cpu, temps)
     local value
     (value, temps) = ror(cpu, temps)
     temps = adc(cpu, temps, value)
-    if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
-        cpu.clockticks6502 -= 1
-    end
-    temps
+    checkpenalty(cpu, temps)
 end
 
 function sha(cpu, temps)
-    putvalue(cpu, temps, cpu.a & cpu.x & ((temps.ea >> 8) + 0x1))
+    putvalue(cpu, temps, cpu.a & cpu.x & ((cpu.ea >> 8) + 0x1))
+    #putvalue(cpu, temps, cpu.a & cpu.x & ((temps.ea >> 8) + 0x1))
     temps
 end
 
 function shx(cpu, temps)
-    putvalue(cpu, temps, cpu.x & ((temps.ea >> 8) + 0x1))
+    putvalue(cpu, temps, cpu.x & ((cpu.ea >> 8) + 0x1))
+    #putvalue(cpu, temps, cpu.x & ((temps.ea >> 8) + 0x1))
     temps
 end
 
 function shy(cpu, temps)
-    putvalue(cpu, temps, cpu.y & ((temps.ea >> 8) + 0x1))
+    putvalue(cpu, temps, cpu.y & ((cpu.ea >> 8) + 0x1))
+    #putvalue(cpu, temps, cpu.y & ((temps.ea >> 8) + 0x1))
     temps
+end
+
+function checkpenalty(cpu, temps)
+    if cpu.penaltyop == 0 || cpu.penaltyaddr == 0
+    #if temps.penaltyop != 0 && temps.penaltyaddr != 0
+        temps
+    else
+        addticks(cpu, temps, -1)
+    end
 end
 
 function sre(cpu, temps)
     temps = lsr(cpu, temps)
     temps = eor(cpu, temps)
-    if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
-        cpu.clockticks6502 -= 1
-    end
-    temps
+    checkpenalty(cpu, temps)
 end
 
 function tas(cpu, temps)
     cpu.sp = cpu.a & cpu.x
-    putvalue(cpu, temps, cpu.a & cpu.x & ((temps.ea >> 8) + 0x1))
+    putvalue(cpu, temps, cpu.a & cpu.x & ((cpu.ea >> 8) + 0x1))
+    #putvalue(cpu, temps, cpu.a & cpu.x & ((temps.ea >> 8) + 0x1))
     temps
 end
 
@@ -1266,72 +1344,74 @@ is_imm(op::UInt8) =
     (op & 0x90 == 0x80 && op & 0x0D == 0x00) ||
     (op & 0x10 == 0x00 && (op & 0x0F == 0x09 || op & 0x0F == 0x0B))
 
-function address(c) #::Cpu)
-    o = c.opcode
-    if     o==0x00  imp(c) elseif o==0x01  indx(c) elseif o==0x02  imp(c) elseif o==0x03 indx(c)
-    elseif o==0x04   zp(c) elseif o==0x05    zp(c) elseif o==0x06   zp(c) elseif o==0x07   zp(c)
-    elseif o==0x08  imp(c) elseif o==0x09   imm(c) elseif o==0x0A  acc(c) elseif o==0x0B  imm(c)
-    elseif o==0x0C abso(c) elseif o==0x0D  abso(c) elseif o==0x0E abso(c) elseif o==0x0F abso(c)
-    elseif o==0x10  rel(c) elseif o==0x11  indy(c) elseif o==0x12  imp(c) elseif o==0x13 indy(c)
-    elseif o==0x14  zpx(c) elseif o==0x15   zpx(c) elseif o==0x16  zpx(c) elseif o==0x17  zpx(c)
-    elseif o==0x18  imp(c) elseif o==0x19  absy(c) elseif o==0x1A  imp(c) elseif o==0x1B absy(c)
-    elseif o==0x1C absx(c) elseif o==0x1D  absx(c) elseif o==0x1E absx(c) elseif o==0x1F absx(c)
-    elseif o==0x20 abso(c) elseif o==0x21  indx(c) elseif o==0x22  imp(c) elseif o==0x23 indx(c)
-    elseif o==0x24   zp(c) elseif o==0x25    zp(c) elseif o==0x26   zp(c) elseif o==0x27   zp(c)
-    elseif o==0x28  imp(c) elseif o==0x29   imm(c) elseif o==0x2A  acc(c) elseif o==0x2B  imm(c)
-    elseif o==0x2C abso(c) elseif o==0x2D  abso(c) elseif o==0x2E abso(c) elseif o==0x2F abso(c)
-    elseif o==0x30  rel(c) elseif o==0x31  indy(c) elseif o==0x32  imp(c) elseif o==0x33 indy(c)
-    elseif o==0x34  zpx(c) elseif o==0x35   zpx(c) elseif o==0x36  zpx(c) elseif o==0x37  zpx(c)
-    elseif o==0x38  imp(c) elseif o==0x39  absy(c) elseif o==0x3A  imp(c) elseif o==0x3B absy(c)
-    elseif o==0x3C absx(c) elseif o==0x3D  absx(c) elseif o==0x3E absx(c) elseif o==0x3F absx(c)
-    elseif o==0x40  imp(c) elseif o==0x41  indx(c) elseif o==0x42  imp(c) elseif o==0x43 indx(c)
-    elseif o==0x44   zp(c) elseif o==0x45    zp(c) elseif o==0x46   zp(c) elseif o==0x47   zp(c)
-    elseif o==0x48  imp(c) elseif o==0x49   imm(c) elseif o==0x4A  acc(c) elseif o==0x4B  imm(c)
-    elseif o==0x4C abso(c) elseif o==0x4D  abso(c) elseif o==0x4E abso(c) elseif o==0x4F abso(c)
-    elseif o==0x50  rel(c) elseif o==0x51  indy(c) elseif o==0x52  imp(c) elseif o==0x53 indy(c)
-    elseif o==0x54  zpx(c) elseif o==0x55   zpx(c) elseif o==0x56  zpx(c) elseif o==0x57  zpx(c)
-    elseif o==0x58  imp(c) elseif o==0x59  absy(c) elseif o==0x5A  imp(c) elseif o==0x5B absy(c)
-    elseif o==0x5C absx(c) elseif o==0x5D  absx(c) elseif o==0x5E absx(c) elseif o==0x5F absx(c)
-    elseif o==0x60  imp(c) elseif o==0x61  indx(c) elseif o==0x62  imp(c) elseif o==0x63 indx(c)
-    elseif o==0x64   zp(c) elseif o==0x65    zp(c) elseif o==0x66   zp(c) elseif o==0x67   zp(c)
-    elseif o==0x68  imp(c) elseif o==0x69   imm(c) elseif o==0x6A  acc(c) elseif o==0x6B  imm(c)
-    elseif o==0x6C  ind(c) elseif o==0x6D  abso(c) elseif o==0x6E abso(c) elseif o==0x6F abso(c)
-    elseif o==0x70  rel(c) elseif o==0x71  indy(c) elseif o==0x72  imp(c) elseif o==0x73 indy(c)
-    elseif o==0x74  zpx(c) elseif o==0x75   zpx(c) elseif o==0x76  zpx(c) elseif o==0x77  zpx(c)
-    elseif o==0x78  imp(c) elseif o==0x79  absy(c) elseif o==0x7A  imp(c) elseif o==0x7B absy(c)
-    elseif o==0x7C absx(c) elseif o==0x7D  absx(c) elseif o==0x7E absx(c) elseif o==0x7F absx(c)
-    elseif o==0x80  imm(c) elseif o==0x81  indx(c) elseif o==0x82  imm(c) elseif o==0x83 indx(c)
-    elseif o==0x84   zp(c) elseif o==0x85    zp(c) elseif o==0x86   zp(c) elseif o==0x87   zp(c)
-    elseif o==0x88  imp(c) elseif o==0x89   imm(c) elseif o==0x8A  imp(c) elseif o==0x8B  imm(c)
-    elseif o==0x8C abso(c) elseif o==0x8D  abso(c) elseif o==0x8E abso(c) elseif o==0x8F abso(c)
-    elseif o==0x90  rel(c) elseif o==0x91  indy(c) elseif o==0x92  imp(c) elseif o==0x93 indy(c)
-    elseif o==0x94  zpx(c) elseif o==0x95   zpx(c) elseif o==0x96  zpy(c) elseif o==0x97  zpy(c)
-    elseif o==0x98  imp(c) elseif o==0x99  absy(c) elseif o==0x9A  imp(c) elseif o==0x9B absy(c)
-    elseif o==0x9C absx(c) elseif o==0x9D  absx(c) elseif o==0x9E absy(c) elseif o==0x9F absy(c)
-    elseif o==0xA0  imm(c) elseif o==0xA1  indx(c) elseif o==0xA2  imm(c) elseif o==0xA3 indx(c)
-    elseif o==0xA4   zp(c) elseif o==0xA5    zp(c) elseif o==0xA6   zp(c) elseif o==0xA7   zp(c)
-    elseif o==0xA8  imp(c) elseif o==0xA9   imm(c) elseif o==0xAA  imp(c) elseif o==0xAB  imm(c)
-    elseif o==0xAC abso(c) elseif o==0xAD  abso(c) elseif o==0xAE abso(c) elseif o==0xAF abso(c)
-    elseif o==0xB0  rel(c) elseif o==0xB1  indy(c) elseif o==0xB2  imp(c) elseif o==0xB3 indy(c)
-    elseif o==0xB4  zpx(c) elseif o==0xB5   zpx(c) elseif o==0xB6  zpy(c) elseif o==0xB7  zpy(c)
-    elseif o==0xB8  imp(c) elseif o==0xB9  absy(c) elseif o==0xBA  imp(c) elseif o==0xBB absy(c)
-    elseif o==0xBC absx(c) elseif o==0xBD  absx(c) elseif o==0xBE absy(c) elseif o==0xBF absy(c)
-    elseif o==0xC0  imm(c) elseif o==0xC1  indx(c) elseif o==0xC2  imm(c) elseif o==0xC3 indx(c)
-    elseif o==0xC4   zp(c) elseif o==0xC5    zp(c) elseif o==0xC6   zp(c) elseif o==0xC7   zp(c)
-    elseif o==0xC8  imp(c) elseif o==0xC9   imm(c) elseif o==0xCA  imp(c) elseif o==0xCB  imm(c)
-    elseif o==0xCC abso(c) elseif o==0xCD  abso(c) elseif o==0xCE abso(c) elseif o==0xCF abso(c)
-    elseif o==0xD0  rel(c) elseif o==0xD1  indy(c) elseif o==0xD2  imp(c) elseif o==0xD3 indy(c)
-    elseif o==0xD4  zpx(c) elseif o==0xD5   zpx(c) elseif o==0xD6  zpx(c) elseif o==0xD7  zpx(c)
-    elseif o==0xD8  imp(c) elseif o==0xD9  absy(c) elseif o==0xDA  imp(c) elseif o==0xDB absy(c)
-    elseif o==0xDC absx(c) elseif o==0xDD  absx(c) elseif o==0xDE absx(c) elseif o==0xDF absx(c)
-    elseif o==0xE0  imm(c) elseif o==0xE1  indx(c) elseif o==0xE2  imm(c) elseif o==0xE3 indx(c)
-    elseif o==0xE4   zp(c) elseif o==0xE5    zp(c) elseif o==0xE6   zp(c) elseif o==0xE7   zp(c)
-    elseif o==0xE8  imp(c) elseif o==0xE9   imm(c) elseif o==0xEA  imp(c) elseif o==0xEB  imm(c)
-    elseif o==0xEC abso(c) elseif o==0xED  abso(c) elseif o==0xEE abso(c) elseif o==0xEF abso(c)
-    elseif o==0xF0  rel(c) elseif o==0xF1  indy(c) elseif o==0xF2  imp(c) elseif o==0xF3 indy(c)
-    elseif o==0xF4  zpx(c) elseif o==0xF5   zpx(c) elseif o==0xF6  zpx(c) elseif o==0xF7  zpx(c)
-    elseif o==0xF8  imp(c) elseif o==0xF9  absy(c) elseif o==0xFA  imp(c) elseif o==0xFB absy(c)
-    elseif o==0xFC absx(c) elseif o==0xFD  absx(c) elseif o==0xFE absx(c) elseif o==0xFF absx(c)
+function address(c::Cpu, t::Temps)::Temps
+    local o = c.opcode
+    #o = t.opcode
+    #@printf "ADDR OPCODE: %02x\n" o
+    if     o==0x00  imp(c, t) elseif o==0x01  indx(c, t) elseif o==0x02  imp(c, t) elseif o==0x03 indx(c, t)
+    elseif o==0x04   zp(c, t) elseif o==0x05    zp(c, t) elseif o==0x06   zp(c, t) elseif o==0x07   zp(c, t)
+    elseif o==0x08  imp(c, t) elseif o==0x09   imm(c, t) elseif o==0x0A  acc(c, t) elseif o==0x0B  imm(c, t)
+    elseif o==0x0C abso(c, t) elseif o==0x0D  abso(c, t) elseif o==0x0E abso(c, t) elseif o==0x0F abso(c, t)
+    elseif o==0x10  rel(c, t) elseif o==0x11  indy(c, t) elseif o==0x12  imp(c, t) elseif o==0x13 indy(c, t)
+    elseif o==0x14  zpx(c, t) elseif o==0x15   zpx(c, t) elseif o==0x16  zpx(c, t) elseif o==0x17  zpx(c, t)
+    elseif o==0x18  imp(c, t) elseif o==0x19  absy(c, t) elseif o==0x1A  imp(c, t) elseif o==0x1B absy(c, t)
+    elseif o==0x1C absx(c, t) elseif o==0x1D  absx(c, t) elseif o==0x1E absx(c, t) elseif o==0x1F absx(c, t)
+    elseif o==0x20 abso(c, t) elseif o==0x21  indx(c, t) elseif o==0x22  imp(c, t) elseif o==0x23 indx(c, t)
+    elseif o==0x24   zp(c, t) elseif o==0x25    zp(c, t) elseif o==0x26   zp(c, t) elseif o==0x27   zp(c, t)
+    elseif o==0x28  imp(c, t) elseif o==0x29   imm(c, t) elseif o==0x2A  acc(c, t) elseif o==0x2B  imm(c, t)
+    elseif o==0x2C abso(c, t) elseif o==0x2D  abso(c, t) elseif o==0x2E abso(c, t) elseif o==0x2F abso(c, t)
+    elseif o==0x30  rel(c, t) elseif o==0x31  indy(c, t) elseif o==0x32  imp(c, t) elseif o==0x33 indy(c, t)
+    elseif o==0x34  zpx(c, t) elseif o==0x35   zpx(c, t) elseif o==0x36  zpx(c, t) elseif o==0x37  zpx(c, t)
+    elseif o==0x38  imp(c, t) elseif o==0x39  absy(c, t) elseif o==0x3A  imp(c, t) elseif o==0x3B absy(c, t)
+    elseif o==0x3C absx(c, t) elseif o==0x3D  absx(c, t) elseif o==0x3E absx(c, t) elseif o==0x3F absx(c, t)
+    elseif o==0x40  imp(c, t) elseif o==0x41  indx(c, t) elseif o==0x42  imp(c, t) elseif o==0x43 indx(c, t)
+    elseif o==0x44   zp(c, t) elseif o==0x45    zp(c, t) elseif o==0x46   zp(c, t) elseif o==0x47   zp(c, t)
+    elseif o==0x48  imp(c, t) elseif o==0x49   imm(c, t) elseif o==0x4A  acc(c, t) elseif o==0x4B  imm(c, t)
+    elseif o==0x4C abso(c, t) elseif o==0x4D  abso(c, t) elseif o==0x4E abso(c, t) elseif o==0x4F abso(c, t)
+    elseif o==0x50  rel(c, t) elseif o==0x51  indy(c, t) elseif o==0x52  imp(c, t) elseif o==0x53 indy(c, t)
+    elseif o==0x54  zpx(c, t) elseif o==0x55   zpx(c, t) elseif o==0x56  zpx(c, t) elseif o==0x57  zpx(c, t)
+    elseif o==0x58  imp(c, t) elseif o==0x59  absy(c, t) elseif o==0x5A  imp(c, t) elseif o==0x5B absy(c, t)
+    elseif o==0x5C absx(c, t) elseif o==0x5D  absx(c, t) elseif o==0x5E absx(c, t) elseif o==0x5F absx(c, t)
+    elseif o==0x60  imp(c, t) elseif o==0x61  indx(c, t) elseif o==0x62  imp(c, t) elseif o==0x63 indx(c, t)
+    elseif o==0x64   zp(c, t) elseif o==0x65    zp(c, t) elseif o==0x66   zp(c, t) elseif o==0x67   zp(c, t)
+    elseif o==0x68  imp(c, t) elseif o==0x69   imm(c, t) elseif o==0x6A  acc(c, t) elseif o==0x6B  imm(c, t)
+    elseif o==0x6C  ind(c, t) elseif o==0x6D  abso(c, t) elseif o==0x6E abso(c, t) elseif o==0x6F abso(c, t)
+    elseif o==0x70  rel(c, t) elseif o==0x71  indy(c, t) elseif o==0x72  imp(c, t) elseif o==0x73 indy(c, t)
+    elseif o==0x74  zpx(c, t) elseif o==0x75   zpx(c, t) elseif o==0x76  zpx(c, t) elseif o==0x77  zpx(c, t)
+    elseif o==0x78  imp(c, t) elseif o==0x79  absy(c, t) elseif o==0x7A  imp(c, t) elseif o==0x7B absy(c, t)
+    elseif o==0x7C absx(c, t) elseif o==0x7D  absx(c, t) elseif o==0x7E absx(c, t) elseif o==0x7F absx(c, t)
+    elseif o==0x80  imm(c, t) elseif o==0x81  indx(c, t) elseif o==0x82  imm(c, t) elseif o==0x83 indx(c, t)
+    elseif o==0x84   zp(c, t) elseif o==0x85    zp(c, t) elseif o==0x86   zp(c, t) elseif o==0x87   zp(c, t)
+    elseif o==0x88  imp(c, t) elseif o==0x89   imm(c, t) elseif o==0x8A  imp(c, t) elseif o==0x8B  imm(c, t)
+    elseif o==0x8C abso(c, t) elseif o==0x8D  abso(c, t) elseif o==0x8E abso(c, t) elseif o==0x8F abso(c, t)
+    elseif o==0x90  rel(c, t) elseif o==0x91  indy(c, t) elseif o==0x92  imp(c, t) elseif o==0x93 indy(c, t)
+    elseif o==0x94  zpx(c, t) elseif o==0x95   zpx(c, t) elseif o==0x96  zpy(c, t) elseif o==0x97  zpy(c, t)
+    elseif o==0x98  imp(c, t) elseif o==0x99  absy(c, t) elseif o==0x9A  imp(c, t) elseif o==0x9B absy(c, t)
+    elseif o==0x9C absx(c, t) elseif o==0x9D  absx(c, t) elseif o==0x9E absy(c, t) elseif o==0x9F absy(c, t)
+    elseif o==0xA0  imm(c, t) elseif o==0xA1  indx(c, t) elseif o==0xA2  imm(c, t) elseif o==0xA3 indx(c, t)
+    elseif o==0xA4   zp(c, t) elseif o==0xA5    zp(c, t) elseif o==0xA6   zp(c, t) elseif o==0xA7   zp(c, t)
+    elseif o==0xA8  imp(c, t) elseif o==0xA9   imm(c, t) elseif o==0xAA  imp(c, t) elseif o==0xAB  imm(c, t)
+    elseif o==0xAC abso(c, t) elseif o==0xAD  abso(c, t) elseif o==0xAE abso(c, t) elseif o==0xAF abso(c, t)
+    elseif o==0xB0  rel(c, t) elseif o==0xB1  indy(c, t) elseif o==0xB2  imp(c, t) elseif o==0xB3 indy(c, t)
+    elseif o==0xB4  zpx(c, t) elseif o==0xB5   zpx(c, t) elseif o==0xB6  zpy(c, t) elseif o==0xB7  zpy(c, t)
+    elseif o==0xB8  imp(c, t) elseif o==0xB9  absy(c, t) elseif o==0xBA  imp(c, t) elseif o==0xBB absy(c, t)
+    elseif o==0xBC absx(c, t) elseif o==0xBD  absx(c, t) elseif o==0xBE absy(c, t) elseif o==0xBF absy(c, t)
+    elseif o==0xC0  imm(c, t) elseif o==0xC1  indx(c, t) elseif o==0xC2  imm(c, t) elseif o==0xC3 indx(c, t)
+    elseif o==0xC4   zp(c, t) elseif o==0xC5    zp(c, t) elseif o==0xC6   zp(c, t) elseif o==0xC7   zp(c, t)
+    elseif o==0xC8  imp(c, t) elseif o==0xC9   imm(c, t) elseif o==0xCA  imp(c, t) elseif o==0xCB  imm(c, t)
+    elseif o==0xCC abso(c, t) elseif o==0xCD  abso(c, t) elseif o==0xCE abso(c, t) elseif o==0xCF abso(c, t)
+    elseif o==0xD0  rel(c, t) elseif o==0xD1  indy(c, t) elseif o==0xD2  imp(c, t) elseif o==0xD3 indy(c, t)
+    elseif o==0xD4  zpx(c, t) elseif o==0xD5   zpx(c, t) elseif o==0xD6  zpx(c, t) elseif o==0xD7  zpx(c, t)
+    elseif o==0xD8  imp(c, t) elseif o==0xD9  absy(c, t) elseif o==0xDA  imp(c, t) elseif o==0xDB absy(c, t)
+    elseif o==0xDC absx(c, t) elseif o==0xDD  absx(c, t) elseif o==0xDE absx(c, t) elseif o==0xDF absx(c, t)
+    elseif o==0xE0  imm(c, t) elseif o==0xE1  indx(c, t) elseif o==0xE2  imm(c, t) elseif o==0xE3 indx(c, t)
+    elseif o==0xE4   zp(c, t) elseif o==0xE5    zp(c, t) elseif o==0xE6   zp(c, t) elseif o==0xE7   zp(c, t)
+    elseif o==0xE8  imp(c, t) elseif o==0xE9   imm(c, t) elseif o==0xEA  imp(c, t) elseif o==0xEB  imm(c, t)
+    elseif o==0xEC abso(c, t) elseif o==0xED  abso(c, t) elseif o==0xEE abso(c, t) elseif o==0xEF abso(c, t)
+    elseif o==0xF0  rel(c, t) elseif o==0xF1  indy(c, t) elseif o==0xF2  imp(c, t) elseif o==0xF3 indy(c, t)
+    elseif o==0xF4  zpx(c, t) elseif o==0xF5   zpx(c, t) elseif o==0xF6  zpx(c, t) elseif o==0xF7  zpx(c, t)
+    elseif o==0xF8  imp(c, t) elseif o==0xF9  absy(c, t) elseif o==0xFA  imp(c, t) elseif o==0xFB absy(c, t)
+    elseif o==0xFC absx(c, t) elseif o==0xFD  absx(c, t) elseif o==0xFE absx(c, t) elseif o==0xFF absx(c, t)
     end
 end
 
@@ -1355,30 +1435,31 @@ const opsyms = SVector(
 #=F=#      :beq,:sbc,:jam,:isc,:nop,:sbc,:inc,:isc,:sed,:sbc,:nop,:isc,:nop,:sbc,:inc,:isc  # F
 )
 
-opcode_cmp(i) = :(opcode == $(UInt8(i - 1)))
+#opcode_cmp(i) = :(opcode == $(UInt8(i - 1)))
+#
+#instruction_for(i) = quote
+#    $(addrsyms[i])(cpu)
+#    $(opsyms[i])(cpu)
+#end
+#
+#macro gencalls()
+#    cases = [i == 256 ? instruction_for(i) : i for i in 2:256]
+#    while length(cases) > 1
+#        last = pop!(cases)
+#        penultimate = pop!(cases)
+#        push!(cases, Expr(:elseif, opcode_cmp(penultimate), instruction_for(penultimate), last))
+#    end
+#    ifs = Expr(:if, opcode_cmp(1), instruction_for(1), cases[1])
+#    esc(:(function instruction(cpu, opcode::UInt8)
+#              $ifs
+#          end))
+#end
+#
+#@gencalls()
 
-instruction_for(i) = quote
-    $(addrsyms[i])(cpu)
-    $(opsyms[i])(cpu)
-end
-
-macro gencalls()
-    cases = [i == 256 ? instruction_for(i) : i for i in 2:256]
-    while length(cases) > 1
-        last = pop!(cases)
-        penultimate = pop!(cases)
-        push!(cases, Expr(:elseif, opcode_cmp(penultimate), instruction_for(penultimate), last))
-    end
-    ifs = Expr(:if, opcode_cmp(1), instruction_for(1), cases[1])
-    esc(:(function instruction(cpu, opcode::UInt8)
-              $ifs
-          end))
-end
-
-@gencalls()
-
-function opcode(c,t) #::Cpu)
-    o = c.opcode
+function opcode(c::Cpu, t::Temps)::Temps #::Cpu)
+    local o = c.opcode
+    #o = t.opcode
     if o==0x00 brk_6502(c, t) elseif o==0x01 ora(c, t) elseif o==0x02 jam(c, t) elseif o==0x03 slo(c, t)
     elseif o==0x04  nop(c, t) elseif o==0x05 ora(c, t) elseif o==0x06 asl(c, t) elseif o==0x07 slo(c, t)
     elseif o==0x08  php(c, t) elseif o==0x09 ora(c, t) elseif o==0x0A asl(c, t) elseif o==0x0B anc(c, t)
@@ -1446,7 +1527,7 @@ function opcode(c,t) #::Cpu)
     end
 end
 
-function exec6502(cpu, tickcount::Int64)
+function exec6502(cpu, temps, tickcount::Int64)
 	#/*
 	#	BUG FIX:
 	#	overflow of unsigned 32 bit integer causes emulation to hang.
@@ -1455,34 +1536,35 @@ function exec6502(cpu, tickcount::Int64)
 	#	The system is changed so that now clockticks 6502 is reset every single time that exec is called.
 	#*/
     local instructions = 0
-    local base_ticks = 0
-    cpu.clockticks6502 = 0
-    while cpu.clockticks6502 + base_ticks < tickcount
-        base_ticks += inner_step6502(cpu)
+    temps = setticks(cpu, temps, 0)
+    while ticks(cpu, temps) < tickcount
+        temps = inner_step6502(cpu, temps)
         instructions += 1
     end
-    cpu.clockticks6502 += base_ticks
     cpu.instructions = instructions
+    temps
 end
 
-function inner_step6502(cpu)
+function inner_step6502(cpu, temps::Temps)
     cpu.opcode = read6502(cpu, cpu.pc)
-    cpu.pc += 0x1
-    cpu.status |= FLAG_CONSTANT
     cpu.penaltyop = 0
     cpu.penaltyaddr = 0
-    opcode(cpu, address(cpu))
+    #temps = Temps(temps; opcode = read6502(cpu, cpu.pc), penaltyop = 0, penaltyaddr = 0)
+    #temps = Temps(temps; opcode = read6502(cpu, cpu.pc))
+    cpu.pc += 0x1
+    cpu.status |= FLAG_CONSTANT
+    temps = opcode(cpu, address(cpu, temps))
     local base_ticks::Int64 = ticktable[cpu.opcode + 1]::Int64
+    #local base_ticks::Int64 = ticktable[temps.opcode + 1]::Int64
     #/*The is commented out in Mike Chamber's usage of the 6502 emulator for MOARNES*/
-    if cpu.penaltyop != 0x0 && cpu.penaltyaddr != 0x0
-        base_ticks += 1
+    if cpu.penaltyop == 0x00 || cpu.penaltyaddr == 0x00
+    #if temps.penaltyop != 0x0 && temps.penaltyaddr != 0x0
+        addticks(cpu, temps, base_ticks)
+    else
+        addticks(cpu, temps, base_ticks + 1)
     end
-    base_ticks
 end
 
-function step6502(cpu)
-	cpu.clockticks6502 = 0;
-    cpu.clockticks6502 += inner_step6502(cpu)
-end
+step6502(cpu, temps) = inner_step6502(cpu, setticks(cpu, temps, 0))
 
 end # module Fake6502
