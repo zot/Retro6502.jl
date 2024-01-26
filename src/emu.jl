@@ -158,12 +158,10 @@ const K = 1024
     clockticks6502::Int64 = 0
     oldpc::UInt16 = 0x0000
     # addressing
-    ea::UInt16 = 0x0000
+    #ea::UInt16 = 0x0000
     reladdr::UInt16 = 0x0000
     # temporary values
-    value::UInt16 = 0x0000
     opcode::UInt8 = 0x00
-    oldstatus::UInt8 = 0x00
     # making these booleans is slower than using UInt8
     penaltyop::UInt8 = 0x00
     penaltyaddr::UInt8 = 0x00
@@ -171,6 +169,19 @@ const K = 1024
     memory::Vector{UInt8} = zeros(UInt8, 64K)
     user_data::T
 end
+
+@kwdef struct Temps
+    ea::UInt16 = 0x0000
+    result::UInt16 = 0x0000
+    #reladdr::UInt16 = 0x0000
+    ## temporary values
+    #opcode::UInt8 = 0x00
+    ## making these booleans is slower than using UInt8
+    #penaltyop::UInt8 = 0x00
+    #penaltyaddr::UInt8 = 0x00
+end
+
+Temps(t::Temps; ea = t.ea, result = t.result) = Temps(; ea, result)
 
 function copy(src::Cpu{T}) where {T}
     new = Cpu{T}(; src.user_data)
@@ -193,7 +204,6 @@ function copy(src::Cpu, dst::Cpu)
      dst.value = src.value
      dst.result = src.result
      dst.opcode = src.opcode
-     dst.oldstatus = src.oldstatus
      dst.penaltyop = src.penaltyop
      dst.penaltyaddr = src.penaltyaddr
      dst.memory = src.memory
@@ -336,35 +346,40 @@ end
 #/*addressing mode functions, calculates effective addresses*/
 function imp(cpu)
     TEST_COMPAT && read6502(cpu, cpu.pc)
-    nothing
+    Temps()
 end
 
 #/*addressing mode functions, calculates effective addresses*/
 function acc(cpu)
     TEST_COMPAT && read6502(cpu, cpu.pc)
+    Temps()
 end
 
 #/*addressing mode functions, calculates effective addresses*/
 function imm(cpu)
-    cpu.ea = cpu.pc
+    local ea = cpu.pc
     cpu.pc += 0x1
+    Temps(; ea)
 end
 
 function zp(cpu) # /*zero-page*/
-    cpu.ea = UInt16(read6502(cpu, cpu.pc))
+    local ea = UInt16(read6502(cpu, cpu.pc))
     cpu.pc += 0x1
+    Temps(; ea)
 end
 
 function zpx(cpu) # /*zero-page,X*/
     local zp = UInt16(read6502(cpu, cpu.pc))
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
-    cpu.ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
+    local ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
     cpu.pc += 0x1
+    Temps(; ea)
 end
 
 function zpy(cpu) # /*zero-page,Y*/
-    cpu.ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
+    local ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
     cpu.pc += 0x1
+    Temps(; ea)
 end
 
 function rel(cpu) #/*relative for branch ops (8-bit immediate value, sign-extended)*/
@@ -373,94 +388,91 @@ function rel(cpu) #/*relative for branch ops (8-bit immediate value, sign-extend
     if (cpu.reladdr & SIGN) != 0
         cpu.reladdr |= 0xFF00
     end
+    Temps()
 end
 
 function abso(cpu) #/*absolute*/
-    cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    local ea  =UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
     cpu.pc += 0x2
+    Temps(; ea)
 end
 
 
 function absx(cpu) #/*absolute,X*/
     local startpage
     local addr = UInt16(read6502(cpu, cpu.pc))
-    cpu.ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
-    startpage = cpu.ea & 0xFF00
-    cpu.ea += UInt16(cpu.x)
-
-    if (startpage != (cpu.ea & 0xFF00)) #/*one cycle penlty for page-crossing on some opcodes*/
-        TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
+    local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    startpage = ea & 0xFF00
+    ea += UInt16(cpu.x)
+    if (startpage != (ea & 0xFF00)) #/*one cycle penlty for page-crossing on some opcodes*/
+        TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
         cpu.penaltyaddr = 0x1
     end
-
     cpu.pc += 0x2
+    Temps(; ea)
 end
 
 function absy(cpu) # /*absolute,Y*/
     local startpage
     local addr = UInt16(read6502(cpu, cpu.pc))
-    cpu.ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
-    startpage = cpu.ea & 0xFF00;
-    cpu.ea += UInt16(cpu.y)
-
-    if (startpage != (cpu.ea & 0xFF00)) # /*one cycle penlty for page-crossing on some opcodes*/
-        TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
+    local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    startpage = ea & 0xFF00;
+    ea += UInt16(cpu.y)
+    if (startpage != (ea & 0xFF00)) # /*one cycle penlty for page-crossing on some opcodes*/
+        TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
         cpu.penaltyaddr = 0x1
     end
-
     cpu.pc += 0x2;
+    Temps(; ea)
 end
 
 function ind(cpu) # /*indirect*/
     local eahelp, eahelp2
     eahelp = UInt16(read6502(cpu, cpu.pc)) | UInt16(UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
     eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*replicate 6502 page-boundary wraparound bug*/
-    cpu.ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
+    local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
     cpu.pc += 0x2;
+    Temps(; ea)
 end
 
 function indx(cpu) # /* (indirect,X)*/
-    local eahelp
     local zp = UInt16(read6502(cpu, cpu.pc))
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
-    eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
+    local eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
     cpu.pc += 0x1
-    cpu.ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8);
+    local ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
+    Temps(; ea)
 end
 
 function indy(cpu) # /* (indirect),Y*/
-    local eahelp, eahelp2, startpage
-    eahelp = UInt16(read6502(cpu, cpu.pc));
+    local eahelp = UInt16(read6502(cpu, cpu.pc));
     cpu.pc += 0x1
-    eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*zero-page wraparound*/
-    cpu.ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8);
-    startpage = cpu.ea & 0xFF00;
-    cpu.ea += UInt16(cpu.y)
-
-    if startpage != (cpu.ea & 0xFF00) # /*one cycle penlty for page-crossing on some opcodes*/
+    local eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*zero-page wraparound*/
+    local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8);
+    local startpage = ea & 0xFF00;
+    ea += UInt16(cpu.y)
+    if startpage != (ea & 0xFF00) # /*one cycle penlty for page-crossing on some opcodes*/
         cpu.penaltyaddr = 0x1
-        TEST_COMPAT && read6502(cpu, startpage | (cpu.ea & 0xFF))
+        TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
     end
+    Temps(; ea)
 end
 
-function getvalue(cpu)
+function getvalue(cpu, temps)
     is_acc(cpu.opcode) && return UInt16(cpu.a)
-    return UInt16(read6502(cpu, cpu.ea));
+    return UInt16(read6502(cpu, temps.ea));
 end
 
-function getvalue16(cpu)
-    return UInt16(read6502(cpu, cpu.ea)) | (UInt16(read6502(cpu, UInt16(cpu.ea+0x1))) << 8);
+function getvalue16(cpu, temps)
+    return UInt16(read6502(cpu, temps.ea)) | (UInt16(read6502(cpu, UInt16(temps.ea+0x1))) << 8);
 end
 
-function putvalue(cpu, saveval::UInt16)
+function putvalue(cpu, temps, saveval::UInt16)
     if is_acc(cpu.opcode)
         # addr mode is acc
         cpu.a = UInt8(saveval & 0x00FF);
     else
-        write6502(cpu, cpu.ea, UInt8(saveval & 0x00FF))
-    end
-    if TEST_COMPAT
-        cpu.value = saveval
+        write6502(cpu, temps.ea, UInt8(saveval & 0x00FF))
     end
 end
 
@@ -470,15 +482,12 @@ signed(i::UInt8) = Int16(reinterpret(Int8, i))
 signed(i::UInt16) = reinterpret(Int16, i)
 
 # Thanks to Bruce Clark: http://www.6502.org/tutorials/decimal_mode.html
-function adc_non_nes(cpu, reuse_value)
+function adc_non_nes(cpu, temps, value)
     (cpu.status & FLAG_DECIMAL) == 0 &&
-        return adc_nes(cpu, reuse_value)
+        return adc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
-    if !reuse_value
-        cpu.value = getvalue(cpu)
-    end
     local A::UInt8 = cpu.a
-    local B::UInt8 = cpu.value
+    local B::UInt8 = value
     local C::UInt8 = cpu.status & 0x0001
     local AL::UInt8 = (A & 0x0F) + (B & 0x0F) + C
     if AL >= 0x0A
@@ -495,58 +504,58 @@ function adc_non_nes(cpu, reuse_value)
     local AH::Int16 = signed(A & 0xF0) + signed(B & 0xF0) + signed(AL)
     setsignif(cpu, AH & SIGN != 0)
     setoverflowif(cpu, AH < -128 || AH > 127)
+    temps
 end
 
-function adc_nes(cpu, reuse_value)
+function adc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
-    if !reuse_value
-        cpu.value = getvalue(cpu)
-    end
-    local result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
+    local result = UInt16(cpu.a) + value + UInt16(cpu.status & FLAG_CARRY)
     carrycalc(cpu, result)
     zerocalc(cpu, result)
-    overflowcalc(cpu, result, cpu.a, cpu.value)
+    overflowcalc(cpu, result, cpu.a, value)
     signcalc(cpu, result)
     saveaccum(cpu, result)
+    temps
 end
 
 # to emulate NES, make a custom adc method call adc_nes instead of adc_non_nes
-adc(cpu, reuse_value = false) = adc_non_nes(cpu, reuse_value)
+adc(cpu, temps, value = getvalue(cpu, temps)) = adc_non_nes(cpu, temps, value)
 
 # AND oper + set C as ASL, immediate only
-function anc(cpu)
-    local A = cpu.a & getvalue(cpu)
+function anc(cpu, temps)
+    local A = cpu.a & getvalue(cpu, temps)
     zerocalc(cpu, A)
     signcalc(cpu, A)
     setstatus(cpu, FLAG_CARRY, A >> 7)
     saveaccum(cpu, A)
+    temps
 end
 
-function and(cpu, reuse_value = false)
+function and(cpu, temps)
     cpu.penaltyop = 0x1
-    if !reuse_value
-        cpu.value = getvalue(cpu)
-    end
-    local result = UInt16(cpu.a) & cpu.value
+    value = getvalue(cpu, temps)
+    local result = UInt16(cpu.a) & value
     zerocalc(cpu, result)
     signcalc(cpu, result)
     saveaccum(cpu, result)
+    temps
 end
 
-function asl(cpu)
-    cpu.value = getvalue(cpu)
-    TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc && putvalue(cpu, cpu.value)
-    local result = cpu.value << 1
+function asl(cpu, temps)
+    local value = getvalue(cpu, temps)
+    TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc && putvalue(cpu, temps, value)
+    local result = value << 1
     carrycalc(cpu, result)
     zerocalc(cpu, result)
     signcalc(cpu, result)
-    putvalue(cpu, result)
+    putvalue(cpu, temps, result)
+    temps
 end
 
-function check_cross_page_boundary(cpu)
+function check_cross_page_boundary(cpu, temps)
     TEST_COMPAT &&
         read6502(cpu, cpu.oldpc)
-    if (cpu.oldpc & 0xFF00) != (cpu.pc & 0xFF00)
+    if cpu.oldpc & 0xFF00 != cpu.pc & 0xFF00
         cpu.clockticks6502 += 2 # /*check if jump crossed a page boundary*/
         if TEST_COMPAT
             read6502(cpu, (cpu.oldpc & 0xFF00) | (cpu.pc & 0x00FF))
@@ -554,236 +563,277 @@ function check_cross_page_boundary(cpu)
     else
         cpu.clockticks6502 += 1
     end
+    temps
 end
 
-function bcc(cpu)
+function bcc(cpu, temps)
     if cpu.status & FLAG_CARRY == 0x0
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu)
+        check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
-function bcs(cpu)
+function bcs(cpu, temps)
     if cpu.status & FLAG_CARRY == FLAG_CARRY
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu)
+        check_cross_page_boundary(cpu, temps)
     end
 end
 
-function beq(cpu)
+function beq(cpu, temps)
     if cpu.status & FLAG_ZERO == FLAG_ZERO
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu)
+        check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
 
-function bit(cpu)
-    cpu.value = getvalue(cpu);
-    local result = UInt16(cpu.a) & cpu.value
+function bit(cpu, temps)
+    local value = getvalue(cpu, temps);
+    local result = UInt16(cpu.a) & value
     zerocalc(cpu, result)
-    cpu.status = (cpu.status & 0x3F) | (UInt8(cpu.value) & 0xC0);
+    cpu.status = (cpu.status & 0x3F) | (UInt8(value) & 0xC0);
+    temps
 end
 
-function bmi(cpu)
+function bmi(cpu, temps)
     if isstatusset(cpu, FLAG_SIGN)
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        if cpu.oldpc & 0xFF00 != cpu.pc & 0xFF00
-            cpu.clockticks6502 += 2 # /*check if jump crossed a page boundary*/
-        else
-            cpu.clockticks6502 += 1
-        end
+        check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
-function bne(cpu)
+function bne(cpu, temps)
     if  isstatusclear(cpu, FLAG_ZERO)
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu)
+        check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
-function bpl(cpu)
+function bpl(cpu, temps)
     if isstatusclear(cpu, FLAG_SIGN)
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu)
+        check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
-function brk_6502(cpu)
+function brk_6502(cpu, temps)
     TEST_COMPAT && read6502(cpu, cpu.pc)
     cpu.pc += 0x1
     push_6502_16(cpu, cpu.pc)
     push_6502_8(cpu, cpu.status | FLAG_BREAK)
     setinterrupt(cpu)
     cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
+    temps
 end
 
-function bvc(cpu)
+function bvc(cpu, temps)
     if cpu.status & FLAG_OVERFLOW == 0x0
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu)
+        check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
-function bvs(cpu)
+function bvs(cpu, temps)
     if cpu.status & FLAG_OVERFLOW == FLAG_OVERFLOW
         cpu.oldpc = cpu.pc
         cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu)
+        check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
 
-clc(cpu)  = clearcarry(cpu)
+function clc(cpu, temps)
+    clearcarry(cpu)
+    temps
+end
 
-cld(cpu) = cleardecimal(cpu)
+function cld(cpu, temps)
+    cleardecimal(cpu)
+    temps
+end
 
-cli(cpu) = clearinterrupt(cpu)
+function cli(cpu, temps)
+    clearinterrupt(cpu)
+    temps
+end
 
-clv(cpu) = clearoverflow(cpu)
+function clv(cpu, temps)
+    clearoverflow(cpu)
+    temps
+end
 
-function cmp(cpu)
+function cmp(cpu, temps)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu)
-    local result = UInt16(cpu.a) - cpu.value
-    setcarryif(cpu, cpu.a >= UInt8(cpu.value & 0x00FF))
-    setzeroif(cpu, cpu.a == UInt8(cpu.value & 0x00FF))
+    local value = getvalue(cpu, temps)
+    local result = UInt16(cpu.a) - value
+    setcarryif(cpu, cpu.a >= UInt8(value & 0x00FF))
+    setzeroif(cpu, cpu.a == UInt8(value & 0x00FF))
     signcalc(cpu, result)
+    temps
 end
 
 
-function cpx(cpu)
-    cpu.value = getvalue(cpu)
-    local result = UInt16(cpu.x) - cpu.value
-    setcarryif(cpu, cpu.x >= UInt8(cpu.value & 0x00FF))
-    setzeroif(cpu, cpu.x == UInt8(cpu.value & 0x00FF))
+function cpx(cpu, temps)
+    local value = getvalue(cpu, temps)
+    local result = UInt16(cpu.x) - value
+    setcarryif(cpu, cpu.x >= UInt8(value & 0x00FF))
+    setzeroif(cpu, cpu.x == UInt8(value & 0x00FF))
     signcalc(cpu, result)
+    temps
 end
 
-function cpy(cpu)
-    cpu.value = getvalue(cpu)
-    local result = UInt16(cpu.y) - cpu.value
-    setcarryif(cpu, cpu.y >= UInt8(cpu.value & 0x00FF))
-    setzeroif(cpu, cpu.y == UInt8(cpu.value & 0x00FF))
+function cpy(cpu, temps)
+    local value = getvalue(cpu, temps)
+    local result = UInt16(cpu.y) - value
+    setcarryif(cpu, cpu.y >= UInt8(value & 0x00FF))
+    setzeroif(cpu, cpu.y == UInt8(value & 0x00FF))
     signcalc(cpu, result)
+    temps
 end
 
-function dec(cpu)
-    cpu.value = getvalue(cpu)
-    local result = cpu.value - 0x1
+function dec(cpu, temps)
+    local value = getvalue(cpu, temps)
+    local result = value - 0x1
     zerocalc(cpu, result)
     signcalc(cpu, result)
-    putvalue(cpu, result)
+    putvalue(cpu, temps, result)
+    temps
 end
 
 
-function dex(cpu)
+function dex(cpu, temps)
     cpu.x -= 0x1
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
+    temps
 end
 
-function dey(cpu)
+function dey(cpu, temps)
     cpu.y -= 0x1
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
+    temps
 end
 
-function eor(cpu)
+function eor(cpu, temps)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu);
-    local result = UInt16(cpu.a) ⊻ cpu.value;
+    local value = getvalue(cpu, temps);
+    local result = UInt16(cpu.a) ⊻ value;
     zerocalc(cpu, result);
     signcalc(cpu, result);
     saveaccum(cpu, result);
+    temps
 end
 
-function inc(cpu)
-    cpu.value = getvalue(cpu)
-    local result = cpu.value + 0x1
+function inc(cpu, temps)
+    local value = getvalue(cpu, temps)
+    local result = value + 0x1
     zerocalc(cpu, result)
     signcalc(cpu, result)
-    putvalue(cpu, result)
-    result
+    putvalue(cpu, temps, result)
+    Temps(temps; result)
 end
 
-function inx(cpu)
+function inx(cpu, temps)
     cpu.x += 0x1
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
+    temps
 end
 
-function iny(cpu)
+function iny(cpu, temps)
     cpu.y += 0x1
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
+    temps
 end
 
-function jam(cpu)
+function jam(cpu, temps)
     cpu.clockticks6502 += 1
     cpu.pc -= 0x1
+    temps
 end
 
-jmp(cpu) = cpu.pc = cpu.ea
+function jmp(cpu, temps)
+    cpu.pc = temps.ea
+    temps
+end
 
-function jsr(cpu)
+function jsr(cpu, temps)
     local oldsp = cpu.sp
     TEST_COMPAT && (cpu.pc - 0x0001) != 0x0100 | oldsp && # not in page zero
         read6502(cpu, 0x0100 | oldsp)
     push_6502_16(cpu, cpu.pc - 0x1)
+    local ea = temps.ea
     if (cpu.pc - 0x0001) == 0x0100 | oldsp # in page zero
-        cpu.ea = (cpu.ea & 0xFF) | (UInt16(read6502(cpu, 0x0100 | oldsp)) << 8)
+        ea = (ea & 0xFF) | (UInt16(read6502(cpu, 0x0100 | oldsp)) << 8)
     end
-    cpu.pc = cpu.ea
+    cpu.pc = ea
+    Temps(temps)
 end
 
-function lda(cpu)
+function lda(cpu, temps)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu)
-    cpu.a = UInt8(cpu.value & 0x00FF)
-   
+    local value = getvalue(cpu, temps)
+    cpu.a = UInt8(value & 0x00FF)
     zerocalc(cpu, cpu.a)
     signcalc(cpu, cpu.a)
+    temps
 end
 
-function ldx(cpu)
+function ldx(cpu, temps)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu)
-    cpu.x = UInt8(cpu.value & 0x00FF)
+    local value = getvalue(cpu, temps)
+    cpu.x = UInt8(value & 0x00FF)
    
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
+    temps
 end
 
-function ldy(cpu)
+function ldy(cpu, temps)
     cpu.penaltyop = 0x1
-    cpu.value = getvalue(cpu)
-    cpu.y = UInt8(cpu.value & 0x00FF)
+    local value = getvalue(cpu, temps)
+    cpu.y = UInt8(value & 0x00FF)
    
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
+    temps
 end
 
-function lsr(cpu, reuse_value = false)
-    if !reuse_value
-        cpu.value = getvalue(cpu)
-    end
-    local result = cpu.value >> 1
-    setcarryif(cpu, (cpu.value & 0x1) != 0)
+function lsr(cpu, temps)
+    local value = getvalue(cpu, temps)
+    local result = value >> 1
+    setcarryif(cpu, (value & 0x1) != 0)
     zerocalc(cpu, result)
     signcalc(cpu, result)
-    putvalue(cpu, result)
+    putvalue(cpu, temps, result)
+    temps
 end
 
-function nop(cpu)
+function nop(cpu, temps)
     local op = cpu.opcode
     if op == 0x1C || op == 0x3C || op == 0x5C || op == 0x7C || op == 0xDC || op == 0xFC
         cpu.penaltyop = 0x1
@@ -792,81 +842,89 @@ function nop(cpu)
         addr = addrsyms[op + 1]
         if addr == :absx || addr == :absy
             cpu.penaltyaddr == 0x0 &&
-                getvalue(cpu)
+                getvalue(cpu, temps)
         elseif addr != :imm && addr != :abso && addr != :imp
-            getvalue(cpu)
+            getvalue(cpu, temps)
         end
     end
+    temps
 end
 
-function ora(cpu, reuse_value = false)
+function ora(cpu, temps)
     cpu.penaltyop = 0x1
-    if !reuse_value
-        cpu.value = getvalue(cpu)
-    end
-    local result = UInt16(cpu.a) | cpu.value
+    local value = getvalue(cpu, temps)
+    local result = UInt16(cpu.a) | value
     zerocalc(cpu, result)
     signcalc(cpu, result)
     saveaccum(cpu, result)
+    temps
 end
 
-pha(cpu) = push_6502_8(cpu, cpu.a)
+function pha(cpu, temps)
+    push_6502_8(cpu, cpu.a)
+    temps
+end
 
-function php(cpu)
+function php(cpu, temps)
     TEST_COMPAT && read6502(cpu, cpu.pc)
     push_6502_8(cpu, cpu.status | FLAG_BREAK)
+    temps
 end
 
-function pla(cpu)
+function pla(cpu, temps)
     cpu.a = pull_6502_8(cpu)
-   
     zerocalc(cpu, cpu.a)
     signcalc(cpu, cpu.a)
+    temps
 end
 
-plp(cpu) = cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
+function plp(cpu, temps)
+    cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
+    temps
+end
 
-function rol(cpu)
-    cpu.value = getvalue(cpu)
-    FAKE_COMPAT && putvalue(cpu, cpu.value)
-    local result = (cpu.value << 1) | (cpu.status & FLAG_CARRY)
+function rol(cpu, temps)
+    local value = getvalue(cpu, temps)
+    FAKE_COMPAT && putvalue(cpu, temps, value)
+    local result = (value << 1) | (cpu.status & FLAG_CARRY)
     carrycalc(cpu, result)
     zerocalc(cpu, result)
     signcalc(cpu, result)
-    putvalue(cpu, result)
+    putvalue(cpu, temps, result)
+    temps
 end
 
-function ror(cpu, reuse_value = false)
-    if !reuse_value
-        cpu.value = getvalue(cpu)
-    end
-    FAKE_COMPAT && putvalue(cpu, cpu.value)
-    local result = (cpu.value >> 1) | ((cpu.status & FLAG_CARRY) << 7)
-    setcarryif(cpu, (cpu.value & 1) != 0)
+function ror(cpu, temps)
+    local value = getvalue(cpu, temps)
+    FAKE_COMPAT && putvalue(cpu, temps, value)
+    local result = (value >> 1) | ((cpu.status & FLAG_CARRY) << 7)
+    setcarryif(cpu, (value & 1) != 0)
     zerocalc(cpu, result)
     signcalc(cpu, result)
-    putvalue(cpu, result)
-    result
+    putvalue(cpu, temps, result)
+    result, temps
 end
 
-function rti(cpu)
+function rti(cpu, temps)
     cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
-    cpu.value = pull_6502_16(cpu)
-    cpu.pc = cpu.value;
+    local value = pull_6502_16(cpu)
+    cpu.pc = value;
+    temps
 end
 
-function rts(cpu)
-    cpu.value = pull_6502_16(cpu)
-    cpu.pc = cpu.value + 0x0001
+function rts(cpu, temps)
+    local value = pull_6502_16(cpu)
+    cpu.pc = value + 0x0001
+    temps
 end
 
 # Thanks to Bruce Clark: http://www.6502.org/tutorials/decimal_mode.html
-function sbc_non_nes(cpu, reuse_value)
+function sbc_non_nes(cpu, temps, value)
     isstatusclear(cpu, FLAG_DECIMAL) &&
-        return sbc_nes(cpu, reuse_value)
+        return sbc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
     local A::Int16 = Int16(cpu.a)
-    local B::UInt8 = (reuse_value ? cpu.value : getvalue(cpu)) & 0xFF
+    local B::UInt8 = value & 0xFF
     local C::UInt8 = cpu.status & FLAG_CARRY
     local AL::Int16 = (A & 0x0F) - Int8(B & 0x0F) + Int8(C) - Int16(0x0001)
     if AL < 0
@@ -883,81 +941,100 @@ function sbc_non_nes(cpu, reuse_value)
     overflowcalc(cpu, fresult, cpu.a, fb)
     carrycalc(cpu, fresult)
     saveaccum(cpu, reinterpret(UInt16, A))
+    temps
 end
 
-function sbc_nes(cpu, reuse_value)
+function sbc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
-    if !reuse_value
-        cpu.value = getvalue(cpu) ⊻ 0x00FF
-    else
-        cpu.value ⊻= 0x00FF
-    end
-    local result = UInt16(cpu.a) + cpu.value + UInt16(cpu.status & FLAG_CARRY)
+    value ⊻= 0x00FF
+    local result = UInt16(cpu.a) + value + UInt16(cpu.status & FLAG_CARRY)
     zerocalc(cpu, result)
-    overflowcalc(cpu, result, cpu.a, cpu.value)
+    overflowcalc(cpu, result, cpu.a, value)
     signcalc(cpu, result)
     carrycalc(cpu, result)
     saveaccum(cpu, result)
+    temps
 end
 
 # to emulate NES, make a custom adc method call sbc_nes instead of sbc_non_nes
-sbc(cpu, reuse_value = false) = sbc_non_nes(cpu, reuse_value)
+sbc(cpu, temps, value = getvalue(cpu, temps)) = sbc_non_nes(cpu, temps, value)
 
-sec(cpu) = setcarry(cpu)
-
-sed(cpu) = setdecimal(cpu)
-
-sei(cpu) = setinterrupt(cpu)
-
-sta(cpu) = putvalue(cpu, UInt16(cpu.a))
-
-stx(cpu) = putvalue(cpu, UInt16(cpu.x))
-
-sty(cpu) = putvalue(cpu, UInt16(cpu.y))
-
-function tax(cpu)
-    cpu.x = cpu.a
-   
-    zerocalc(cpu, cpu.x)
-    signcalc(cpu, cpu.x)
+function sec(cpu, temps)
+    setcarry(cpu)
+    temps
 end
 
-function tay(cpu)
+function sed(cpu, temps)
+    setdecimal(cpu)
+    temps
+end
+
+function sei(cpu, temps)
+    setinterrupt(cpu)
+    temps
+end
+
+function sta(cpu, temps)
+    putvalue(cpu, temps, UInt16(cpu.a))
+    temps
+end
+
+function stx(cpu, temps)
+    putvalue(cpu, temps, UInt16(cpu.x))
+    temps
+end
+
+function sty(cpu, temps)
+    putvalue(cpu, temps, UInt16(cpu.y))
+    temps
+end
+
+function tax(cpu, temps)
+    cpu.x = cpu.a
+    zerocalc(cpu, cpu.x)
+    signcalc(cpu, cpu.x)
+    temps
+end
+
+function tay(cpu, temps)
     cpu.y = cpu.a
-   
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
+    temps
 end
 
-function tsx(cpu)
+function tsx(cpu, temps)
     cpu.x = cpu.sp
-   
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
+    temps
 end
 
-function txa(cpu)
+function txa(cpu, temps)
     cpu.a = cpu.x
-   
     zerocalc(cpu, cpu.a)
     signcalc(cpu, cpu.a)
+    temps
 end
 
-txs(cpu) = cpu.sp = cpu.x
+function txs(cpu, temps)
+    cpu.sp = cpu.x
+    temps
+end
 
-function tya(cpu)
+function tya(cpu, temps)
     cpu.a = cpu.y
-   
     zerocalc(cpu, cpu.a)
     signcalc(cpu, cpu.a)
+    temps
 end
 
 #/*undocumented instructions~~~~~~~~~~~~~~~~~~~~~~~~~*/
 # to disable them, override them to call nop()
 
 # AND oper + LSR
-function alr(cpu)
-    local M = getvalue(cpu)
+function alr(cpu, temps)
+    local M = getvalue(cpu, temps)
     local anded = cpu.a & M
     local A = anded >> 1
     local N = A & SIGN
@@ -965,22 +1042,24 @@ function alr(cpu)
     local C = anded & FLAG_CARRY
     cpu.a = A
     setstatus(cpu, FLAG_SIGN | FLAG_ZERO | FLAG_CARRY, N | Z | C)
+    temps
 end
 
 # AND X + AND oper
 # A' = (A \/ EE) /\ X /\ M
-function ane(cpu)
-    cpu.a = (cpu.a | 0xEE) & cpu.x & getvalue(cpu)
+function ane(cpu, temps)
+    cpu.a = (cpu.a | 0xEE) & cpu.x & getvalue(cpu, temps)
     cpu.status = (cpu.a & SIGN) | (cpu.status & 0x7D) | (cpu.a == 0 ? FLAG_ZERO : 0x0)
+    temps
 end
 
 # A' = (C << 7) | ((A & M) >> 1)
 # status: N, Z, C = A'6, V = (A6 & M6) ⊻ (A7 & M7)
 # decimal mode differs
-function arr(cpu)
+function arr(cpu, temps)
     local V, C
     local A = cpu.a
-    local anded = A & getvalue(cpu)
+    local anded = A & getvalue(cpu, temps)
     local N = (cpu.status & FLAG_CARRY) << 7
     A = N | (anded >> 1)
     local Z = A == 0 ? 0x02 : 0x00
@@ -1006,63 +1085,70 @@ function arr(cpu)
     end
     cpu.a = A
     setstatus(cpu, FLAG_SIGN | FLAG_OVERFLOW | FLAG_ZERO | FLAG_CARRY, N | V | Z | C)
+    temps
 end
 
-function las(cpu)
-    local value = cpu.sp & getvalue(cpu)
+function las(cpu, temps)
+    local value = cpu.sp & getvalue(cpu, temps)
     cpu.a = value
     cpu.x = value
     cpu.sp = value
     cpu.status = (value & SIGN) | (cpu.status & 0x7D) | (value == 0 ? FLAG_ZERO : 0x0)
+    temps
 end
 
-function lax(cpu)
-    lda(cpu)
-    ldx(cpu)
+function lax(cpu, temps)
+    temps = lda(cpu, temps)
+    ldx(cpu, temps)
 end
 
-function lxa(cpu)
-    local value = getvalue(cpu) & (cpu.a | 0xEE)
+function lxa(cpu, temps)
+    local value = getvalue(cpu, temps) & (cpu.a | 0xEE)
     cpu.a = value
     cpu.x = value
     cpu.status = (value & SIGN) | (cpu.status & 0x7D) | (value == 0 ? FLAG_ZERO : 0x0)
+    temps
 end
 
-function sax(cpu)
-    sta(cpu)
-    stx(cpu)
-    putvalue(cpu, UInt16(cpu.a & cpu.x))
+function sax(cpu, temps)
+    temps = sta(cpu, temps)
+    temps = stx(cpu, temps)
+    putvalue(cpu, temps, UInt16(cpu.a & cpu.x))
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
     end
+    temps
 end
 
-function sbx(cpu)
+function sbx(cpu, temps)
     local first = cpu.a & cpu.x
-    local second = getvalue(cpu)
+    local second = getvalue(cpu, temps)
     local value = UInt16(first) - second
     cpu.x = UInt8(value & 0xFF)
     setcarryif(cpu, first >= UInt8(second & 0x00FF))
     setzeroif(cpu, first == UInt8(second & 0x00FF))
     signcalc(cpu, value)
+    temps
 end
 
-function dcp(cpu)
-    dec(cpu)
-    cmp(cpu)
+function dcp(cpu, temps)
+    temps = dec(cpu, temps)
+    temps = cmp(cpu, temps)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
     end
+    temps
 end
 
-function isc(cpu)
-    cpu.value = inc(cpu)
-    sbc(cpu, true)
+function isc(cpu, temps)
+    local value
+    temps = inc(cpu, temps)
+    sbc(cpu, temps, temps.result)
 end
 
-function slo(cpu)
-    local M = getvalue(cpu) << 1
-    putvalue(cpu, M)
+function slo(cpu, temps)
+    local M = getvalue(cpu, temps) << 1
+    putvalue(cpu, temps, M)
     local A = cpu.a | UInt8(M & 0xFF)
     local N = A & SIGN
     local Z = A == 0x00 ? FLAG_ZERO : 0
@@ -1072,11 +1158,12 @@ function slo(cpu)
     end
     cpu.a = A
     setstatus(cpu, FLAG_SIGN | FLAG_ZERO | FLAG_CARRY, N | Z | C)
+    temps
 end
 
-function rla(cpu)
-    local M = (getvalue(cpu) << 1) | (cpu.status & FLAG_CARRY)
-    putvalue(cpu, M)
+function rla(cpu, temps)
+    local M = (getvalue(cpu, temps) << 1) | (cpu.status & FLAG_CARRY)
+    putvalue(cpu, temps, M)
     local A = cpu.a & M
     local N = A & SIGN
     local Z = A == 0x00 ? FLAG_ZERO : 0
@@ -1086,46 +1173,55 @@ function rla(cpu)
     end
     cpu.a = A
     setstatus(cpu, FLAG_SIGN | FLAG_ZERO | FLAG_CARRY, N | Z | C)
+    temps
 end
 
-function rra(cpu)
-    cpu.value = ror(cpu)
-    adc(cpu, true)
+function rra(cpu, temps)
+    local value
+    (value, temps) = ror(cpu, temps)
+    temps = adc(cpu, temps, value)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
     end
+    temps
 end
 
-function sha(cpu)
-    putvalue(cpu, cpu.a & cpu.x & ((cpu.ea >> 8) + 0x1))
+function sha(cpu, temps)
+    putvalue(cpu, temps, cpu.a & cpu.x & ((temps.ea >> 8) + 0x1))
+    temps
 end
 
-function shx(cpu)
-    putvalue(cpu, cpu.x & ((cpu.ea >> 8) + 0x1))
+function shx(cpu, temps)
+    putvalue(cpu, temps, cpu.x & ((temps.ea >> 8) + 0x1))
+    temps
 end
 
-function shy(cpu)
-    putvalue(cpu, cpu.y & ((cpu.ea >> 8) + 0x1))
+function shy(cpu, temps)
+    putvalue(cpu, temps, cpu.y & ((temps.ea >> 8) + 0x1))
+    temps
 end
 
-function sre(cpu)
-    lsr(cpu)
-    eor(cpu)
+function sre(cpu, temps)
+    temps = lsr(cpu, temps)
+    temps = eor(cpu, temps)
     if cpu.penaltyop != 0 && cpu.penaltyaddr != 0
         cpu.clockticks6502 -= 1
     end
+    temps
 end
 
-function tas(cpu)
+function tas(cpu, temps)
     cpu.sp = cpu.a & cpu.x
-    putvalue(cpu, cpu.a & cpu.x & ((cpu.ea >> 8) + 0x1))
+    putvalue(cpu, temps, cpu.a & cpu.x & ((temps.ea >> 8) + 0x1))
+    temps
 end
 
-function nmi6502(cpu)
+function nmi6502(cpu, temps)
     push_6502_16(cpu, cpu.pc)
     push_6502_8(cpu, cpu.status  & ~FLAG_BREAK)
     cpu.status |= FLAG_INTERRUPT
     cpu.pc = UInt16(read6502(cpu, 0xFFFA)) | (UInt16(read6502(cpu, 0xFFFB)) << 8)
+    temps
 end
 
 function irq6502(cpu)
@@ -1281,74 +1377,73 @@ end
 
 @gencalls()
 
-function opcode(c) #::Cpu)
+function opcode(c,t) #::Cpu)
     o = c.opcode
-    if o==0x00 brk_6502(c) elseif o==0x01 ora(c) elseif o==0x02 jam(c) elseif o==0x03 slo(c)
-    elseif o==0x04  nop(c) elseif o==0x05 ora(c) elseif o==0x06 asl(c) elseif o==0x07 slo(c)
-    elseif o==0x08  php(c) elseif o==0x09 ora(c) elseif o==0x0A asl(c) elseif o==0x0B anc(c)
-    elseif o==0x0C  nop(c) elseif o==0x0D ora(c) elseif o==0x0E asl(c) elseif o==0x0F slo(c)
-    elseif o==0x10  bpl(c) elseif o==0x11 ora(c) elseif o==0x12 jam(c) elseif o==0x13 slo(c)
-    elseif o==0x14  nop(c) elseif o==0x15 ora(c) elseif o==0x16 asl(c) elseif o==0x17 slo(c)
-    elseif o==0x18  clc(c) elseif o==0x19 ora(c) elseif o==0x1A nop(c) elseif o==0x1B slo(c)
-    elseif o==0x1C  nop(c) elseif o==0x1D ora(c) elseif o==0x1E asl(c) elseif o==0x1F slo(c)
-    elseif o==0x20  jsr(c) elseif o==0x21 and(c) elseif o==0x22 jam(c) elseif o==0x23 rla(c)
-    elseif o==0x24  bit(c) elseif o==0x25 and(c) elseif o==0x26 rol(c) elseif o==0x27 rla(c)
-    elseif o==0x28  plp(c) elseif o==0x29 and(c) elseif o==0x2A rol(c) elseif o==0x2B anc(c)
-    elseif o==0x2C  bit(c) elseif o==0x2D and(c) elseif o==0x2E rol(c) elseif o==0x2F rla(c)
-    elseif o==0x30  bmi(c) elseif o==0x31 and(c) elseif o==0x32 jam(c) elseif o==0x33 rla(c)
-    elseif o==0x34  nop(c) elseif o==0x35 and(c) elseif o==0x36 rol(c) elseif o==0x37 rla(c)
-    elseif o==0x38  sec(c) elseif o==0x39 and(c) elseif o==0x3A nop(c) elseif o==0x3B rla(c)
-    elseif o==0x3C  nop(c) elseif o==0x3D and(c) elseif o==0x3E rol(c) elseif o==0x3F rla(c)
-    elseif o==0x40  rti(c) elseif o==0x41 eor(c) elseif o==0x42 jam(c) elseif o==0x43 sre(c)
-    elseif o==0x44  nop(c) elseif o==0x45 eor(c) elseif o==0x46 lsr(c) elseif o==0x47 sre(c)
-    elseif o==0x48  pha(c) elseif o==0x49 eor(c) elseif o==0x4A lsr(c) elseif o==0x4B alr(c)
-    elseif o==0x4C  jmp(c) elseif o==0x4D eor(c) elseif o==0x4E lsr(c) elseif o==0x4F sre(c)
-    elseif o==0x50  bvc(c) elseif o==0x51 eor(c) elseif o==0x52 jam(c) elseif o==0x53 sre(c)
-    elseif o==0x54  nop(c) elseif o==0x55 eor(c) elseif o==0x56 lsr(c) elseif o==0x57 sre(c)
-    elseif o==0x58  cli(c) elseif o==0x59 eor(c) elseif o==0x5A nop(c) elseif o==0x5B sre(c)
-    elseif o==0x5C  nop(c) elseif o==0x5D eor(c) elseif o==0x5E lsr(c) elseif o==0x5F sre(c)
-    elseif o==0x60  rts(c) elseif o==0x61 adc(c) elseif o==0x62 jam(c) elseif o==0x63 rra(c)
-    elseif o==0x64  nop(c) elseif o==0x65 adc(c) elseif o==0x66 ror(c) elseif o==0x67 rra(c)
-    elseif o==0x68  pla(c) elseif o==0x69 adc(c) elseif o==0x6A ror(c) elseif o==0x6B arr(c)
-    elseif o==0x6C  jmp(c) elseif o==0x6D adc(c) elseif o==0x6E ror(c) elseif o==0x6F rra(c)
-    elseif o==0x70  bvs(c) elseif o==0x71 adc(c) elseif o==0x72 jam(c) elseif o==0x73 rra(c)
-    elseif o==0x74  nop(c) elseif o==0x75 adc(c) elseif o==0x76 ror(c) elseif o==0x77 rra(c)
-    elseif o==0x78  sei(c) elseif o==0x79 adc(c) elseif o==0x7A nop(c) elseif o==0x7B rra(c)
-    elseif o==0x7C  nop(c) elseif o==0x7D adc(c) elseif o==0x7E ror(c) elseif o==0x7F rra(c)
-    elseif o==0x80  nop(c) elseif o==0x81 sta(c) elseif o==0x82 nop(c) elseif o==0x83 sax(c)
-    elseif o==0x84  sty(c) elseif o==0x85 sta(c) elseif o==0x86 stx(c) elseif o==0x87 sax(c)
-    elseif o==0x88  dey(c) elseif o==0x89 nop(c) elseif o==0x8A txa(c) elseif o==0x8B ane(c)
-    elseif o==0x8C  sty(c) elseif o==0x8D sta(c) elseif o==0x8E stx(c) elseif o==0x8F sax(c)
-    elseif o==0x90  bcc(c) elseif o==0x91 sta(c) elseif o==0x92 jam(c) elseif o==0x93 sha(c)
-    elseif o==0x94  sty(c) elseif o==0x95 sta(c) elseif o==0x96 stx(c) elseif o==0x97 sax(c)
-    elseif o==0x98  tya(c) elseif o==0x99 sta(c) elseif o==0x9A txs(c) elseif o==0x9B tas(c)
-    elseif o==0x9C  shy(c) elseif o==0x9D sta(c) elseif o==0x9E shx(c) elseif o==0x9F sha(c)
-    elseif o==0xA0  ldy(c) elseif o==0xA1 lda(c) elseif o==0xA2 ldx(c) elseif o==0xA3 lax(c)
-    elseif o==0xA4  ldy(c) elseif o==0xA5 lda(c) elseif o==0xA6 ldx(c) elseif o==0xA7 lax(c)
-    elseif o==0xA8  tay(c) elseif o==0xA9 lda(c) elseif o==0xAA tax(c) elseif o==0xAB lxa(c)
-    elseif o==0xAC  ldy(c) elseif o==0xAD lda(c) elseif o==0xAE ldx(c) elseif o==0xAF lax(c)
-    elseif o==0xB0  bcs(c) elseif o==0xB1 lda(c) elseif o==0xB2 jam(c) elseif o==0xB3 lax(c)
-    elseif o==0xB4  ldy(c) elseif o==0xB5 lda(c) elseif o==0xB6 ldx(c) elseif o==0xB7 lax(c)
-    elseif o==0xB8  clv(c) elseif o==0xB9 lda(c) elseif o==0xBA tsx(c) elseif o==0xBB las(c)
-    elseif o==0xBC  ldy(c) elseif o==0xBD lda(c) elseif o==0xBE ldx(c) elseif o==0xBF lax(c)
-    elseif o==0xC0  cpy(c) elseif o==0xC1 cmp(c) elseif o==0xC2 nop(c) elseif o==0xC3 dcp(c)
-    elseif o==0xC4  cpy(c) elseif o==0xC5 cmp(c) elseif o==0xC6 dec(c) elseif o==0xC7 dcp(c)
-    elseif o==0xC8  iny(c) elseif o==0xC9 cmp(c) elseif o==0xCA dex(c) elseif o==0xCB sbx(c)
-    elseif o==0xCC  cpy(c) elseif o==0xCD cmp(c) elseif o==0xCE dec(c) elseif o==0xCF dcp(c)
-    elseif o==0xD0  bne(c) elseif o==0xD1 cmp(c) elseif o==0xD2 jam(c) elseif o==0xD3 dcp(c)
-    elseif o==0xD4  nop(c) elseif o==0xD5 cmp(c) elseif o==0xD6 dec(c) elseif o==0xD7 dcp(c)
-    elseif o==0xD8  cld(c) elseif o==0xD9 cmp(c) elseif o==0xDA nop(c) elseif o==0xDB dcp(c)
-    elseif o==0xDC  nop(c) elseif o==0xDD cmp(c) elseif o==0xDE dec(c) elseif o==0xDF dcp(c)
-    elseif o==0xE0  cpx(c) elseif o==0xE1 sbc(c) elseif o==0xE2 nop(c) elseif o==0xE3 isc(c)
-    elseif o==0xE4  cpx(c) elseif o==0xE5 sbc(c) elseif o==0xE6 inc(c) elseif o==0xE7 isc(c)
-    elseif o==0xE8  inx(c) elseif o==0xE9 sbc(c) elseif o==0xEA nop(c) elseif o==0xEB sbc(c)
-    elseif o==0xEC  cpx(c) elseif o==0xED sbc(c) elseif o==0xEE inc(c) elseif o==0xEF isc(c)
-    elseif o==0xF0  beq(c) elseif o==0xF1 sbc(c) elseif o==0xF2 jam(c) elseif o==0xF3 isc(c)
-    elseif o==0xF4  nop(c) elseif o==0xF5 sbc(c) elseif o==0xF6 inc(c) elseif o==0xF7 isc(c)
-    elseif o==0xF8  sed(c) elseif o==0xF9 sbc(c) elseif o==0xFA nop(c) elseif o==0xFB isc(c)
-    elseif o==0xFC  nop(c) elseif o==0xFD sbc(c) elseif o==0xFE inc(c) elseif o==0xFF isc(c)
+    if o==0x00 brk_6502(c, t) elseif o==0x01 ora(c, t) elseif o==0x02 jam(c, t) elseif o==0x03 slo(c, t)
+    elseif o==0x04  nop(c, t) elseif o==0x05 ora(c, t) elseif o==0x06 asl(c, t) elseif o==0x07 slo(c, t)
+    elseif o==0x08  php(c, t) elseif o==0x09 ora(c, t) elseif o==0x0A asl(c, t) elseif o==0x0B anc(c, t)
+    elseif o==0x0C  nop(c, t) elseif o==0x0D ora(c, t) elseif o==0x0E asl(c, t) elseif o==0x0F slo(c, t)
+    elseif o==0x10  bpl(c, t) elseif o==0x11 ora(c, t) elseif o==0x12 jam(c, t) elseif o==0x13 slo(c, t)
+    elseif o==0x14  nop(c, t) elseif o==0x15 ora(c, t) elseif o==0x16 asl(c, t) elseif o==0x17 slo(c, t)
+    elseif o==0x18  clc(c, t) elseif o==0x19 ora(c, t) elseif o==0x1A nop(c, t) elseif o==0x1B slo(c, t)
+    elseif o==0x1C  nop(c, t) elseif o==0x1D ora(c, t) elseif o==0x1E asl(c, t) elseif o==0x1F slo(c, t)
+    elseif o==0x20  jsr(c, t) elseif o==0x21 and(c, t) elseif o==0x22 jam(c, t) elseif o==0x23 rla(c, t)
+    elseif o==0x24  bit(c, t) elseif o==0x25 and(c, t) elseif o==0x26 rol(c, t) elseif o==0x27 rla(c, t)
+    elseif o==0x28  plp(c, t) elseif o==0x29 and(c, t) elseif o==0x2A rol(c, t) elseif o==0x2B anc(c, t)
+    elseif o==0x2C  bit(c, t) elseif o==0x2D and(c, t) elseif o==0x2E rol(c, t) elseif o==0x2F rla(c, t)
+    elseif o==0x30  bmi(c, t) elseif o==0x31 and(c, t) elseif o==0x32 jam(c, t) elseif o==0x33 rla(c, t)
+    elseif o==0x34  nop(c, t) elseif o==0x35 and(c, t) elseif o==0x36 rol(c, t) elseif o==0x37 rla(c, t)
+    elseif o==0x38  sec(c, t) elseif o==0x39 and(c, t) elseif o==0x3A nop(c, t) elseif o==0x3B rla(c, t)
+    elseif o==0x3C  nop(c, t) elseif o==0x3D and(c, t) elseif o==0x3E rol(c, t) elseif o==0x3F rla(c, t)
+    elseif o==0x40  rti(c, t) elseif o==0x41 eor(c, t) elseif o==0x42 jam(c, t) elseif o==0x43 sre(c, t)
+    elseif o==0x44  nop(c, t) elseif o==0x45 eor(c, t) elseif o==0x46 lsr(c, t) elseif o==0x47 sre(c, t)
+    elseif o==0x48  pha(c, t) elseif o==0x49 eor(c, t) elseif o==0x4A lsr(c, t) elseif o==0x4B alr(c, t)
+    elseif o==0x4C  jmp(c, t) elseif o==0x4D eor(c, t) elseif o==0x4E lsr(c, t) elseif o==0x4F sre(c, t)
+    elseif o==0x50  bvc(c, t) elseif o==0x51 eor(c, t) elseif o==0x52 jam(c, t) elseif o==0x53 sre(c, t)
+    elseif o==0x54  nop(c, t) elseif o==0x55 eor(c, t) elseif o==0x56 lsr(c, t) elseif o==0x57 sre(c, t)
+    elseif o==0x58  cli(c, t) elseif o==0x59 eor(c, t) elseif o==0x5A nop(c, t) elseif o==0x5B sre(c, t)
+    elseif o==0x5C  nop(c, t) elseif o==0x5D eor(c, t) elseif o==0x5E lsr(c, t) elseif o==0x5F sre(c, t)
+    elseif o==0x60  rts(c, t) elseif o==0x61 adc(c, t) elseif o==0x62 jam(c, t) elseif o==0x63 rra(c, t)
+    elseif o==0x64  nop(c, t) elseif o==0x65 adc(c, t) elseif o==0x66 ror(c, t) elseif o==0x67 rra(c, t)
+    elseif o==0x68  pla(c, t) elseif o==0x69 adc(c, t) elseif o==0x6A ror(c, t) elseif o==0x6B arr(c, t)
+    elseif o==0x6C  jmp(c, t) elseif o==0x6D adc(c, t) elseif o==0x6E ror(c, t) elseif o==0x6F rra(c, t)
+    elseif o==0x70  bvs(c, t) elseif o==0x71 adc(c, t) elseif o==0x72 jam(c, t) elseif o==0x73 rra(c, t)
+    elseif o==0x74  nop(c, t) elseif o==0x75 adc(c, t) elseif o==0x76 ror(c, t) elseif o==0x77 rra(c, t)
+    elseif o==0x78  sei(c, t) elseif o==0x79 adc(c, t) elseif o==0x7A nop(c, t) elseif o==0x7B rra(c, t)
+    elseif o==0x7C  nop(c, t) elseif o==0x7D adc(c, t) elseif o==0x7E ror(c, t) elseif o==0x7F rra(c, t)
+    elseif o==0x80  nop(c, t) elseif o==0x81 sta(c, t) elseif o==0x82 nop(c, t) elseif o==0x83 sax(c, t)
+    elseif o==0x84  sty(c, t) elseif o==0x85 sta(c, t) elseif o==0x86 stx(c, t) elseif o==0x87 sax(c, t)
+    elseif o==0x88  dey(c, t) elseif o==0x89 nop(c, t) elseif o==0x8A txa(c, t) elseif o==0x8B ane(c, t)
+    elseif o==0x8C  sty(c, t) elseif o==0x8D sta(c, t) elseif o==0x8E stx(c, t) elseif o==0x8F sax(c, t)
+    elseif o==0x90  bcc(c, t) elseif o==0x91 sta(c, t) elseif o==0x92 jam(c, t) elseif o==0x93 sha(c, t)
+    elseif o==0x94  sty(c, t) elseif o==0x95 sta(c, t) elseif o==0x96 stx(c, t) elseif o==0x97 sax(c, t)
+    elseif o==0x98  tya(c, t) elseif o==0x99 sta(c, t) elseif o==0x9A txs(c, t) elseif o==0x9B tas(c, t)
+    elseif o==0x9C  shy(c, t) elseif o==0x9D sta(c, t) elseif o==0x9E shx(c, t) elseif o==0x9F sha(c, t)
+    elseif o==0xA0  ldy(c, t) elseif o==0xA1 lda(c, t) elseif o==0xA2 ldx(c, t) elseif o==0xA3 lax(c, t)
+    elseif o==0xA4  ldy(c, t) elseif o==0xA5 lda(c, t) elseif o==0xA6 ldx(c, t) elseif o==0xA7 lax(c, t)
+    elseif o==0xA8  tay(c, t) elseif o==0xA9 lda(c, t) elseif o==0xAA tax(c, t) elseif o==0xAB lxa(c, t)
+    elseif o==0xAC  ldy(c, t) elseif o==0xAD lda(c, t) elseif o==0xAE ldx(c, t) elseif o==0xAF lax(c, t)
+    elseif o==0xB0  bcs(c, t) elseif o==0xB1 lda(c, t) elseif o==0xB2 jam(c, t) elseif o==0xB3 lax(c, t)
+    elseif o==0xB4  ldy(c, t) elseif o==0xB5 lda(c, t) elseif o==0xB6 ldx(c, t) elseif o==0xB7 lax(c, t)
+    elseif o==0xB8  clv(c, t) elseif o==0xB9 lda(c, t) elseif o==0xBA tsx(c, t) elseif o==0xBB las(c, t)
+    elseif o==0xBC  ldy(c, t) elseif o==0xBD lda(c, t) elseif o==0xBE ldx(c, t) elseif o==0xBF lax(c, t)
+    elseif o==0xC0  cpy(c, t) elseif o==0xC1 cmp(c, t) elseif o==0xC2 nop(c, t) elseif o==0xC3 dcp(c, t)
+    elseif o==0xC4  cpy(c, t) elseif o==0xC5 cmp(c, t) elseif o==0xC6 dec(c, t) elseif o==0xC7 dcp(c, t)
+    elseif o==0xC8  iny(c, t) elseif o==0xC9 cmp(c, t) elseif o==0xCA dex(c, t) elseif o==0xCB sbx(c, t)
+    elseif o==0xCC  cpy(c, t) elseif o==0xCD cmp(c, t) elseif o==0xCE dec(c, t) elseif o==0xCF dcp(c, t)
+    elseif o==0xD0  bne(c, t) elseif o==0xD1 cmp(c, t) elseif o==0xD2 jam(c, t) elseif o==0xD3 dcp(c, t)
+    elseif o==0xD4  nop(c, t) elseif o==0xD5 cmp(c, t) elseif o==0xD6 dec(c, t) elseif o==0xD7 dcp(c, t)
+    elseif o==0xD8  cld(c, t) elseif o==0xD9 cmp(c, t) elseif o==0xDA nop(c, t) elseif o==0xDB dcp(c, t)
+    elseif o==0xDC  nop(c, t) elseif o==0xDD cmp(c, t) elseif o==0xDE dec(c, t) elseif o==0xDF dcp(c, t)
+    elseif o==0xE0  cpx(c, t) elseif o==0xE1 sbc(c, t) elseif o==0xE2 nop(c, t) elseif o==0xE3 isc(c, t)
+    elseif o==0xE4  cpx(c, t) elseif o==0xE5 sbc(c, t) elseif o==0xE6 inc(c, t) elseif o==0xE7 isc(c, t)
+    elseif o==0xE8  inx(c, t) elseif o==0xE9 sbc(c, t) elseif o==0xEA nop(c, t) elseif o==0xEB sbc(c, t)
+    elseif o==0xEC  cpx(c, t) elseif o==0xED sbc(c, t) elseif o==0xEE inc(c, t) elseif o==0xEF isc(c, t)
+    elseif o==0xF0  beq(c, t) elseif o==0xF1 sbc(c, t) elseif o==0xF2 jam(c, t) elseif o==0xF3 isc(c, t)
+    elseif o==0xF4  nop(c, t) elseif o==0xF5 sbc(c, t) elseif o==0xF6 inc(c, t) elseif o==0xF7 isc(c, t)
+    elseif o==0xF8  sed(c, t) elseif o==0xF9 sbc(c, t) elseif o==0xFA nop(c, t) elseif o==0xFB isc(c, t)
+    elseif o==0xFC  nop(c, t) elseif o==0xFD sbc(c, t) elseif o==0xFE inc(c, t) elseif o==0xFF isc(c, t)
     end
-    nothing
 end
 
 function exec6502(cpu, tickcount::Int64)
@@ -1376,8 +1471,7 @@ function inner_step6502(cpu)
     cpu.status |= FLAG_CONSTANT
     cpu.penaltyop = 0
     cpu.penaltyaddr = 0
-    address(cpu)
-    opcode(cpu)
+    opcode(cpu, address(cpu))
     local base_ticks::Int64 = ticktable[cpu.opcode + 1]::Int64
     #/*The is commented out in Mike Chamber's usage of the 6502 emulator for MOARNES*/
     if cpu.penaltyop != 0x0 && cpu.penaltyaddr != 0x0
