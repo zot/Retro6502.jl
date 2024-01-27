@@ -11,7 +11,7 @@ const EDIR=joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
 
 include("emu.jl")
-import .Fake6502m: Cpu, Temps, setticks, ticks
+import .Fake6502m: Cpu, Temps, setticks, ticks, pc
 include("base.jl")
 include("fakes.jl")
 include("c64.jl")
@@ -21,8 +21,10 @@ run2(mach::Machine, temps::Temps, sym::Symbol, max_ticks::Int64) =
 run2(mach::Machine, temps::Temps, addr::Addr, max_ticks::Int64) =
     run2(mach.newcpu, temps, addr, max_ticks)
 function run2(cpu::Cpu, temps::Temps, addr::Addr, max_ticks::Int64)
-    cpu.pc = addr.value - 1
-    @printf "pc: %04x opcode: %02x\n" cpu.pc Fake6502m.read6502(cpu, cpu.pc)
+    #cpu.pc = addr.value - 1
+    temps = Temps(temps; pc = addr.value - 1)
+    #@printf "pc: %04x opcode: %02x\n" cpu.pc Fake6502m.read6502(cpu, cpu.pc)
+    @printf "pc: %04x opcode: %02x\n" pc(cpu, temps) Fake6502m.read6502(cpu, pc(cpu, temps))
     cpu.sp = 0xfe
     local original_max = max_ticks
     local m::Int64 = max_ticks

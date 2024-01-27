@@ -148,7 +148,7 @@ const BASE_STACK = 0x100
 const K = 1024
 
 @kwdef mutable struct Cpu{T}
-    pc::UInt16 = 0x0000
+    #pc::UInt16 = 0x0000
     a::UInt8 = 0x00
     x::UInt8 = 0x00
     y::UInt8 = 0x00
@@ -173,7 +173,7 @@ end
 
 @kwdef struct Temps
     # registers
-    #pc::UInt16 = 0x0000
+    pc::UInt16 = 0x0000
     #status::UInt8 = 0x00
     #clockticks6502::Int64 = 0
     # addressing
@@ -214,7 +214,8 @@ end
 #Temps(t::Temps; ea = t.ea, opcode = t.opcode, memory = t.memory) = Temps(t; ea, opcode, memory)
 #Temps(t::Temps; ea = t.ea, opcode = t.opcode) = Temps(t; ea, opcode)
 #Temps(t::Temps; ea = t.ea) = Temps(t; ea)
-Temps(t::Temps; ea = nothing) = t
+#Temps(t::Temps; ea = nothing) = t
+Temps(t::Temps; ea = nothing, pc = t.pc) = Temps(; pc)
 #Temps(t::Temps) = t
 
 #Temps(cpu::Cpu) = Temps(; memory = cpu.memory)
@@ -227,7 +228,7 @@ function copy(src::Cpu{T}) where {T}
 end
 
 function copy(src::Cpu, dst::Cpu)
-     dst.pc = src.pc
+     #dst.pc = src.pc
      dst.a = src.a
      dst.x = src.x
      dst.y = src.y
@@ -375,81 +376,102 @@ function reset6502(cpu, temps)
     read6502(cpu, 0x01ff)
     read6502(cpu, 0x01fe)
     cpu.instructions = 0
-    cpu.pc = mem_6502_read16(cpu, 0xfffc)
+    #cpu.pc = mem_6502_read16(cpu, 0xfffc)
     cpu.sp = 0xfd
     cpu.status |= FLAG_CONSTANT | FLAG_INTERRUPT
-    setticks(cpu, temps, 0)
+    setticks(cpu, Temps(temps; pc = mem_6502_read16(cpu, 0xfffc)), 0)
 end
+
+pc(::Cpu, temps::Temps) = temps.pc
+incpc(::Cpu, temps::Temps, delta::UInt8) = Temps(temps; pc = temps.pc + UInt16(delta))
+incpc(::Cpu, temps::Temps, delta::UInt16) = Temps(temps; pc = temps.pc + delta)
+incpc(::Cpu, temps::Temps, delta) = Temps(temps; pc = Int32(temps.pc + delta) & 0xFFFF)
 
 #/*addressing mode functions, calculates effective addresses*/
 function imp(cpu, temps)
-    TEST_COMPAT && read6502(cpu, cpu.pc)
+    #TEST_COMPAT && read6502(cpu, cpu.pc)
+    TEST_COMPAT && read6502(cpu, pc(cpu, temps))
     temps
 end
 
 #/*addressing mode functions, calculates effective addresses*/
 function acc(cpu, temps)
-    TEST_COMPAT && read6502(cpu, cpu.pc)
-    temps
+    #TEST_COMPAT && read6502(cpu, cpu.pc)
+    TEST_COMPAT && read6502(cpu, pc(cpu, temps))
+    return temps
 end
 
 #/*addressing mode functions, calculates effective addresses*/
 function imm(cpu, temps)
     #local ea = cpu.pc
-    cpu.ea = cpu.pc
-    cpu.pc += 0x1
+    #cpu.ea = cpu.pc
+    cpu.ea = pc(cpu, temps)
+    #cpu.pc += 0x1
+    return incpc(cpu, temps, 0x01)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function zp(cpu, temps) # /*zero-page*/
     #local ea = UInt16(read6502(cpu, cpu.pc))
-    cpu.ea = UInt16(read6502(cpu, cpu.pc))
-    cpu.pc += 0x1
+    #cpu.ea = UInt16(read6502(cpu, cpu.pc))
+    cpu.ea = UInt16(read6502(cpu, pc(cpu, temps)))
+    #cpu.pc += 0x1
+    return incpc(cpu, temps, 0x01)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function zpx(cpu, temps) # /*zero-page,X*/
-    local zp = UInt16(read6502(cpu, cpu.pc))
+    #local zp = UInt16(read6502(cpu, cpu.pc))
+    local zp = UInt16(read6502(cpu, pc(cpu, temps)))
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
     #local ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
     cpu.ea = (zp + UInt16(cpu.x)) & 0xFF #/*zero-page wraparound*/
-    cpu.pc += 0x1
+    #cpu.pc += 0x1
+    return incpc(cpu, temps, 0x01)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function zpy(cpu, temps) # /*zero-page,Y*/
     #local ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
-    cpu.ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
-    cpu.pc += 0x1
+    #cpu.ea = (UInt16(read6502(cpu, cpu.pc)) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
+    cpu.ea = (UInt16(read6502(cpu, pc(cpu, temps))) + UInt16(cpu.y)) & 0xFF # /*zero-page wraparound*/
+    #cpu.pc += 0x1
+    return incpc(cpu, temps, 0x01)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function rel(cpu, temps) #/*relative for branch ops (8-bit immediate value, sign-extended)*/
-    cpu.reladdr = UInt16(read6502(cpu, cpu.pc))
-    cpu.pc += 0x1
+    #cpu.reladdr = UInt16(read6502(cpu, cpu.pc))
+    cpu.reladdr = UInt16(read6502(cpu, pc(cpu, temps)))
+    #cpu.pc += 0x1
     if (cpu.reladdr & SIGN) != 0x0000
         cpu.reladdr |= 0xFF00
     end
-    temps
+    return incpc(cpu, temps, 0x01)
+    #temps
 end
 
 function abso(cpu, temps) #/*absolute*/
     #local ea  =UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
-    cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
-    cpu.pc += 0x2
+    #cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    cpu.ea = UInt16(read6502(cpu, pc(cpu, temps))) | (UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8)
+    #cpu.pc += 0x2
+    return incpc(cpu, temps, 0x02)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 
 function absx(cpu, temps) #/*absolute,X*/
     local startpage
-    local addr = UInt16(read6502(cpu, cpu.pc))
-    local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    #local addr = UInt16(read6502(cpu, cpu.pc))
+    local addr = UInt16(read6502(cpu, pc(cpu, temps)))
+    #local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    local ea = addr | (UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8)
     startpage = ea & 0xFF00
     ea += UInt16(cpu.x)
     if (startpage != (ea & 0xFF00)) #/*one cycle penlty for page-crossing on some opcodes*/
@@ -457,15 +479,18 @@ function absx(cpu, temps) #/*absolute,X*/
         cpu.penaltyaddr = 0x1
         #temps = penaltyaddr(temps)
     end
-    cpu.pc += 0x2
-    cpu.ea=  ea
-    Temps(temps; ea)
+    #cpu.pc += 0x2
+    cpu.ea = ea
+    return incpc(cpu, temps, 0x02)
+    #Temps(temps; ea)
 end
 
 function absy(cpu, temps) # /*absolute,Y*/
     local startpage
-    local addr = UInt16(read6502(cpu, cpu.pc))
-    local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    #local addr = UInt16(read6502(cpu, cpu.pc))
+    local addr = UInt16(read6502(cpu, pc(cpu, temps)))
+    #local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
+    local ea = addr | (UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8)
     startpage = ea & 0xFF00;
     ea += UInt16(cpu.y)
     if (startpage != (ea & 0xFF00)) # /*one cycle penlty for page-crossing on some opcodes*/
@@ -473,37 +498,43 @@ function absy(cpu, temps) # /*absolute,Y*/
         cpu.penaltyaddr = 0x1
         #temps = penaltyaddr(temps)
     end
-    cpu.pc += 0x2;
+    #cpu.pc += 0x2;
     cpu.ea = ea
+    return incpc(cpu, temps, 0x02)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function ind(cpu, temps) # /*indirect*/
     local eahelp, eahelp2
-    eahelp = UInt16(read6502(cpu, cpu.pc)) | UInt16(UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
+    #eahelp = UInt16(read6502(cpu, cpu.pc)) | UInt16(UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
+    eahelp = UInt16(read6502(cpu, pc(cpu, temps))) | UInt16(UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8);
     eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*replicate 6502 page-boundary wraparound bug*/
     #local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
     cpu.ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
-    cpu.pc += 0x2;
+    #cpu.pc += 0x2;
+    return incpc(cpu, temps, 0x02)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function indx(cpu, temps) # /* (indirect,X)*/
-    local zp = UInt16(read6502(cpu, cpu.pc))
+    #local zp = UInt16(read6502(cpu, cpu.pc))
+    local zp = UInt16(read6502(cpu, pc(cpu, temps)))
     TEST_COMPAT && cpu.x != 0 && read6502(cpu, zp)
     local eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
-    cpu.pc += 0x1
+    #cpu.pc += 0x1
     #local ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
     cpu.ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
+    return incpc(cpu, temps, 0x01)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function indy(cpu, temps) # /* (indirect),Y*/
-    local eahelp = UInt16(read6502(cpu, cpu.pc));
-    cpu.pc += 0x1
+    #local eahelp = UInt16(read6502(cpu, cpu.pc));
+    local eahelp = UInt16(read6502(cpu, pc(cpu, temps)));
+    #cpu.pc += 0x1
     local eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*zero-page wraparound*/
     local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8);
     local startpage = ea & 0xFF00;
@@ -514,8 +545,9 @@ function indy(cpu, temps) # /* (indirect),Y*/
         TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
     end
     cpu.ea = ea
+    return incpc(cpu, temps, 0x01)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function getvalue(cpu, temps)
@@ -624,10 +656,12 @@ end
 function check_cross_page_boundary(cpu, temps)
     TEST_COMPAT &&
         read6502(cpu, cpu.oldpc)
-    if cpu.oldpc & 0xFF00 != cpu.pc & 0xFF00
+    #if cpu.oldpc & 0xFF00 != cpu.pc & 0xFF00
+    if cpu.oldpc & 0xFF00 != pc(cpu, temps) & 0xFF00
         # /*check if jump crossed a page boundary*/
         if TEST_COMPAT
-            read6502(cpu, (cpu.oldpc & 0xFF00) | (cpu.pc & 0x00FF))
+            #read6502(cpu, (cpu.oldpc & 0xFF00) | (cpu.pc & 0x00FF))
+            read6502(cpu, (cpu.oldpc & 0xFF00) | (pc(cpu, temps) & 0x00FF))
         end
         addticks(cpu, temps, 2)
     else
@@ -637,9 +671,11 @@ end
 
 function bcc(cpu, temps)
     if cpu.status & FLAG_CARRY == 0x0
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temps, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     else
         temps
     end
@@ -647,17 +683,21 @@ end
 
 function bcs(cpu, temps)
     if cpu.status & FLAG_CARRY == FLAG_CARRY
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temsp, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     end
 end
 
 function beq(cpu, temps)
     if cpu.status & FLAG_ZERO == FLAG_ZERO
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temps, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     else
         temps
     end
@@ -674,9 +714,11 @@ end
 
 function bmi(cpu, temps)
     if isstatusset(cpu, FLAG_SIGN)
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temps, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     else
         temps
     end
@@ -684,9 +726,11 @@ end
 
 function bne(cpu, temps)
     if  isstatusclear(cpu, FLAG_ZERO)
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temps, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     else
         temps
     end
@@ -694,29 +738,37 @@ end
 
 function bpl(cpu, temps)
     if isstatusclear(cpu, FLAG_SIGN)
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temps, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     else
         temps
     end
 end
 
 function brk_6502(cpu, temps)
-    TEST_COMPAT && read6502(cpu, cpu.pc)
-    cpu.pc += 0x1
-    push_6502_16(cpu, cpu.pc)
+    #TEST_COMPAT && read6502(cpu, cpu.pc)
+    TEST_COMPAT && read6502(cpu, pc(cpu, temps))
+    #cpu.pc += 0x1
+    temps = incpc(cpu, temps, 0x01)
+    #push_6502_16(cpu, cpu.pc)
+    push_6502_16(cpu, pc(cpu, temps))
     push_6502_8(cpu, cpu.status | FLAG_BREAK)
     setinterrupt(cpu)
-    cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
-    temps
+    #cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
+    return Temps(temps; pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8))
+    #temps
 end
 
 function bvc(cpu, temps)
     if cpu.status & FLAG_OVERFLOW == 0x0
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temps, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     else
         temps
     end
@@ -724,9 +776,11 @@ end
 
 function bvs(cpu, temps)
     if cpu.status & FLAG_OVERFLOW == FLAG_OVERFLOW
-        cpu.oldpc = cpu.pc
-        cpu.pc += cpu.reladdr
-        check_cross_page_boundary(cpu, temps)
+        #cpu.oldpc = cpu.pc
+        cpu.oldpc = pc(cpu, temps)
+        #cpu.pc += cpu.reladdr
+        temps = incpc(cpu, temps, cpu.reladdr)
+        return check_cross_page_boundary(cpu, temps)
     else
         temps
     end
@@ -843,30 +897,36 @@ function iny(cpu, temps)
 end
 
 function jam(cpu, temps)
-    cpu.pc -= 0x1
-    addticks(cpu, temps, 1)
+    #cpu.pc -= 0x1
+    temps = incpc(cpu, temps, -1)
+    return addticks(cpu, temps, 1)
 end
 
 function jmp(cpu, temps)
-    cpu.pc = cpu.ea
+    #cpu.pc = cpu.ea
     #cpu.pc = temps.ea
-    temps
+    return Temps(temps; pc = cpu.ea)
+    #temps
 end
 
 function jsr(cpu, temps)
     local oldsp = cpu.sp
-    TEST_COMPAT && (cpu.pc - 0x0001) != 0x0100 | oldsp && # not in page zero
+    #TEST_COMPAT && (cpu.pc - 0x0001) != 0x0100 | oldsp && # not in page zero
+    TEST_COMPAT && (pc(cpu, temps) - 0x0001) != 0x0100 | oldsp && # not in page zero
         read6502(cpu, 0x0100 | oldsp)
-    push_6502_16(cpu, cpu.pc - 0x1)
+    #push_6502_16(cpu, cpu.pc - 0x1)
+    push_6502_16(cpu, pc(cpu, temps) - 0x1)
     local ea = cpu.ea
     #local ea = temps.ea
-    if (cpu.pc - 0x0001) == 0x0100 | oldsp # in page zero
+    #if (cpu.pc - 0x0001) == 0x0100 | oldsp # in page zero
+    if (pc(cpu, temps) - 0x0001) == 0x0100 | oldsp # in page zero
         ea = (ea & 0xFF) | (UInt16(read6502(cpu, 0x0100 | oldsp)) << 8)
         cpu.ea = ea
     end
-    cpu.pc = ea
+    #cpu.pc = ea
+    return Temps(temps, pc = ea)
     #Temps(temps; ea)
-    temps
+    #temps
 end
 
 function lda(cpu, temps)
@@ -948,7 +1008,8 @@ function pha(cpu, temps)
 end
 
 function php(cpu, temps)
-    TEST_COMPAT && read6502(cpu, cpu.pc)
+    #TEST_COMPAT && read6502(cpu, cpu.pc)
+    TEST_COMPAT && read6502(cpu, pc(cpu, temps))
     push_6502_8(cpu, cpu.status | FLAG_BREAK)
     temps
 end
@@ -984,20 +1045,23 @@ function ror(cpu, temps)
     zerocalc(cpu, result)
     signcalc(cpu, result)
     putvalue(cpu, temps, result)
-    result, temps
+    cpu.result = result
+    temps
 end
 
 function rti(cpu, temps)
     cpu.status = (pull_6502_8(cpu) | FLAG_CONSTANT) & 0xEF
     local value = pull_6502_16(cpu)
-    cpu.pc = value;
-    temps
+    #cpu.pc = value
+    return Temps(temps; pc = value)
+    #temps
 end
 
 function rts(cpu, temps)
     local value = pull_6502_16(cpu)
-    cpu.pc = value + 0x0001
-    temps
+    #cpu.pc = value + 0x0001
+    return Temps(temps; pc = value + 0x0001)
+    #temps
 end
 
 # Thanks to Bruce Clark: http://www.6502.org/tutorials/decimal_mode.html
@@ -1248,9 +1312,8 @@ function rla(cpu, temps)
 end
 
 function rra(cpu, temps)
-    local value
-    (value, temps) = ror(cpu, temps)
-    temps = adc(cpu, temps, value)
+    temps = ror(cpu, temps)
+    temps = adc(cpu, temps, cpu.result)
     checkpenalty(cpu, temps)
 end
 
@@ -1295,14 +1358,16 @@ function tas(cpu, temps)
 end
 
 function nmi6502(cpu, temps)
-    push_6502_16(cpu, cpu.pc)
+    #push_6502_16(cpu, cpu.pc)
+    push_6502_16(cpu, pc(cpu, temps))
     push_6502_8(cpu, cpu.status  & ~FLAG_BREAK)
     cpu.status |= FLAG_INTERRUPT
-    cpu.pc = UInt16(read6502(cpu, 0xFFFA)) | (UInt16(read6502(cpu, 0xFFFB)) << 8)
-    temps
+    #cpu.pc = UInt16(read6502(cpu, 0xFFFA)) | (UInt16(read6502(cpu, 0xFFFB)) << 8)
+    return Temps(temps; pc = UInt16(read6502(cpu, 0xFFFA)) | (UInt16(read6502(cpu, 0xFFFB)) << 8))
+    #temps
 end
 
-function irq6502(cpu)
+function irq6502(cpu, temps::Temps)
 	#/*
     #push_6502_16(pc);
     #push_6502_8(status);
@@ -1310,12 +1375,15 @@ function irq6502(cpu)
     #pc = (ushort)read6502(0xFFFE) | ((ushort)read6502(0xFFFF) << 8);
     #*/
 	if (cpu.status & FLAG_INTERRUPT) == 0x0
-		push_6502_16(cpu, cpu.pc)
+		#push_6502_16(cpu, cpu.pc)
+		push_6502_16(cpu, pc(cpu, temps))
 		push_6502_8(cpu, cpu.status & ~FLAG_BREAK)
 		cpu.status |= FLAG_INTERRUPT
 		#/*pc = mem_6502_read16(0xfffe);*/
-		cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
+		#cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
+		return Temps(temps, pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8))
     end
+    return temps
 end
 
 const addrsyms = SVector(
@@ -1546,12 +1614,14 @@ function exec6502(cpu, temps, tickcount::Int64)
 end
 
 function inner_step6502(cpu, temps::Temps)
-    cpu.opcode = read6502(cpu, cpu.pc)
+    #cpu.opcode = read6502(cpu, cpu.pc)
+    cpu.opcode = read6502(cpu, pc(cpu, temps))
     cpu.penaltyop = 0
     cpu.penaltyaddr = 0
     #temps = Temps(temps; opcode = read6502(cpu, cpu.pc), penaltyop = 0, penaltyaddr = 0)
     #temps = Temps(temps; opcode = read6502(cpu, cpu.pc))
-    cpu.pc += 0x1
+    #cpu.pc += 0x1
+    temps = incpc(cpu, temps, 0x01)
     cpu.status |= FLAG_CONSTANT
     temps = opcode(cpu, address(cpu, temps))
     local base_ticks::Int64 = ticktable[cpu.opcode + 1]::Int64

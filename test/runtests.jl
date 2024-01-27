@@ -178,24 +178,32 @@ function run_fake_test(machine::Cpu, fake::Machine, test, file, number)
     empty!(FAKE_CYCLES)
 end
 
+retrievefield(machine::Cpu, temps::Temps, field::Symbol) =
+    field == :pc ? temps.pc : getfield(machine, field)
+
 function run_data_test(machine::Cpu, test, file, number)
+    local temps = Temps()
     for (new, std) in REGISTERS
-        val = getfield(machine, new)
-        setfield!(machine, new, convert(typeof(val), test.initial[std]))
+        if new == :pc
+            temps = Temps(temps; pc = UInt16(test.initial.pc))
+        else
+            val = getfield(machine, new)
+            setfield!(machine, new, convert(typeof(val), test.initial[std]))
+        end
     end
     for (addr, value) in test.initial.ram
         machine.memory[addr + 1] = value
     end
-    temps = Fake6502m.step6502(machine, Temps())
+    temps = Fake6502m.step6502(machine, temps)
     errs = []
     cycles = [CYCLES...]
     for (new, std) in REGISTERS
-        if getfield(machine, new) != test.final[std]
+        if retrievefield(machine, temps, new) != test.final[std]
             if new == :status
                 local diff = machine.status ⊻ UInt8(test.final.p)
                 push!(errs, "status ($(status(machine.status, diff))) != p ($(status(test.final.p, diff)))")
             else
-                push!(errs, "$new ($(rhex(getfield(machine, new)))) != $std ($(rhex(test.final[std])))")
+                push!(errs, "$new ($(rhex(retrievefield(machine, temps, new)))) != $std ($(rhex(test.final[std])))")
             end
         end
     end
@@ -262,7 +270,7 @@ const ILLEGAL = [
     0xE2, 0xE3, 0xFF, 0xE7, 0xFF, 0xEB, 0xEC, 0xEF,
     0xF2, 0xF3, 0xF4, 0xF7, 0xFA, 0xFB, 0xFC, 0xFF,
 ]
-const DONE = 0x00:0x1C
+const DONE = 0x00:0x6F
 const SKIP = [0x10]
 
 function runtests(dir; mode=:data)
