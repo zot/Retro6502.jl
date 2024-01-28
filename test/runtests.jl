@@ -278,7 +278,7 @@ function runtests(dir; mode=:data)
     machine = Cpu(; user_data = TestCpu())
     for inst in 0x00:0xFF
         #inst ∈ ILLEGAL && continue
-        inst ∈ DONE && continue
+        #inst ∈ DONE && continue
         #inst ∈ SKIP && continue
         runtests(machine, dir, inst; mode)
     end

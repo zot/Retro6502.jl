@@ -686,8 +686,10 @@ function bcs(cpu, temps)
         #cpu.oldpc = cpu.pc
         cpu.oldpc = pc(cpu, temps)
         #cpu.pc += cpu.reladdr
-        temps = incpc(cpu, temsp, cpu.reladdr)
+        temps = incpc(cpu, temps, cpu.reladdr)
         return check_cross_page_boundary(cpu, temps)
+    else
+        temps
     end
 end
 
@@ -878,7 +880,7 @@ function inc(cpu, temps)
     zerocalc(cpu, result)
     signcalc(cpu, result)
     putvalue(cpu, temps, result)
-    cpu.result = result
+    cpu.result = UInt8(result & 0xFF)
     temps
 end
 
