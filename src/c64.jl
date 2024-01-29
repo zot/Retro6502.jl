@@ -437,9 +437,9 @@ function test_c64()
             reset(mach)
             mach.cpu.s = 0xfe
             mach.newcpu.sp = 0xfe
-            result = call_6502(mach, :asmtest)
+            result, temps = call_6502(mach, :asmtest)
             print("RESULT: ")
-            diag(result)
+            diag(result, temps)
 
             println("CALLING FRTHTEST")
             reset(mach)

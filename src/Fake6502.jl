@@ -1,8 +1,12 @@
 module Fake6502
-using Printf
-#using ProfileCanvas
+using Printf, StaticArrays
+using ProfileCanvas
 
 export reset, step
+
+const K = 1024
+const M = K * 1024
+const G = M * 1024
 
 #const USE_GPL = true
 const USE_GPL = false
@@ -11,8 +15,11 @@ const EDIR=joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
 
 include("emu.jl")
-import .Fake6502m: Cpu, Temps, setticks, ticks, pc
+import .Fake6502m: Cpu, Temps, setticks, ticks, pc, incpc, setpc, base_inner_step6502, ticks
 include("base.jl")
+include("rewinding.jl")
+import .Rewinding
+import .Rewinding: Rewinder
 include("fakes.jl")
 include("c64.jl")
 
@@ -36,8 +43,13 @@ function run2(cpu::Cpu, temps::Temps, addr::Addr, max_ticks::Int64)
     return temps, ticks(cpu, temps) + original_max - m
 end
 
+Fake6502m.write6502(cpu::Cpu{Rewinder}, addr::UInt16, value::UInt8) = Rewinding.write6502(cpu.user_data, cpu, addr, value)
+
+Fake6502m.inner_step6502(cpu::Cpu{Rewinder}, temps::Temps) = Rewinding.inner_step6502(cpu.user_data, cpu, temps)
+
 function init_speed()
-    mach = NewMachine(; user_data = nothing)
+    #mach = NewMachine(; user_data = nothing)
+    mach = NewMachine(; user_data = Rewinder())
     mach.mem[intRange(screen)] .= ' '
     loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
     mach
@@ -53,17 +65,19 @@ function speed_test(; profile = :none)
     run2(mach, temps, :endless, 10000)
     println("running benchmark")
     if profile == :alloc
-        error("No profiler installed")
-        #@profview_allocs run2(mach, temps, :endless, 100000000)
+        #error("No profiler installed")
+        @profview_allocs run2(mach, temps, :endless, 10000000)
     elseif profile == :cpu
-        error("No profiler installed")
-        #@profview run2(mach, temps, :endless, 100000000)
+        #error("No profiler installed")
+        @profview run2(mach, temps, :endless, 100000)
     else
-        for i in 1:10
+        for i in 1:15
             start = time()
             temps, ticks = run2(mach, temps, :endless, 1000000)
             finish = time()
-            println("$ticks clock cycles took $((finish - start) * 1000) milliseconds")
+            @printf "%2d: %d clock cycles took %d milliseconds" i ticks (finish - start) * 1000
+            local trail = mach.newcpu.user_data
+            println("Trail len: ", (length(trail.trails) -1) * Rewinding.SNAPLEN + trail.nextfree - 1)
         end
     end
 end
@@ -107,9 +121,9 @@ function test()
 
     println("CALLING ASMTEST")
     reset(mach)
-    result = call_6502(mach, :asmtest)
+    result, temps = call_6502(mach, :asmtest)
     print("RESULT: ")
-    diag(result)
+    diag(result, temps)
 
     println("CALLING FRTHTEST")
     reset(mach)

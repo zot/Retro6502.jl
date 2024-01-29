@@ -40,7 +40,6 @@ const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.
 #const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
 #const fake6502_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
 #const fake6502_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
-const K = 1024
 const SCREEN_LEN = 40 * 25
 const screen = A(0x0400:0x07FF)
 const colors = A(0xD800:0xDBFF) # color is bits 8-11, color 1 for each character (color 3 in multicolor)
@@ -252,26 +251,26 @@ function call_step(mach::Machine)
             println("FAKE ROUTINE")
             mach.fake_routines[addr](mach)
             mach.cpu.pc += 3
-            mach.newcpu.pc += 3
+            incpc(mach, 3)
             check_cpu(mach)
             return
         #elseif ((addr.value - 1) & 0xFF00) == 0xFF00
         #    println("ROM INST: $(mach.read_mem(mach, UInt16(addr.value - 1)))")
         #    mach.verbose = true
         end
-    elseif mach[mach.newcpu.pc] === JSR
+    elseif mach[pc(mach)] === JSR
         # check for fake routine
-        addr = A(mach[mach.newcpu.pc + 1] + (UInt16(mach[mach.newcpu.pc + 2]) << 8))
+        addr = A(mach[pc(mach) + 1] + (UInt16(mach[pc(mach) + 2]) << 8))
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
         #println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
             println("FAKE ROUTINE")
             mach.fake_routines[addr](mach)
-            mach.newcpu.pc += 3
+            incpc(mach, 3)
             return
         end
     end
-    Fake6502m.step6502(mach.newcpu)
+    mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
     if USE_GPL
         stepfunc = mach.c_step
         @ccall $stepfunc(mach.ctx::Ptr{Context})::Cvoid
@@ -328,18 +327,23 @@ function check_cpu(mach::Machine, label = "")
     #end
 end
 
+pc(mach::Machine) = pc(mach.newcpu, mach.temps)
+incpc(mach::Machine, delta) = mach.temps = incpc(mach.newcpu, mach.temps, UInt16(delta))
+setpc(mach::Machine, value) = mach.temps = setpc(mach.newcpu, mach.temps, UInt16(value))
+
 call_6502(mach::Machine, sym::Symbol) = call_6502(mach, mach.labels[sym])
 function call_6502(mach::Machine, addr::Addr)
     if USE_GPL
         oldstate = unsafe_load(mach.ctx)
     else
         oldstate = Fake6502m.copy(mach.newcpu)
+        oldtemps = mach.temps
     end
     push_stack(mach, A(0x00))
     if USE_GPL
         mach.cpu.pc = addr.value - 1
     end
-    mach.newcpu.pc = addr.value - 1
+    setpc(mach, addr.value - 1)
     if USE_GPL
         while mach.cpu.s != oldstate.cpu.s
             call_step(mach)
@@ -352,13 +356,15 @@ function call_6502(mach::Machine, addr::Addr)
             call_step(mach)
         end
         newstate = mach.newcpu
+        newtemps = mach.temps
         mach.newcpu = oldstate
-        return newstate
+        mach.temps = oldtemps
+        return newstate, newtemps
     end
  end
 
 function call_frth(mach::Machine, sym)
-    pc = mach.labels[:pc]
+    local oldpc = mach.labels[:pc]
     # save pc
     pclo = mach[:pc]
     pchi = mach[mach.labels[:pc] + 1]
@@ -366,21 +372,21 @@ function call_frth(mach::Machine, sym)
     # set up pc to return to Julia
     retstub = mach.labels[:retstub].value - 1
     if USE_GPL
-        mach[pc] = UInt8(retstub & 0xFF)
-        mach[pc + 1] = UInt8(retstub >> 8)
+        mach[oldpc] = UInt8(retstub & 0xFF)
+        mach[oldpc + 1] = UInt8(retstub >> 8)
     end        
-    mach.newcpu.memory[pc.value] = UInt8(retstub & 0xFF)
-    mach.newcpu.memory[pc.value + 1] = UInt8(retstub >> 8)
+    mach.newcpu.memory[oldpc.value] = UInt8(retstub & 0xFF)
+    mach.newcpu.memory[oldpc.value + 1] = UInt8(retstub >> 8)
     # call code
     call_6502(mach, sym)
     diag(mach)
     # restore pc
     if USE_GPL
-        mach[pc] = pclo
-        mach[pc + 1] = pchi
+        mach[oldpc] = pclo
+        mach[oldpc + 1] = pchi
     end
-    mach.newcpu.memory[pc.value] = pclo
-    mach.newcpu.memory[pc.value + 1] = pchi
+    mach.newcpu.memory[oldpc.value] = pclo
+    mach.newcpu.memory[oldpc.value + 1] = pchi
 end
 
 function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = step, user_data::T) where T
@@ -424,12 +430,12 @@ function diag(mach::Machine, label = "")
     print(label)
     USE_GPL && diag(unsafe_load(mach.ctx))
     USE_GPL && print(lpad("", length(label)))
-    diag(mach.newcpu)
+    diag(mach.newcpu, mach.temps)
     println()
 end
 diag(ctx::Context) = diag(ctx.cpu, ctx.emu)
 diag(cpu::CpuState, emu::EmuState) = @printf "OLD a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.s emu.clockticks
-diag(cpu::Cpu) = @printf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.sp cpu.clockticks6502
+diag(cpu::Cpu, temps) = @printf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y pc(cpu, temps) cpu.sp cpu.clockticks6502
 
 run(mach::Machine, sym::Symbol; max_ticks = 100) = run(mach, mach.labels[sym]; max_ticks)
 function run(mach::Machine, addr::Addr; max_ticks = 100)
@@ -438,7 +444,7 @@ function run(mach::Machine, addr::Addr; max_ticks = 100)
     println("FINISHED RESETTING")
     mach.cpu.pc = addr.value - 1
     mach.cpu.s = 0xfe
-    mach.newcpu.pc = addr.value - 1
+    setpc(mach, addr.value - 1)
     mach.newcpu.sp = 0xfe
     check_cpu(mach, "RUN: ")
     #@printf "cpu.a: %d cpu.x: %d cpu.y: %d cpu.flags: %d cpu.s: %d cpu.pc: %d\n" offset(mach.cpu, :a) offset(mach.cpu, :x) offset(mach.cpu, :y) offset(mach.cpu, :flags) offset(mach.cpu, :s) offset(mach.cpu, :pc)

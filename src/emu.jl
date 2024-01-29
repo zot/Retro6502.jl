@@ -131,6 +131,9 @@ const FAKE_COMPAT = false
 
 const DECIMALMODE = true
 
+const K = 1024
+const M = K * 1024
+const G = M * 1024
 # STATUS: NV-BDIZC
 const FLAG_CARRY = 0x01
 const FLAG_ZERO = 0x02
@@ -144,8 +147,6 @@ const SIGN = 0x80
 const FLAG_SIGN = SIGN
 
 const BASE_STACK = 0x100
-
-const K = 1024
 
 @kwdef mutable struct Cpu{T}
     #pc::UInt16 = 0x0000
@@ -383,9 +384,9 @@ function reset6502(cpu, temps)
 end
 
 pc(::Cpu, temps::Temps) = temps.pc
-incpc(::Cpu, temps::Temps, delta::UInt8) = Temps(temps; pc = temps.pc + UInt16(delta))
-incpc(::Cpu, temps::Temps, delta::UInt16) = Temps(temps; pc = temps.pc + delta)
-incpc(::Cpu, temps::Temps, delta) = Temps(temps; pc = Int32(temps.pc + delta) & 0xFFFF)
+setpc(cpu::Cpu, temps::Temps, value::UInt8) = setpc(cpu, temps, UInt16(value))
+setpc(::Cpu, temps::Temps, value::UInt16) = Temps(temps; pc = value)
+incpc(cpu::Cpu, temps::Temps, delta) = setpc(cpu, temps, temps.pc + delta)
 
 #/*addressing mode functions, calculates effective addresses*/
 function imp(cpu, temps)
@@ -1388,7 +1389,7 @@ function irq6502(cpu, temps::Temps)
     return temps
 end
 
-const addrsyms = SVector(
+const addrsyms = (
 #    |  0  |  1  |  2 |  3  |  4 |  5 |  6 |  7 |  8 |  9  |  A |  B  |  C  |  D  |  E  |  F  |
 #=0=#  :imp,:indx,:imp,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:acc, :imm,:abso,:abso,:abso,:abso,  #0
 #=1=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #1
@@ -1485,7 +1486,7 @@ function address(c::Cpu, t::Temps)::Temps
     end
 end
 
-const opsyms = SVector(
+const opsyms = (
 #        |  0  |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |  A |  B |  C |  D |  E |  F |
 #=0=# :brk_6502,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:php,:ora,:asl,:anc,:nop,:ora,:asl,:slo, # 0
 #=1=#      :bpl,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:clc,:ora,:nop,:slo,:nop,:ora,:asl,:slo, # 1
@@ -1615,7 +1616,9 @@ function exec6502(cpu, temps, tickcount::Int64)
     temps
 end
 
-function inner_step6502(cpu, temps::Temps)
+inner_step6502(cpu, temps::Temps) = base_inner_step6502(cpu, temps)
+
+function base_inner_step6502(cpu, temps::Temps)
     #cpu.opcode = read6502(cpu, cpu.pc)
     cpu.opcode = read6502(cpu, pc(cpu, temps))
     cpu.penaltyop = 0
