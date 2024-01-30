@@ -75,9 +75,9 @@ function speed_test(; profile = :none)
             start = time()
             temps, ticks = run2(mach, temps, :endless, 1000000)
             finish = time()
-            @printf "%2d: %d clock cycles took %d milliseconds" i ticks (finish - start) * 1000
+            @printf "%2d: %d clock cycles took %lf milliseconds" i ticks (finish - start) * 1000
             local trail = mach.newcpu.user_data
-            println("Trail len: ", (length(trail.trails) -1) * Rewinding.SNAPLEN + trail.nextfree - 1)
+            #println("Trail len: ", (length(trail.trails) -1) * Rewinding.SNAPLEN + trail.nextfree - 1)
         end
     end
 end
