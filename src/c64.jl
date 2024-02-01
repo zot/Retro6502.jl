@@ -1,5 +1,4 @@
 module C64
-using Base: throw_invalid_char
 using ..Fake6502
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step
