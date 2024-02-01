@@ -223,12 +223,12 @@ end
 
 # high level machine hooks
 function read_mem(mach::Machine, addr::UInt16)::UInt8
-    #println("READ 0x", string(addr; base=16, pad=4))
+    #mprintln("READ 0x", string(addr; base=16, pad=4))
     return mach[addr]
 end
 
 function write_mem(mach::Machine, addr::UInt16, byte::UInt8)
-    #@printf "WRITE %04x = %02x\n" addr byte
+    #mprint(mach, @sprintf "WRITE %04x = %02x\n" addr byte)
     mach[addr] = byte
 end
 
@@ -241,36 +241,38 @@ rhex(num::Union{UInt16,Int16}) = rhex(num, 4)
 rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(string(num; base=16), pad, "0")
 
 function call_step(mach::Machine)
+    #mprintln(mach, "CALLING STEP")
     #diag(mach)
     if USE_GPL && mach[mach.cpu.pc] === JSR
         # check for fake routine
         addr = A(mach[mach.cpu.pc + 1] + (UInt16(mach[mach.cpu.pc + 2]) << 8))
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
-        #println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
+        #mprintln(mach, "JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
-            println("FAKE ROUTINE")
+            mprintln(mach, "FAKE ROUTINE")
             mach.fake_routines[addr](mach)
             mach.cpu.pc += 3
             incpc(mach, 3)
             check_cpu(mach)
             return
         #elseif ((addr.value - 1) & 0xFF00) == 0xFF00
-        #    println("ROM INST: $(mach.read_mem(mach, UInt16(addr.value - 1)))")
+        #    mprintln(mach, "ROM INST: $(mach.read_mem(mach, UInt16(addr.value - 1)))")
         #    mach.verbose = true
         end
     elseif mach[pc(mach)] === JSR
         # check for fake routine
         addr = A(mach[pc(mach) + 1] + (UInt16(mach[pc(mach) + 2]) << 8))
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
-        #println("JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
+        #mprintln(mach,"JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
-            println("FAKE ROUTINE")
+            mprintln(mach,"FAKE ROUTINE")
             mach.fake_routines[addr](mach)
             incpc(mach, 3)
             return
         end
     end
-    mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
+    #mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
+    mach.step(mach)
     if USE_GPL
         stepfunc = mach.c_step
         @ccall $stepfunc(mach.ctx::Ptr{Context})::Cvoid
@@ -331,8 +333,28 @@ pc(mach::Machine) = pc(mach.newcpu, mach.temps)
 incpc(mach::Machine, delta) = mach.temps = incpc(mach.newcpu, mach.temps, UInt16(delta))
 setpc(mach::Machine, value) = mach.temps = setpc(mach.newcpu, mach.temps, UInt16(value))
 
+prep_call(mach::Machine, sym::Symbol) = prep_call(mach, mach.labels[sym])
+function prep_call(mach::Machine, addr::Addr)
+    local oldstate = Fake6502m.copy(mach.newcpu)
+    local oldtemps = mach.temps
+
+    push_stack(mach, A(0x00))
+    setpc(mach, addr.value - 1)
+    return oldstate, oldtemps
+end
+
+function finish_call(mach::Machine, (oldstate, oldtemps))
+    local newstate = mach.newcpu
+    local newtemps = mach.temps
+
+    mach.newcpu = oldstate
+    mach.temps = oldtemps
+    return newstate, newtemps
+end
+
 call_6502(mach::Machine, sym::Symbol) = call_6502(mach, mach.labels[sym])
 function call_6502(mach::Machine, addr::Addr)
+    #mprintln(mach,"call_6502: $addr")
     if USE_GPL
         oldstate = unsafe_load(mach.ctx)
     else
@@ -362,6 +384,32 @@ function call_6502(mach::Machine, addr::Addr)
         return newstate, newtemps
     end
  end
+
+function prep_frth(mach::Machine, sym)
+    local oldpc = mach.labels[:pc]
+    # save pc
+    local pclo = mach[:pc]
+    local pchi = mach[mach.labels[:pc] + 1]
+    # prep to call frth word
+    # set up pc to return to Julia
+    retstub = mach.labels[:retstub].value - 1
+    mach.newcpu.memory[oldpc.value] = UInt8(retstub & 0xFF)
+    mach.newcpu.memory[oldpc.value + 1] = UInt8(retstub >> 8)
+    state = prep_call(mach, sym)
+    return oldpc, pclo, pchi, state
+end
+
+function finish_frth(mach::Machine, (oldpc, pclo, pchi, state))
+    finish_call(mach, state)
+    diag(mach)
+    # restore pc
+    if USE_GPL
+        mach[oldpc] = pclo
+        mach[oldpc + 1] = pchi
+    end
+    mach.newcpu.memory[oldpc.value] = pclo
+    mach.newcpu.memory[oldpc.value + 1] = pchi
+end
 
 function call_frth(mach::Machine, sym)
     local oldpc = mach.labels[:pc]
@@ -393,7 +441,7 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.so"))
     local machine = Machine{T}()
     initfunc = machine.c_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
-    println("INIT: $(typeof(machine.c_init))")
+    mprintln(machine, "INIT: $(typeof(machine.c_init))")
     machine.c_reset = Base.Libc.Libdl.dlsym(lib, :fake6502_reset)
     machine.c_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
     machine.c_read_mem = @cfunction(read_mem, Cuchar, (Ptr{Context}, Cushort))
@@ -411,7 +459,7 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     machine.verbose = false
     machine.ctx = @ccall $initfunc(machine.c_read_mem::Ptr{Cvoid}, machine.c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
     machine.temps = Fake6502m.reset6502(machine.newcpu, Temps(machine.newcpu))
-    println("CTX ", machine.ctx)
+    mprintln(machine, "CTX ", machine.ctx)
     machine.cpu = Accessor(machine.ctx).cpu
     machine.emu = Accessor(machine.ctx).emu
     machine.step = step_func
@@ -427,21 +475,21 @@ function register(func::Function, mach::Machine, addr::Addr)
 end
 
 function diag(mach::Machine, label = "")
-    print(label)
+    mprint(mach,label)
     USE_GPL && diag(unsafe_load(mach.ctx))
-    USE_GPL && print(lpad("", length(label)))
+    USE_GPL && mprint(mach,lpad("", length(label)))
     diag(mach.newcpu, mach.temps)
-    println()
+    mprintln(mach,)
 end
 diag(ctx::Context) = diag(ctx.cpu, ctx.emu)
 diag(cpu::CpuState, emu::EmuState) = @printf "OLD a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.s emu.clockticks
-diag(cpu::Cpu, temps) = @printf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y pc(cpu, temps) cpu.sp cpu.clockticks6502
+diag(cpu::Cpu, temps) = mprint(cpu, @sprintf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y pc(cpu, temps) cpu.sp cpu.clockticks6502)
 
 run(mach::Machine, sym::Symbol; max_ticks = 100) = run(mach, mach.labels[sym]; max_ticks)
 function run(mach::Machine, addr::Addr; max_ticks = 100)
-    println("RESETTING")
+    mprintln(mach,"RESETTING")
     reset(mach)
-    println("FINISHED RESETTING")
+    mprintln(mach,"FINISHED RESETTING")
     mach.cpu.pc = addr.value - 1
     mach.cpu.s = 0xfe
     setpc(mach, addr.value - 1)
@@ -490,19 +538,26 @@ function loadprg(filename, mach::Machine; labelfile="")
     return off, total-1
 end
 
+mprint(::Machine, args...) = print(args...)
+mprintln(::Machine, args...) = println(args...)
+
 function reset(mach::Machine)
-    resetfunc = mach.c_reset
-    @ccall $resetfunc(mach.ctx::Ptr{Context})::Cvoid
+    mprintln(mach, "RESETTING...")
+    if USE_GPL
+        resetfunc = mach.c_reset
+        @ccall $resetfunc(mach.ctx::Ptr{Context})::Cvoid
+        mach.cpu.flags = 0
+        mach.cpu.a = 0
+        mach.cpu.x = 0
+        mach.cpu.y = 0
+    end
     mach.temps = Fake6502m.reset6502(mach.newcpu, mach.temps)
-    mach.cpu.flags = 0
-    mach.cpu.a = 0
-    mach.cpu.x = 0
-    mach.cpu.y = 0
     mach.newcpu.status = 0
     mach.newcpu.a = 0
     mach.newcpu.x = 0
     mach.newcpu.y = 0
     check_cpu(mach, "RESET: ")
+    mprintln(mach, "DONE RESETTING")
 end
 
 function step(mach::Machine)

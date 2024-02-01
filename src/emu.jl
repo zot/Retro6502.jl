@@ -1418,7 +1418,6 @@ is_imm(op::UInt8) =
 function address(c::Cpu, t::Temps)::Temps
     local o = c.opcode
     #o = t.opcode
-    #@printf "ADDR OPCODE: %02x\n" o
     if     o==0x00  imp(c, t) elseif o==0x01  indx(c, t) elseif o==0x02  imp(c, t) elseif o==0x03 indx(c, t)
     elseif o==0x04   zp(c, t) elseif o==0x05    zp(c, t) elseif o==0x06   zp(c, t) elseif o==0x07   zp(c, t)
     elseif o==0x08  imp(c, t) elseif o==0x09   imm(c, t) elseif o==0x0A  acc(c, t) elseif o==0x0B  imm(c, t)

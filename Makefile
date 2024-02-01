@@ -36,7 +36,7 @@ $(FAKE6502):
 	rm -rf FAKE6502
 
 c64: default $(PRGS) FRC
-	julia --project=. -e 'include("src/Fake6502.jl"); Fake6502.C64.test_c64()'
+	julia -t 6 --project=. -e 'include("src/Fake6502.jl"); Fake6502.C64.test_c64()'
 
 resources:
 	mkdir -p resources

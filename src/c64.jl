@@ -1,14 +1,27 @@
 module C64
+using Base: throw_invalid_char
 using ..Fake6502
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
-using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex
+using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR, USE_GPL
-import ..Fake6502: Fake6502m, mem
+using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, check_cpu
+import ..Fake6502: Fake6502m, mem, mprint, mprintln
 using ..Fake6502.Fake6502m: Cpu
 import ..Fake6502.Fake6502m: read6502, write6502
-using SimpleDirectMediaLayer
-using SimpleDirectMediaLayer.LibSDL2
 using Printf
+using CImGui: GetTextLineHeight, GetTextLineHeightWithSpacing
+using CImGui
+using CImGui.LibCImGui
+using CImGui.ImGuiGLFWBackend
+using CImGui.ImGuiGLFWBackend.LibCImGui
+using CImGui.ImGuiGLFWBackend.LibGLFW
+using CImGui.ImGuiOpenGLBackend
+using CImGui.ImGuiOpenGLBackend.ModernGL
+# using CImGui.ImGuiGLFWBackend.GLFW
+using CImGui.CSyntax
+using CImGui.CSyntax.CStatic
+using ProfileCanvas
+using Base.Threads
 
 const SCREEN_WIDTH = 40 * 8
 const SCREEN_HEIGHT = 25 * 8
@@ -39,8 +52,6 @@ const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
 const VIC_MEM = A(0xD018)
 const VIC_BANK = A(0xDD00)
 const UPDATE_PERIOD = 1000000 ÷ 5
-
-#SDL2_pkg_dir = dirname(dirname(pathof(SimpleDirectMediaLayer)))
 
 color(value::Integer) = ((value >> 16, (value >> 8) & 0xFF, value & 0xff, 0xFF))
 
@@ -75,19 +86,81 @@ const SCREEN_CODES = Vector{Char}(
     BLANKS(255 - 219 + 1)
 )
 screen2ascii(char) = SCREEN_CODES(UInt8(char))
+const iochan = Channel{Function}(1024)
+
+const scr_width, scr_height = 320, 200
+
+struct Rect
+    x::Int
+    y::Int
+    w::Int # width 0 means left and right are the same, i.e. this is a segment or point 
+    h::Int # height 0 means top and bottom are the same, i.e. this is a segment or point
+end
+
+Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
 
 @kwdef mutable struct C64_machine
-    renderer::Ptr{SDL_Renderer}
-    screen::Ptr{SDL_Texture}
+    scr_id::Int
+    scr_buf::Array{GLubyte, 3} = zeros(GLubyte, (4, scr_width, scr_height))
+    scratch_buf::Array{GLubyte, 2} = fill(GLubyte(0xFF), (4, scr_width * scr_height))
+    video_lock::ReentrantLock = ReentrantLock()
+    needs_update::Atomic{Bool} = Atomic{Bool}(false)
+    has_dirty_rects::Atomic{Bool} = Atomic{Bool}(false)
     all_dirty::Bool = true
     dirty_characters::Array{Bool, 1} = zeros(Bool, (40*25,)) # characters that have changed
     dirty_character_defs::Array{Bool, 1} = zeros(Bool, (256,)) # character defs that have changed
+    dirty_rects::Vector{Rect} = Rect[]
     multicolor::Bool = false
     banks::Set{AddrRange} = Set{AddrRange}()
     screen_mem::Addr = A(0x400)
     character_mem::Addr = A(0x1000)
     running::Bool = true
 end
+
+isscreen(c64::C64_machine, addr::UInt16) = addr & 0xFC00 == c64.screen_mem.value - 1
+ischars(c64::C64_machine, addr::UInt16) = addr & 0xF800 == c64.character_mem.value - 1
+isvideo(c64::C64_machine, addr::UInt16) = isscreen(c64, addr) || ischars(c64, addr)
+
+right(r::Rect) = r.x + r.w
+
+bottom(r::Rect) = r.y + r.h
+
+above_or_left(r1::Rect, r2::Rect) = right(r1) + 1 < r2.x || bottom(r1) + 1 < r2.y
+
+intersects(r1::Rect, r2::Rect) = !(above_or_left(r1, r2) || above_or_left(r2, r1))
+
+merge(r1::Rect, r2::Rect) =
+    Rect(min(r1.x, r2.x), min(r1.y, r2.y); r = max(right(r1), right(r2)), b = max(bottom(r1), bottom(r2)))
+
+macro io(args)
+    :(use_io(()-> $(esc(args))))
+end
+
+usingio = true
+
+use_io(func::Function) = put!(iochan, func)
+
+function process_io()
+    if isready(iochan)
+        usingio = true
+        try
+            while isready(iochan)
+                take!(iochan)()
+            end
+        finally
+            usingio = false
+        end
+    end
+end
+
+mprint(::Machine{C64_machine}, args...) = @io print(args...)
+mprintln(::Machine{C64_machine}, args...) = @io println(args...)
+mprint(::Cpu{C64_machine}, args...) = @io print(args...)
+mprintln(::Cpu{C64_machine}, args...) = @io println(args...)
+
+c64(cpu::Cpu{C64_machine})::C64_machine = cpu.user_data
+
+c64(mach::Machine)::C64_machine = mach.properties[:c64]
 
 function screen_mem(mach::Machine)
     c = c64(mach)
@@ -99,24 +172,6 @@ function character_mem(mach::Machine)
     c = c64(mach)
     characters = c.character_mem ∈ VIC_SETS ? ROM : mem(mach)
     @view characters[c.character_mem.value:c.character_mem.value + 0x7FF]
-end
-
-function with_sdl(func::Function)
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 16)
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 16)
-    
-    @assert SDL_Init(SDL_INIT_EVERYTHING) == 0 "error initializing SDL: $(unsafe_string(SDL_GetError()))"
-    win = SDL_CreateWindow("C64", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1000, 1000, SDL_WINDOW_SHOWN)
-    SDL_SetWindowResizable(win, SDL_TRUE)
-    renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC)
-    #SDL_RenderSetLogicalSize(renderer, SCREEN_WIDTH, SCREEN_HEIGHT)
-    SDL_RenderClear(renderer)
-    try
-        func(renderer, win)
-    finally
-        SDL_DestroyWindow(win)
-        SDL_Quit()
-    end
 end
 
 function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
@@ -131,32 +186,40 @@ function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
 end
 
 function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
-    println("WRITE BYTE")
+    @io println("WRITE BYTE")
     state = c64(cpu)
     adr = A(addr)
-    adr ∈ state.screen_mem:state.screen_mem+999 &&
-        println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
-    if adr == BANK_SWITCH
+    if isvideo(state, addr)
+        video(state) do
+            if isscreen(state, addr)
+                # writing to screen
+                @io println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
+                state.needs_update[] = true
+                state.dirty_characters[adr - state.screen_mem + 1] = true
+            else
+                # writing to character data
+                @io println("WRITING TO CHARACTER MEM AT ", A(addr) - state.screen_mem)
+                state.needs_update[] = true
+                state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
+            end
+            cpu.memory[adr.value] = byte
+        end
+        return
+    elseif adr == BANK_SWITCH
         # writing to bank switcher
-        println("WRITE TO BANK SWITCH")
+        @io println("WRITE TO BANK SWITCH")
         switch_banks(state, byte)
         return
     elseif adr == VIC_MEM || adr == VIC_BANK
         cpu.memory[adr.value] == byte && return
         cpu.memory[adr.value] = byte
         update_vic_bank(cpu.memory, state)
-        println("WRITE TO VIC MEM")
+        @io println("WRITE TO VIC MEM")
         return
     elseif any(in_bank.(Ref(adr), (CHAR_ROM, KERNAL_ROM, BASIC_ROM), Ref(state.banks)))
         # skip it, it's ROM
-        println("WRITE TO ROM")
+        @io println("WRITE TO ROM")
         return
-    elseif state.screen_mem <= adr < state.screen_mem + 1000
-        # writing to screen
-        state.dirty_characters[adr - state.screen_mem + 1] = true
-    elseif state.character_mem <= adr < state.character_mem + 0x800
-        # writing to character data
-        state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
     end
     cpu.memory[adr.value] = byte
 end
@@ -173,25 +236,25 @@ function c64_read_mem(mach::Machine, addr::UInt16)
 end
 
 function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
-    #println("STORE ", hex(addr, 4), " = ", hex(byte))
+    #@io println("STORE ", hex(addr, 4), " = ", hex(byte))
     state = c64(mach)
     adr = A(addr)
     adr ∈ state.screen_mem:state.screen_mem+999 &&
-        println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
+        @io println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
     if adr == BANK_SWITCH
         # writing to bank switcher
-        println("WRITE TO BANK SWITCH")
+        @io println("WRITE TO BANK SWITCH")
         switch_banks(mach, byte)
         return
     elseif adr == VIC_MEM || adr == VIC_BANK
         mach[adr] == byte && return
         mach[adr] = byte
         update_vic_bank(mem(mach), state)
-        println("WRITE TO VIC MEM")
+        @io println("WRITE TO VIC MEM")
         return
     elseif any(in_bank.(Ref(adr), (CHAR_ROM, KERNAL_ROM, BASIC_ROM), Ref(state.banks)))
         # skip it, it's ROM
-        println("WRITE TO ROM")
+        @io println("WRITE TO ROM")
         return
     elseif state.screen_mem <= adr < state.screen_mem + 1000
         # writing to screen
@@ -221,11 +284,11 @@ function switch_banks(mach::Machine, value::UInt8)
         end
     end
     if settings != original
-        println("BANK CHOICES CHANGED")
-        settings != value && println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
+        @io println("BANK CHOICES CHANGED")
+        settings != value && @io println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
         mach[BANK_SWITCH] = settings
     else
-        println("BANK CHOICES DID NOT CHANGE")
+        @io println("BANK CHOICES DID NOT CHANGE")
     end
 end
 
@@ -237,130 +300,11 @@ function update_vic_bank(mem::Vector{UInt8}, state::C64_machine)
     state.character_mem = offset + ((mem[VIC_MEM] & 0x0E) << 11)
 end
 
-c64(cpu::Cpu{C64_machine}) = cpu.user_data
-
-c64(mach::Machine)::C64_machine = mach.properties[:c64]
-
-function update_screen(mach::Machine, win)
-    c = c64(mach)
-    all_dirty = c.all_dirty
-    rend = c.renderer
-    fmt = Ref(UInt32(0))
-    check(SDL_QueryTexture)(c.screen, Ptr{UInt32}(pointer_from_objref(fmt)), C_NULL, C_NULL, C_NULL)
-    info = Ref(SDL_RendererInfo(C_NULL, UInt32(0), UInt32(0), (zeros(UInt32, 16)...,), UInt32(0), UInt32(0)))
-    check(SDL_GetRendererInfo)(rend, pointer_from_objref(info))
-    found = false
-    for i in 1:info[].num_texture_formats
-        if fmt[] == info[].texture_formats[i]
-            found = true
-        end
-    end
-    !found &&
-        error("Unsupported texture format, cannot draw screen on window")
-    check(SDL_SetRenderTarget)(rend, c.screen)
-    dirtydefs = Set(i for (i,d) in enumerate(c.dirty_character_defs) if d)
-    isempty(dirtydefs) && !any(c.dirty_characters) &&
-        return false
-    scr_mem = screen_mem(mach)
-    char_mem = character_mem(mach)
-    # NOTE: CHANGE THIS TO USE SDL_LockTexture
-    #       Coalesce rectangles to reduce the number of calls?
-    for col in 0:39
-        for pixel in 0 : 7
-            x = col * 8 + pixel
-            for row in 0:24
-                i = row * 40 + col
-                char = scr_mem[1 + i]
-                !all_dirty && !c.dirty_characters[1 + i] && char ∉ dirtydefs &&
-                    continue
-                c.multicolor &&
-                    error("multicolor not supported")
-                bg = C64_PALETTE[1 + mach[BG0]]
-                fg = C64_PALETTE[1 + mach[COLOR_MEM + i]]
-                for rowbyte in 0 : 7
-                    y = row * 8 + rowbyte
-                    pixels = char_mem[1 + 8 * char + rowbyte]
-                    color = (pixels >> (7 - pixel)) & 1 == 1 ? fg : bg
-                    check(SDL_SetRenderDrawColor)(rend, color...)
-                    check(SDL_RenderDrawPoint)(rend, x, y)
-                end
-            end
-        end
-    end
-    c.dirty_characters .= false
-    c.dirty_character_defs .= false
-    c.all_dirty = false
-    #error("burp")
-    SDL_RenderPresent(rend)
-    draw_screen(mach, win)
-    #SDL_Delay(10)
-    return true
-end
-
-struct Close <: Exception end
-
-prev_evt = nothing
-last_draw = 0
-
-function draw_screen(mach::Machine, win)
-    c = c64(mach)
-    SDL_SetRenderTarget(c.renderer, C_NULL)
-    w = Ref{Int}(0)
-    h = Ref{Int}(0)
-    SDL_RenderGetLogicalSize(c.renderer, pointer_from_objref(w), pointer_from_objref(h))
-    if w[] == 0 && h[] == 0
-        SDL_GetWindowSize(win, pointer_from_objref(w), pointer_from_objref(h))
-    end
-    maxw = Int(round(Float64(h[]) / SCREEN_HEIGHT * SCREEN_WIDTH))
-    if w[] > maxw + 1
-        w[] = maxw
-    else
-        h[] = Int(round(Float64(w[]) / SCREEN_WIDTH * SCREEN_HEIGHT))
-    end
-    rect = Ref(SDL_Rect(0, 0, w[], h[]))
-    check(SDL_SetRenderDrawColor)(c.renderer, 0, 0, 0, 255)
-    # this doesn't work with check() for some reason
-    SDL_RenderClear(c.renderer)
-    check(SDL_RenderCopy)(c.renderer, c.screen, C_NULL, pointer_from_objref(rect))
-    SDL_RenderPresent(c.renderer)
-end
-
-as(T::Type, obj::SDL_Event) = as(T, Ref(obj))
-as(T::Type, obj::Ref{SDL_Event}) = unsafe_load(Ptr{T}(pointer_from_objref(obj)))
-
-function is_draw_evt(evt)
-    (isnothing(evt) || evt.type != SDL_WINDOWEVENT) &&
-        return false
-    evt = as(SDL_WindowEvent, evt)
-    return evt.event ∈ (SDL_WINDOWEVENT_EXPOSED, SDL_WINDOWEVENT_MAXIMIZED, SDL_WINDOWEVENT_SHOWN, SDL_WINDOWEVENT_RESTORED, SDL_WINDOWEVENT_SIZE_CHANGED, SDL_WINDOWEVENT_RESIZED)
-end
-
-function check_close(renderer, win, mach::Machine)
-    global prev_evt
-    global last_draw
-
-    event_ref = Ref{SDL_Event}(SDL_Event((zeros(UInt8, 56)...,)))
-    SDL_PollEvent(event_ref)
-    common = as(SDL_CommonEvent, event_ref)
-    evt = event_ref[]
-    prev_type = !isnothing(prev_evt) ? as(SDL_CommonEvent, prev_evt).type : nothing
-    if is_draw_evt(prev_evt) && (prev_type != common.type || common.timestamp - last_draw > 100)
-        draw_screen(mach, win)
-        prev_evt = nothing
-        last_draw = common.timestamp
-    elseif isnothing(prev_evt) || prev_type != common.type
-        prev_evt = event_ref[]
-    end
-    return common.type == SDL_QUIT
-end
-
-check(func::Function) = (args...)-> begin
-    result = func(args...)
-    result != 0 && error("Error $result calling $func: $(unsafe_string(SDL_GetError()))")
-    return 0
-end
-
-function init_c64(mach::Machine)
+function init()
+    state =
+        C64_machine(; scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(scr_width, scr_height))
+    mach = NewMachine(; write_func = c64_write_mem, user_data = state)
+    mach.properties[:c64] = state
     mem(mach)[intRange(screen)] .= ' '
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
@@ -389,81 +333,261 @@ function init_c64(mach::Machine)
         @printf "\n  %04x %s" labels[name].value-1 name
     end
     println()
-end
-
-function test_c64()
-    with_sdl() do renderer, win
-        screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, SCREEN_WIDTH, SCREEN_HEIGHT)
-        state = C64_machine(; renderer, screen)
-        global mach = NewMachine(; write_func = c64_write_mem, user_data = state)
-        mach.properties[:c64] = state
-        init_c64(mach)
-        println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
-        labels = mach.labels
-        lastlabel = nothing
-        labelcount = 0
-        addrs = Dict(addr => name for (name, addr) in labels)
-        maxwid = max(length.(string.(keys(labels)))...)
-        state.all_dirty = true
-        update_screen(mach, win)
-        try
-            nextupdate = UPDATE_PERIOD
-            mach.step = function(mach::Machine)
-                label = Base.get(addrs, A(mach.cpu.pc), nothing)
-                if !isnothing(label)
-                    if label === lastlabel
-                        labelcount === 0 && println("  LOOP...")
-                        labelcount += 1
-                    else
-                        print(rpad(string(label) * ": ", maxwid + 2))
-                        lastlabel = label
-                        labelcount = 0
-                        diag(mach)
-                    end
-                end
-                step(mach)
-                if mach.emu.clockticks >= nextupdate
-                    update_screen(mach, win)
-                    nextupdate += UPDATE_PERIOD
-                end
-                if check_close(renderer, win, mach)
-                    mach.cpu.s = 0
-                    mach.newcpu.sp = 0
-                end
+    println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
+    labels = mach.labels
+    lastlabel = nothing
+    labelcount = 0
+    addrs = Dict(addr => name for (name, addr) in labels)
+    maxwid = max(length.(string.(keys(labels)))...)
+    state.all_dirty = true
+    update_screen(mach)
+    nextupdate = UPDATE_PERIOD
+    mach.step = function(mach::Machine)
+        #println("c64 step")
+        label = Base.get(addrs, A(mach.cpu.pc), nothing)
+        if !isnothing(label)
+            if label === lastlabel
+                labelcount === 0 && @io println("  LOOP...")
+                labelcount += 1
+            else
+                @io print(rpad(string(label) * ": ", maxwid + 2))
+                lastlabel = label
+                labelcount = 0
+                diag(mach)
             end
-            register(print_n, mach, :print_n)
-
-            println("CALLING ASMTEST")
-            reset(mach)
-            mach.cpu.s = 0xfe
-            mach.newcpu.sp = 0xfe
-            result, temps = call_6502(mach, :asmtest)
-            print("RESULT: ")
-            diag(result, temps)
-
-            println("CALLING FRTHTEST")
-            reset(mach)
-            mach.cpu.s = 0xfe
-            mach.newcpu.sp = 0xfe
-            call_frth(mach, :frthtest_def)
-            println("RESULT: ", A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult] + 1]) << 8)))
-
-            run(mach, labels[:main]; max_ticks = 10000)
-            state.all_dirty = true
-            update_screen(mach, win)
-        catch err
-            if !(err isa Close)
-                @error "error running instructions" exception=(err,catch_backtrace())
-                rethrow(err)
-            end
-        finally
-            diag(mach)
         end
-        while !check_close(renderer, win, mach)
+        mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
+        #diag(mach)
+        if mach.emu.clockticks >= nextupdate
+            update_screen(mach)
+            nextupdate += UPDATE_PERIOD
         end
     end
-    display_chars(screen_mem(mach)) do c; SCREEN_CODES[c + 1]; end
-    println("done testing, ", mach.emu.clockticks, " clock ticks")
+    register(print_n, mach, :print_n)
+    return mach
+end
+
+function merge_dirty(mach::C64_machine, rect::Rect)
+    dirty = mach.dirty_rects
+    changed = true
+    while changed
+        changed = false
+        for i in length(dirty):-1:1
+            if intersects(rect, dirty[i])
+                rect = merge(rect, dirty[i])
+                deleteat!(dirty, i)
+                changed = true
+            end
+        end
+    end
+    push!(dirty, rect)
+    mach.has_dirty_rects[] = true
+end
+
+function video(func::Function, mach::C64_machine)
+    #try
+	#    error("attempt lock")
+    #catch ex
+    #    @error "Attempt lock" exception=(ex,catch_backtrace())
+    #end
+    lock(func, mach.video_lock)
+    #func()
+end
+
+function update_screen(mach::Machine)
+    c = c64(mach)
+    all_dirty = c.all_dirty
+    dirtydefs = Set(i for (i,d) in enumerate(c.dirty_character_defs) if d)
+    scr_mem = screen_mem(mach)
+    char_mem = character_mem(mach)
+    for col in 0:39
+        for row in 0:24
+            i = row * 40 + col
+            char = scr_mem[1 + i]
+            !all_dirty && !c.dirty_characters[1 + i] && char ∉ dirtydefs &&
+                continue
+            merge_dirty(c, Rect(col * 8, row * 8, 7, 7))
+            for pixel in 0 : 7
+                x = col * 8 + pixel
+                c.multicolor &&
+                    error("multicolor not supported")
+                bg = C64_PALETTE[1 + mach[BG0]]
+                fg = C64_PALETTE[1 + mach[COLOR_MEM + i]]
+                for rowbyte in 0 : 7
+                    y = row * 8 + rowbyte
+                    pixels = char_mem[1 + 8 * char + rowbyte]
+                    color = (pixels >> (7 - pixel)) & 1 == 1 ? fg : bg
+                    c.scr_buf[1, x + 1, y + 1] = GLubyte(color[1])
+                    c.scr_buf[2, x + 1, y + 1] = GLubyte(color[2])
+                    c.scr_buf[3, x + 1, y + 1] = GLubyte(color[3])
+                end
+            end
+        end
+    end
+    c.dirty_characters .= false
+    c.dirty_character_defs .= false
+    c.all_dirty = false
+    c.needs_update[] = false
+    println("dirty rects after update: ", c.dirty_rects)
+end
+
+struct Close <: Exception end
+
+function draw_rect(id, x, y, w, h, pixels)
+    ImGuiOpenGLBackend.glBindTexture(GL_TEXTURE_2D, ImGuiOpenGLBackend.g_ImageTexture[id])
+    ImGuiOpenGLBackend.glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, GLsizei(w), GLsizei(h), ImGuiOpenGLBackend.GL_RGBA, ImGuiOpenGLBackend.GL_UNSIGNED_BYTE, pixels)
+end
+
+function draw_screen(mach::Machine)
+    state = c64(mach)
+    !state.needs_update[] && !state.has_dirty_rects[] &&
+        return
+    video(state) do
+        state.needs_update[] &&
+            update_screen(mach)
+        if state.has_dirty_rects[]
+            image_buf = state.scr_buf
+            image_id = state.scr_id
+            pix = state.scratch_buf
+            for r in state.dirty_rects
+                count = 1
+                for y = r.y:bottom(r), x = r.x:right(r)
+                    for c in 1:3
+                        pix[c, count] = image_buf[c, x + 1, y + 1]
+                    end
+                    count += 1
+                end
+                ImGuiOpenGLBackend.ImGui_ImplOpenGL3_UpdateImageTexture(state.scr_id, image_buf, scr_width, scr_height)
+                draw_rect(image_id, r.x, r.y, r.w + 1, r.h + 1, pix)
+            end
+            empty!(state.dirty_rects)
+            state.has_dirty_rects[] = false
+        end
+    end
+end
+
+function draw_c64(mach::Machine, width, height)
+    state = c64(mach)
+    nodeco =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoDocking
+    if CImGui.Begin("Screen", Ptr{Nothing}(0), nodeco,)
+        CImGui.SetWindowPos((0, 0))
+        CImGui.SetWindowSize(ImVec2(width, height))
+        draw_screen(mach)
+        sz = CImGui.GetContentRegionAvail()
+        CImGui.Image(Ptr{Cvoid}(state.scr_id), CImGui.ImVec2(sz.x, sz.y - GetTextLineHeightWithSpacing()))
+        CImGui.Text("THIS is the bottom line")
+    end
+    CImGui.End()
+end
+
+function with_imgui(func::Function, init::Function)
+    glfwDefaultWindowHints()
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3)
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2)
+    if Sys.isapple()
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE) # 3.2+ only
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE) # required on Mac
+    end
+    # create window
+    window = glfwCreateWindow(1280, 720, "C64", C_NULL, C_NULL)
+    @assert window != C_NULL
+    glfwMakeContextCurrent(window)
+    glfwSwapInterval(1)  # enable vsync
+    # create OpenGL and GLFW context
+    window_ctx = ImGuiGLFWBackend.create_context(window)
+    gl_ctx = ImGuiOpenGLBackend.create_context()
+    # setup Dear ImGui context
+    ctx = CImGui.CreateContext()
+    # setup Dear ImGui style
+    CImGui.StyleColorsDark() #.StyleColorsClassic, StyleColorsLight
+    # setup Platform/Renderer bindings
+    ImGuiGLFWBackend.init(window_ctx)
+    ImGuiOpenGLBackend.init(gl_ctx)
+    try
+        clear_color = Cfloat[0.45, 0.55, 0.60, 1.00]
+        init()
+        while glfwWindowShouldClose(window) == 0
+            glfwPollEvents()
+            # start the Dear ImGui frame
+            ImGuiOpenGLBackend.new_frame(gl_ctx)
+            ImGuiGLFWBackend.new_frame(window_ctx)
+            CImGui.NewFrame()
+            width, height = Ref{Cint}(), Ref{Cint}() #! need helper fcn
+            glfwGetFramebufferSize(window, width, height)
+            func(width[], height[])
+            # rendering
+            CImGui.Render()
+            glfwMakeContextCurrent(window)
+            glClearColor(clear_color...)
+            glClear(GL_COLOR_BUFFER_BIT)
+            ImGuiOpenGLBackend.render(gl_ctx)
+            if unsafe_load(igGetIO().ConfigFlags) & ImGuiConfigFlags_ViewportsEnable == ImGuiConfigFlags_ViewportsEnable
+                backup_current_context = glfwGetCurrentContext()
+                igUpdatePlatformWindows()
+                GC.@preserve gl_ctx igRenderPlatformWindowsDefault(C_NULL, pointer_from_objref(gl_ctx))
+                glfwMakeContextCurrent(backup_current_context)
+            end
+            glfwSwapBuffers(window)
+        end
+    catch e
+        @error "Error in renderloop!" exception=(e,catch_backtrace())
+        #Base.show_backtrace(stderr, catch_backtrace())
+    finally
+        ImGuiOpenGLBackend.shutdown(gl_ctx)
+        ImGuiGLFWBackend.shutdown(window_ctx)
+        CImGui.DestroyContext(ctx)
+        glfwDestroyWindow(window)
+    end
+end
+
+ticks(mach::Machine) = Fake6502m.ticks(mach.newcpu, mach.temps)
+
+function test_c64()
+    local mach = nothing
+    local state = nothing
+    local task = nothing
+
+    function init_c64()
+        mach = init()
+        state = c64(mach)
+        Threads.@spawn begin
+            try
+                @io println("CALLING ASMTEST")
+                reset(mach)
+                mach.cpu.s = 0xfe
+                mach.newcpu.sp = 0xfe
+                result, temps = call_6502(mach, :asmtest)
+                @io begin
+                    print("RESULT: ")
+                    diag(result, temps)
+                end
+                
+                @io println("CALLING FRTHTEST")
+                reset(mach)
+                mach.cpu.s = 0xfe
+                mach.newcpu.sp = 0xfe
+                call_frth(mach, :frthtest_def)
+                @io println("RESULT: ", A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult] + 1]) << 8)))
+                
+                run(mach, mach.labels[:main]; max_ticks = 10000)
+                state.all_dirty = true
+                update_screen(mach)
+            catch err
+                cb = catch_backtrace()
+                use_io() do
+                    @error "Error in 6502 thread" exception=(err,cb)
+                end
+            end
+        end
+        return mach
+    end
+    with_imgui(init_c64) do w, h
+        process_io()
+        draw_c64(mach, w, h)
+    end
 end
 
 end # module C64
