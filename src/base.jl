@@ -538,9 +538,6 @@ function loadprg(filename, mach::Machine; labelfile="")
     return off, total-1
 end
 
-mprint(::Machine, args...) = print(args...)
-mprintln(::Machine, args...) = println(args...)
-
 function reset(mach::Machine)
     mprintln(mach, "RESETTING...")
     if USE_GPL

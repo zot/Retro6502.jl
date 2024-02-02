@@ -14,6 +14,9 @@ const CDIR=joinpath(dirname(@__FILE__), "..", "C")
 const EDIR=joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
 
+mprint(::Any, args...) = print(args...)
+mprintln(::Any, args...) = println(args...)
+
 include("emu.jl")
 import .Fake6502m: Cpu, Temps, setticks, ticks, pc, incpc, setpc, base_inner_step6502, ticks
 include("base.jl")
@@ -48,8 +51,10 @@ Fake6502m.write6502(cpu::Cpu{Rewinder}, addr::UInt16, value::UInt8) = Rewinding.
 Fake6502m.inner_step6502(cpu::Cpu{Rewinder}, temps::Temps) = Rewinding.inner_step6502(cpu.user_data, cpu, temps)
 
 function init_speed()
-    mach = NewMachine(; user_data = nothing)
-    #mach = NewMachine(; user_data = Rewinder())
+    #mach = NewMachine(; user_data = nothing)
+    rew = Rewinder()
+    mach = NewMachine(; user_data = rew)
+    Rewinding.init(rew, mach.newcpu, mach.temps)
     mach.mem[intRange(screen)] .= ' '
     loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
     mach
@@ -76,8 +81,8 @@ function speed_test(; profile = :none)
             temps, ticks = run2(mach, temps, :endless, 1000000)
             finish = time()
             @printf "%2d: %d clock cycles took %lf milliseconds\n" i ticks (finish - start) * 1000
-            #local trail = mach.newcpu.user_data
-            #println("Trail len: ", (length(trail.trails) -1) * Rewinding.SNAPLEN + trail.nextfree - 1)
+            local trail = mach.newcpu.user_data
+            println("Trail len: ", (length(trail.trails) -1) * Rewinding.SNAPLEN + trail.nextfree - 1)
         end
     end
 end

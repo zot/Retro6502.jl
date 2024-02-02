@@ -250,7 +250,8 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
                 state.needs_update[] = true
                 state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
             end
-            cpu.memory[adr.value] = byte
+            #cpu.memory[adr.value] = byte
+            Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
         end
         return
     elseif adr == BANK_SWITCH
@@ -260,7 +261,8 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
         return
     elseif adr == VIC_MEM || adr == VIC_BANK
         cpu.memory[adr.value] == byte && return
-        cpu.memory[adr.value] = byte
+        #cpu.memory[adr.value] = byte
+        Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
         update_vic_bank(cpu.memory, state)
         @io println("WRITE TO VIC MEM")
         return
@@ -269,7 +271,8 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
         @io println("WRITE TO ROM")
         return
     end
-    cpu.memory[adr.value] = byte
+    #cpu.memory[adr.value] = byte
+    Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
 end
 
 function c64_read_mem(mach::Machine, addr::UInt16)
@@ -288,44 +291,17 @@ end
 c64_set_mem(mach::Machine, addr::Addr, byte::UInt8) = c64_set_mem(mach, UInt16(addr.value - 0x01), byte)
 c64_set_mem(mach::Machine, addr::UInt16, byte::UInt8) =
     Rewinding.write6502(c64(mach).rewinder, mach.newcpu, addr, byte)
-
-function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
-    #@io println("STORE ", hex(addr, 4), " = ", hex(byte))
-    state = c64(mach)
-    adr = A(addr)
-    adr ∈ state.screen_mem:state.screen_mem+999 &&
-        @io println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
-    if adr == BANK_SWITCH
-        # writing to bank switcher
-        @io println("WRITE TO BANK SWITCH")
-        switch_banks(mach, byte)
-        return
-    elseif adr == VIC_MEM || adr == VIC_BANK
-        mach[adr] == byte && return
-        c64_set_mem(mach, adr, byte)
-        update_vic_bank(mem(mach), state)
-        @io println("WRITE TO VIC MEM")
-        return
-    elseif any(in_bank.(Ref(adr), (CHAR_ROM, KERNAL_ROM, BASIC_ROM), Ref(state.banks)))
-        # skip it, it's ROM
-        @io println("WRITE TO ROM")
-        return
-    elseif state.screen_mem <= adr < state.screen_mem + 1000
-        # writing to screen
-        state.dirty_characters[adr - state.screen_mem + 1] = true
-    elseif state.character_mem <= adr < state.character_mem + 0x800
-        # writing to character data
-        state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
-    end
-    c64_set_mem(mach, adr, byte)
-end
+c64_set_mem(cpu::Cpu{C64_machine}, addr::Addr, byte::UInt8) =
+    c64_set_mem(cpu, UInt16(addr.value - 0x01), byte)
+c64_set_mem(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
+    Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
 
 in_bank(addr, bank, banks) = addr ∈ bank && bank ∈ banks
 
-function switch_banks(mach::Machine, value::UInt8)
-    banks = c64(mach).banks
-    io = mach[IO_CTL]
-    original = settings = mach[BANK_SWITCH]
+function switch_banks(cpu::Cpu{C64_machine}, value::UInt8)
+    banks = cpu.user_data.banks
+    io = cpu.memory[IO_CTL.value]
+    original = settings = cpu.memory[BANK_SWITCH.value]
     for bit in (0x01, 0x02, 0x04)
         if io & bit != 0
             settings = (settings & ~bit) | bit
@@ -340,7 +316,7 @@ function switch_banks(mach::Machine, value::UInt8)
     if settings != original
         @io println("BANK CHOICES CHANGED")
         settings != value && @io println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
-        c64_set_mem(mach, BANK_SWITCH, settings)
+        c64_set_mem(cpu, BANK_SWITCH, settings)
     else
         @io println("BANK CHOICES DID NOT CHANGE")
     end
@@ -394,7 +370,7 @@ end
 function init()
     state =
         C64_machine(; scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(scr_width, scr_height))
-    mach = NewMachine(; write_func = c64_write_mem, user_data = state)
+    mach = NewMachine(; user_data = state)
     mem(mach)[intRange(screen)] .= ' '
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
@@ -417,7 +393,8 @@ function init()
     if USE_GPL
         mach.newcpu.memory[IO_CTL.value] = 0x2F
     end
-    switch_banks(mach, 0x07)
+    switch_banks(mach.newcpu, 0x07)
+    Rewinding.init(state.rewinder, mach.newcpu, mach.temps)
     labels = mach.labels
     off, total = loadprg("$EDIR/condensed.prg", mach; labelfile="$EDIR/condensed.labels")
     println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")

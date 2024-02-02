@@ -122,6 +122,9 @@
 
 module Fake6502m
 
+using ..Fake6502
+using ..Fake6502: mprint, mprintln
+
 using Printf, StaticArrays
 
 #const TEST_COMPAT = true
