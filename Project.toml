@@ -8,6 +8,7 @@ CImGui = "5d785b6c-b76f-510e-a07c-3070796c7e87"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 ProfileCanvas = "efd6af41-a80b-495e-886c-e51b0c7d77a3"
 ProfileView = "c46f51b8-102a-5cf2-8d2c-8597cb0e0da7"
+Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 SimpleDirectMediaLayer = "98e33af6-2ee5-5afd-9e75-cbc738b767c4"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 

@@ -1,4 +1,5 @@
 module C64
+using Revise
 using ..Fake6502
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step
@@ -7,6 +8,8 @@ using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, check_c
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
 using ..Fake6502.Fake6502m: Cpu
 import ..Fake6502.Fake6502m: read6502, write6502
+using ..Fake6502.Rewinding
+using ..Fake6502.Rewinding: Rewinder
 using Printf
 using CImGui: GetTextLineHeight, GetTextLineHeightWithSpacing, GetStyle
 using CImGui
@@ -51,6 +54,7 @@ const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
 const VIC_MEM = A(0xD018)
 const VIC_BANK = A(0xDD00)
 const UPDATE_PERIOD = 1000000 ÷ 5
+revising = false
 
 color(value::Integer) = ((value >> 16, (value >> 8) & 0xFF, value & 0xff, 0xFF))
 
@@ -118,7 +122,9 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     actually_paused::Condition = Condition()
     pausing::Atomic{Bool} = Atomic{Bool}(false)
     running::Atomic{Bool} = Atomic{Bool}(true)
-    time_slider::Int32 = Int32(0)
+    rewinder::Rewinder = Rewinder()
+    maxtime::Atomic{UInt64} = Atomic{UInt64}(0)
+    curtime::Atomic{UInt64} = Atomic{UInt64}(0)
 end
 
 function pause(f::Function, c::C64_machine)
@@ -277,6 +283,12 @@ function c64_read_mem(mach::Machine, addr::UInt16)
     return mach[adr]
 end
 
+#c64_set_mem(mach::Machine, addr::Addr, byte::UInt8) = mach[addr] = byte
+#c64_set_mem(mach::Machine, addr::UInt16, byte::UInt8) = c64_set_mem(mach, A(addr), byte)
+c64_set_mem(mach::Machine, addr::Addr, byte::UInt8) = c64_set_mem(mach, UInt16(addr.value - 0x01), byte)
+c64_set_mem(mach::Machine, addr::UInt16, byte::UInt8) =
+    Rewinding.write6502(c64(mach).rewinder, mach.newcpu, addr, byte)
+
 function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
     #@io println("STORE ", hex(addr, 4), " = ", hex(byte))
     state = c64(mach)
@@ -290,7 +302,7 @@ function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
         return
     elseif adr == VIC_MEM || adr == VIC_BANK
         mach[adr] == byte && return
-        mach[adr] = byte
+        c64_set_mem(mach, adr, byte)
         update_vic_bank(mem(mach), state)
         @io println("WRITE TO VIC MEM")
         return
@@ -305,7 +317,7 @@ function c64_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
         # writing to character data
         state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
     end
-    mach[addr] = byte
+    c64_set_mem(mach, adr, byte)
 end
 
 in_bank(addr, bank, banks) = addr ∈ bank && bank ∈ banks
@@ -328,7 +340,7 @@ function switch_banks(mach::Machine, value::UInt8)
     if settings != original
         @io println("BANK CHOICES CHANGED")
         settings != value && @io println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
-        mach[BANK_SWITCH] = settings
+        c64_set_mem(mach, BANK_SWITCH, settings)
     else
         @io println("BANK CHOICES DID NOT CHANGE")
     end
@@ -340,6 +352,43 @@ function update_vic_bank(mem::Vector{UInt8}, state::C64_machine)
     offset = A((3 - (mem[VIC_BANK] & 0xF)) << 14)
     state.screen_mem = offset + ((mem[VIC_MEM] & 0xF0) << 6)
     state.character_mem = offset + ((mem[VIC_MEM] & 0x0E) << 11)
+end
+
+function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcount, maxwid)
+    # note: this use of the "double-checked locking pattern" is valid because pause_count is atomic
+    if state.pause_count[] > 0
+        lock(state.pause) do
+            if state.pause_count[] > 0
+                lock(state.actually_paused) do
+                    state.pausing[] = true
+                    notify(state.actually_paused)
+                end
+                # wait until resumed
+                wait(state.pause)
+            end
+        end
+    end
+    #println("c64 step")
+    label = Base.get(addrs, A(mach.cpu.pc), nothing)
+    if !isnothing(label)
+        if label === lastlabel[]
+            labelcount[] === 0 && @io println("  LOOP...")
+            labelcount[] += 1
+        else
+            @io print(rpad(string(label) * ": ", maxwid + 2))
+            lastlabel[] = label
+            labelcount[] = 0
+            diag(mach)
+        end
+    end
+    #mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
+    mach.temps = Rewinding.inner_step6502(c64(mach).rewinder, mach.newcpu, mach.temps)
+    if state.curtime[] == state.maxtime[]
+        state.curtime[] = state.rewinder.curtime
+    end
+    state.maxtime[] = state.rewinder.curtime
+    @io println("time cur: ", state.curtime[], " max: ", state.maxtime[])
+    #diag(mach)
 end
 
 function init()
@@ -379,42 +428,21 @@ function init()
     println()
     println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
     labels = mach.labels
-    lastlabel = nothing
-    labelcount = 0
+    lastlabel = Ref{Any}(nothing)
+    labelcount = Ref(0)
     addrs = Dict(addr => name for (name, addr) in labels)
     maxwid = max(length.(string.(keys(labels)))...)
     state.all_dirty = true
     update_screen(mach)
     nextupdate = UPDATE_PERIOD
     mach.step = function(mach::Machine)
-        # note: this use of the "double-checked locking pattern" is valid because pause_count is atomic
-        if state.pause_count[] > 0
-            lock(state.pause) do
-                if state.pause_count[] > 0
-                    lock(state.actually_paused) do
-                        state.pausing[] = true
-                        notify(state.actually_paused)
-                    end
-                    # wait until resumed
-                    wait(state.pause)
-                end
-            end
+        global revising
+
+        if revising
+            Base.invokelatest(c64_step, mach, state, addrs, lastlabel, labelcount, maxwid)
+        else
+            c64_step(mach, state, addrs, lastlabel, labelcount, maxwid)
         end
-        #println("c64 step")
-        label = Base.get(addrs, A(mach.cpu.pc), nothing)
-        if !isnothing(label)
-            if label === lastlabel
-                labelcount === 0 && @io println("  LOOP...")
-                labelcount += 1
-            else
-                @io print(rpad(string(label) * ": ", maxwid + 2))
-                lastlabel = label
-                labelcount = 0
-                diag(mach)
-            end
-        end
-        mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
-        #diag(mach)
         if mach.emu.clockticks >= nextupdate
             update_screen(mach)
             nextupdate += UPDATE_PERIOD
@@ -557,9 +585,13 @@ function draw_ui(mach::Machine, width, height)
         pressed = CImGui.Button("<<")
         CImGui.TableNextColumn()
         CImGui.SetNextItemWidth(-1)
-        local old = state.time_slider
-        @c CImGui.SliderInt("##timeslider", &state.time_slider, 0, 65535)
-        old != state.time_slider && println("SLIDE TO $(state.time_slider)")
+        local old = state.curtime[]
+        local new = Int32(old)
+        @c CImGui.SliderInt("##timeslider", &new, 0, state.maxtime[])
+        if old != new
+            println("SLIDE TO $new")
+            state.curtime[] = new
+        end
         CImGui.TableNextColumn()
         #CImGui.SetNextItemWidth(16)
         CImGui.SetNextItemWidth(-1)
@@ -577,6 +609,8 @@ function antialias(enable)
 end
 
 function with_imgui(func::Function, init::Function)
+    global revising
+
     glfwDefaultWindowHints()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2)
@@ -604,6 +638,7 @@ function with_imgui(func::Function, init::Function)
         init()
         println("pad: ", unsafe_load(CImGui.GetStyle().WindowPadding), " line height: ", GetTextLineHeight(), " with spacing: ", GetTextLineHeightWithSpacing)
         while glfwWindowShouldClose(window) == 0
+            revising && revise()
             glfwPollEvents()
             # start the Dear ImGui frame
             ImGuiOpenGLBackend.new_frame(gl_ctx)
@@ -611,7 +646,11 @@ function with_imgui(func::Function, init::Function)
             CImGui.NewFrame()
             width, height = Ref{Cint}(), Ref{Cint}() #! need helper fcn
             glfwGetFramebufferSize(window, width, height)
-            func(width[], height[])
+            if revising
+                Base.invokelatest(func, width[], height[])
+            else
+                func(width[], height[])
+            end
             # rendering
             CImGui.Render()
             glfwMakeContextCurrent(window)
@@ -639,7 +678,8 @@ end
 
 ticks(mach::Machine) = Fake6502m.ticks(mach.newcpu, mach.temps)
 
-function test_c64()
+function test_c64(; revise = false)
+    global revising = revise
     local mach = nothing
     local state = nothing
     local task = nothing
