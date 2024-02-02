@@ -8,7 +8,7 @@ import ..Fake6502: Fake6502m, mem, mprint, mprintln
 using ..Fake6502.Fake6502m: Cpu
 import ..Fake6502.Fake6502m: read6502, write6502
 using Printf
-using CImGui: GetTextLineHeight, GetTextLineHeightWithSpacing
+using CImGui: GetTextLineHeight, GetTextLineHeightWithSpacing, GetStyle
 using CImGui
 using CImGui.LibCImGui
 using CImGui.ImGuiGLFWBackend
@@ -113,7 +113,50 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     banks::Set{AddrRange} = Set{AddrRange}()
     screen_mem::Addr = A(0x400)
     character_mem::Addr = A(0x1000)
-    running::Bool = true
+    pause::Condition = Condition()
+    pause_count::Atomic{Int} = Atomic{Int}(0)
+    actually_paused::Condition = Condition()
+    pausing::Atomic{Bool} = Atomic{Bool}(false)
+    running::Atomic{Bool} = Atomic{Bool}(true)
+    time_slider::Int32 = Int32(0)
+end
+
+function pause(f::Function, c::C64_machine)
+    pause(c)
+    try
+        f()
+    finally
+        resume(c)
+    end
+end
+
+function pause(c::C64_machine)
+    # issue a pause command
+    lock(c.pause) do
+        c.pause_count[] += 1
+    end
+    wait_for_pause(c)
+end
+
+function wait_for_pause(c::C64_machine)
+    # wait for the machine to actually pause
+    # once it's paused, the machine is known to be locked
+    # so it's safe to modify the state until it's resumed (registers, memory, etc.)
+    # note: this use of the "double-checked locking pattern" is valid because pausing is atomic
+    if !c.pausing[]
+        lock(c.actually_paused) do
+            !c.pausing[] &&
+                wait(c.actually_paused)
+        end
+    end
+end
+
+function resume(c::C64_machine)
+    lock(c.pause) do
+        c.pause_count[] -= 1
+        c.pause_count[] == 0 &&
+            notify(c.pause)
+    end
 end
 
 isscreen(c64::C64_machine, addr::UInt16) = addr & 0xFC00 == c64.screen_mem.value - 1
@@ -159,7 +202,7 @@ mprintln(::Cpu{C64_machine}, args...) = @io println(args...)
 
 c64(cpu::Cpu{C64_machine})::C64_machine = cpu.user_data
 
-c64(mach::Machine)::C64_machine = mach.properties[:c64]
+c64(mach::Machine)::C64_machine = c64(mach.newcpu)
 
 function screen_mem(mach::Machine)
     c = c64(mach)
@@ -303,13 +346,15 @@ function init()
     state =
         C64_machine(; scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(scr_width, scr_height))
     mach = NewMachine(; write_func = c64_write_mem, user_data = state)
-    mach.properties[:c64] = state
     mem(mach)[intRange(screen)] .= ' '
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
     mach[BG1] = 0x1
     mach[BG2] = 0x2
     mach[BG3] = 0x3
+    for mem in 0xD800:0xDBE7
+        mach[mem] = 0x01
+    end
     if USE_GPL
         mach.newcpu.memory[intRange(screen)] .= ' '
         mach.newcpu.memory[BORDER.value] = 0xE
@@ -342,6 +387,19 @@ function init()
     update_screen(mach)
     nextupdate = UPDATE_PERIOD
     mach.step = function(mach::Machine)
+        # note: this use of the "double-checked locking pattern" is valid because pause_count is atomic
+        if state.pause_count[] > 0
+            lock(state.pause) do
+                if state.pause_count[] > 0
+                    lock(state.actually_paused) do
+                        state.pausing[] = true
+                        notify(state.actually_paused)
+                    end
+                    # wait until resumed
+                    wait(state.pause)
+                end
+            end
+        end
         #println("c64 step")
         label = Base.get(addrs, A(mach.cpu.pc), nothing)
         if !isnothing(label)
@@ -465,21 +523,57 @@ function draw_screen(mach::Machine)
     end
 end
 
-function draw_c64(mach::Machine, width, height)
-    state = c64(mach)
-    nodeco =
+function draw_ui(mach::Machine, width, height)
+    local state = c64(mach)
+    local nodeco =
         ImGuiWindowFlags_NoDecoration |
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_NoDocking
+    local style = unsafe_load(CImGui.GetStyle())
+    local pad = style.WindowPadding.y
+    local ispacing = style.ItemSpacing.y
+    local fpad = style.FramePadding.y
+    local fborder = style.FrameBorderSize
+    local space = pad + ispacing + fpad + fborder
+
     if CImGui.Begin("Screen", Ptr{Nothing}(0), nodeco,)
         CImGui.SetWindowPos((0, 0))
         CImGui.SetWindowSize(ImVec2(width, height))
         draw_screen(mach)
         sz = CImGui.GetContentRegionAvail()
-        CImGui.Image(Ptr{Cvoid}(state.scr_id), CImGui.ImVec2(sz.x, sz.y - GetTextLineHeightWithSpacing()))
-        CImGui.Text("THIS is the bottom line")
+        antialias(false)
+        CImGui.Image(Ptr{Cvoid}(state.scr_id), CImGui.ImVec2(sz.x, sz.y - GetTextLineHeight() - space))
+        antialias(true)
+        #table for these next three
+        CImGui.SetNextItemWidth(-1)
+        CImGui.BeginTable("sliderrow", 3, ImGuiTableFlags_NoPadInnerX | ImGuiTableFlags_NoPadOuterX | ImGuiTableFlags_SizingFixedFit)
+        CImGui.TableSetupColumn("col1", ImGuiTableColumnFlags_WidthFixed)
+        CImGui.TableSetupColumn("col2", ImGuiTableColumnFlags_WidthStretch)
+        CImGui.TableSetupColumn("col3", ImGuiTableColumnFlags_WidthFixed)
+        CImGui.TableNextRow()
+        CImGui.TableNextColumn()
+#        CImGui.SetNextItemWidth(16)
+        CImGui.SetNextItemWidth(-1)
+        pressed = CImGui.Button("<<")
+        CImGui.TableNextColumn()
+        CImGui.SetNextItemWidth(-1)
+        local old = state.time_slider
+        @c CImGui.SliderInt("##timeslider", &state.time_slider, 0, 65535)
+        old != state.time_slider && println("SLIDE TO $(state.time_slider)")
+        CImGui.TableNextColumn()
+        #CImGui.SetNextItemWidth(16)
+        CImGui.SetNextItemWidth(-1)
+        pressed = CImGui.Button(">>")
+        CImGui.EndTable()
     end
     CImGui.End()
+end
+
+function antialias(enable)
+    style = GetStyle()
+    style.AntiAliasedLines = enable
+    style.AntiAliasedLinesUseTex = enable
+    style.AntiAliasedFill = enable
 end
 
 function with_imgui(func::Function, init::Function)
@@ -508,6 +602,7 @@ function with_imgui(func::Function, init::Function)
     try
         clear_color = Cfloat[0.45, 0.55, 0.60, 1.00]
         init()
+        println("pad: ", unsafe_load(CImGui.GetStyle().WindowPadding), " line height: ", GetTextLineHeight(), " with spacing: ", GetTextLineHeightWithSpacing)
         while glfwWindowShouldClose(window) == 0
             glfwPollEvents()
             # start the Dear ImGui frame
@@ -574,6 +669,8 @@ function test_c64()
                 run(mach, mach.labels[:main]; max_ticks = 10000)
                 state.all_dirty = true
                 update_screen(mach)
+                state.running[] = false
+                state.pausing[] = true
             catch err
                 cb = catch_backtrace()
                 use_io() do
@@ -585,7 +682,7 @@ function test_c64()
     end
     with_imgui(init_c64) do w, h
         process_io()
-        draw_c64(mach, w, h)
+        draw_ui(mach, w, h)
     end
 end
 

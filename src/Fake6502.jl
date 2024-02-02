@@ -48,8 +48,8 @@ Fake6502m.write6502(cpu::Cpu{Rewinder}, addr::UInt16, value::UInt8) = Rewinding.
 Fake6502m.inner_step6502(cpu::Cpu{Rewinder}, temps::Temps) = Rewinding.inner_step6502(cpu.user_data, cpu, temps)
 
 function init_speed()
-    #mach = NewMachine(; user_data = nothing)
-    mach = NewMachine(; user_data = Rewinder())
+    mach = NewMachine(; user_data = nothing)
+    #mach = NewMachine(; user_data = Rewinder())
     mach.mem[intRange(screen)] .= ' '
     loadprg("$EDIR/speed.prg", mach; labelfile="$EDIR/speed.labels")
     mach
@@ -75,8 +75,8 @@ function speed_test(; profile = :none)
             start = time()
             temps, ticks = run2(mach, temps, :endless, 1000000)
             finish = time()
-            @printf "%2d: %d clock cycles took %lf milliseconds" i ticks (finish - start) * 1000
-            local trail = mach.newcpu.user_data
+            @printf "%2d: %d clock cycles took %lf milliseconds\n" i ticks (finish - start) * 1000
+            #local trail = mach.newcpu.user_data
             #println("Trail len: ", (length(trail.trails) -1) * Rewinding.SNAPLEN + trail.nextfree - 1)
         end
     end
