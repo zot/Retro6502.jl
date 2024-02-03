@@ -3,8 +3,8 @@ using Revise
 using ..Fake6502
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step, SCREEN_CODES, screen2ascii
-using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR, USE_GPL
-using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, check_cpu, dbyte
+using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
+using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
 using ..Fake6502.Fake6502m: Cpu
 import ..Fake6502.Fake6502m: read6502, write6502
@@ -224,6 +224,11 @@ function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
     cpu.memory[adr.value]
 end
 
+c64_set_mem(cpu::Cpu{C64_machine}, addr::Addr, byte::UInt8) =
+    c64_set_mem(cpu, UInt16(addr.value - 0x01), byte)
+c64_set_mem(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
+    Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
+
 function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
     state = c64(cpu)
     adr = A(addr)
@@ -243,8 +248,7 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
                 state.needs_update[] = true
                 state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
             end
-            #cpu.memory[adr.value] = byte
-            Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
+            c64_set_mem(cpu, addr, byte)
         end
         return
     elseif adr == BANK_SWITCH
@@ -254,8 +258,7 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
         return
     elseif adr == VIC_MEM || adr == VIC_BANK
         cpu.memory[adr.value] == byte && return
-        #cpu.memory[adr.value] = byte
-        Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
+        c64_set_mem(cpu, addr, byte)
         update_vic_bank(cpu.memory, state)
         @io println("WRITE TO VIC MEM")
         return
@@ -264,8 +267,7 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
         @io println("WRITE TO ROM")
         return
     end
-    #cpu.memory[adr.value] = byte
-    Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
+    c64_set_mem(cpu, addr, byte)
 end
 
 function c64_read_mem(mach::Machine, addr::UInt16)
@@ -278,16 +280,6 @@ function c64_read_mem(mach::Machine, addr::UInt16)
     end
     return mach[adr]
 end
-
-#c64_set_mem(mach::Machine, addr::Addr, byte::UInt8) = mach[addr] = byte
-#c64_set_mem(mach::Machine, addr::UInt16, byte::UInt8) = c64_set_mem(mach, A(addr), byte)
-c64_set_mem(mach::Machine, addr::Addr, byte::UInt8) = c64_set_mem(mach, UInt16(addr.value - 0x01), byte)
-c64_set_mem(mach::Machine, addr::UInt16, byte::UInt8) =
-    Rewinding.write6502(c64(mach).rewinder, mach.newcpu, addr, byte)
-c64_set_mem(cpu::Cpu{C64_machine}, addr::Addr, byte::UInt8) =
-    c64_set_mem(cpu, UInt16(addr.value - 0x01), byte)
-c64_set_mem(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
-    Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
 
 in_bank(addr, bank, banks) = addr ∈ bank && bank ∈ banks
 
@@ -371,19 +363,8 @@ function init()
     for mem in 0xD800:0xDBE7
         mach[mem] = 0x01
     end
-    if USE_GPL
-        mach.newcpu.memory[intRange(screen)] .= ' '
-        mach.newcpu.memory[BORDER.value] = 0xE
-        mach.newcpu.memory[BG0.value] = 0x6
-        mach.newcpu.memory[BG1.value] = 0x1
-        mach.newcpu.memory[BG2.value] = 0x2
-        mach.newcpu.memory[BG3.value] = 0x3
-    end
     init_rom()
     mach[IO_CTL] = 0x2F
-    if USE_GPL
-        mach.newcpu.memory[IO_CTL.value] = 0x2F
-    end
     switch_banks(mach.newcpu, 0x07)
     Rewinding.init(state.rewinder, mach.newcpu, mach.temps)
     Rewinding.init_undo_session(state.rewinder, state.session)

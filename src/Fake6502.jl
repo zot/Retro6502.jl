@@ -16,8 +16,6 @@ const SCREEN_CODES = Vector{Char}(
     BLANKS(255 - 219 + 1)
 )
 screen2ascii(char) = SCREEN_CODES[UInt8(char) + 1]
-#const USE_GPL = true
-const USE_GPL = false
 const CDIR=joinpath(dirname(@__FILE__), "..", "C")
 const EDIR=joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
@@ -118,11 +116,7 @@ function test()
     labelcount = 0
     maxwid = max(0, length.(string.(keys(labels)))...)
     mach.step = function(mach::Machine)
-        if USE_GPL
-            label = Base.get(addrs, A(mach.cpu.pc), nothing)
-        else
-            label = Base.get(addrs, A(mach.newcpu.pc), nothing)
-        end
+        label = Base.get(addrs, A(pc(mach.newcpu, mach.temps)), nothing)
         if !isnothing(label)
             if label === lastlabel
                 labelcount === 0 && println("  LOOP...")
@@ -136,27 +130,19 @@ function test()
         step(mach)
     end
     register(print_n, mach, :print_n)
-    check_cpu(mach)
-
     println("CALLING ASMTEST")
     reset(mach)
     result, temps = call_6502(mach, :asmtest)
     print("RESULT: ")
     diag(result, temps)
-
     println("CALLING FRTHTEST")
     reset(mach)
     call_frth(mach, :frthtest_def)
     println("RESULT: ", A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult] + 1]) << 8)))
-
     run(mach, labels[:main]; max_ticks = 10000)
     diag(mach)
     #display_hex(mach.mem)
-    if USE_GPL
-        display_chars(@view mach.mem[intRange(screen)]) do c; C64.SCREEN_CODES[c + 1]; end
-    else
-        display_chars(@view mach.newcpu.memory[intRange(screen)]) do c; C64.SCREEN_CODES[c + 1]; end
-    end
+    display_chars(@view mach.newcpu.memory[intRange(screen)]) do c; C64.SCREEN_CODES[c + 1]; end
     println("done testing, ", mach.emu.clockticks, " clock ticks")
 end
 
