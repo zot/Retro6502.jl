@@ -56,7 +56,7 @@ using Test
 using Printf
 using Fake6502
 using Fake6502: rhex, Fake6502m, NewMachine, Machine
-import .Fake6502m: Cpu, step6502, read6502, write6502, addrsyms, opsyms, FLAG_DECIMAL, Temps
+import .Fake6502m: Cpu, step6502, read6502, write6502, addrsyms, opsyms, FLAG_DECIMAL, Temps, status
 
 const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp, :s, :s), (:status, :p, :flags))
 
@@ -88,10 +88,6 @@ function fake_write_mem(mach::Machine, addr::UInt16, byte::UInt8)
     push!(FAKE_CYCLES, [addr, byte, "write"])
     mach[addr] = byte
 end
-
-status(s, mask = 0xFF) =
-    join([s & (1 << (8 - i)) != 0 ? n : lowercase(n)
-          for (i, n) in enumerate("NVXBDIZC") if (1 << (8 - i)) & mask != 0])
 
 function register(c, reg)
     if reg == :p

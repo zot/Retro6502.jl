@@ -7,7 +7,15 @@ export reset, step
 const K = 1024
 const M = K * 1024
 const G = M * 1024
-
+const PUNCT = "[£]⭡⭠ !\"#\$%&'()*+,-./0123456789:;<=>?"
+BLANKS(n) = String((c->' ').(1:n))
+const SCREEN_CODES = Vector{Char}(
+    '@' * String('A':'Z') * PUNCT * BLANKS(64) *
+    '@' * String('a':'z') * PUNCT *
+    ' ' * String('A':'Z') *
+    BLANKS(255 - 219 + 1)
+)
+screen2ascii(char) = SCREEN_CODES[UInt8(char) + 1]
 #const USE_GPL = true
 const USE_GPL = false
 const CDIR=joinpath(dirname(@__FILE__), "..", "C")
@@ -16,6 +24,10 @@ const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
 
 mprint(::Any, args...) = print(args...)
 mprintln(::Any, args...) = println(args...)
+
+status(s, mask = 0xFF) =
+    join([s & (1 << (8 - i)) != 0 ? n : lowercase(n)
+          for (i, n) in enumerate("NVXBDIZC") if (1 << (8 - i)) & mask != 0])
 
 include("emu.jl")
 import .Fake6502m: Cpu, Temps, setticks, ticks, pc, incpc, setpc, base_inner_step6502, ticks

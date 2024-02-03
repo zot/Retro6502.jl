@@ -2,14 +2,14 @@ module C64
 using Revise
 using ..Fake6502
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
-using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step
+using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR, USE_GPL
 using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, check_cpu
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
 using ..Fake6502.Fake6502m: Cpu
 import ..Fake6502.Fake6502m: read6502, write6502
 using ..Fake6502.Rewinding
-using ..Fake6502.Rewinding: Rewinder
+using ..Fake6502.Rewinding: Rewinder, RewindSession
 using Printf
 using CImGui: GetTextLineHeight, GetTextLineHeightWithSpacing, GetStyle
 using CImGui
@@ -80,17 +80,7 @@ const COLOR_DEFS =
 
 const C64_PALETTE = color.(values(COLOR_DEFS))
 const COLORS = (; (name => i-1 for (i, name) in enumerate(keys(COLOR_DEFS)))...)
-const PUNCT = "[£]⭡⭠ !\"#\$%&'()*+,-./0123456789:;<=>?"
-BLANKS(n) = String((c->' ').(1:n))
-const SCREEN_CODES = Vector{Char}(
-    '@' * String('A':'Z') * PUNCT * BLANKS(64) *
-    '@' * String('a':'z') * PUNCT *
-    ' ' * String('A':'Z') *
-    BLANKS(255 - 219 + 1)
-)
-screen2ascii(char) = SCREEN_CODES(UInt8(char))
 const iochan = Channel{Function}(1024)
-
 const scr_width, scr_height = 320, 200
 
 struct Rect
@@ -123,6 +113,7 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     pausing::Atomic{Bool} = Atomic{Bool}(false)
     running::Atomic{Bool} = Atomic{Bool}(true)
     rewinder::Rewinder = Rewinder()
+    session::RewindSession = RewindSession()
     maxtime::Atomic{UInt64} = Atomic{UInt64}(0)
     curtime::Atomic{UInt64} = Atomic{UInt64}(0)
 end
@@ -363,8 +354,6 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
         state.curtime[] = state.rewinder.curtime
     end
     state.maxtime[] = state.rewinder.curtime
-    @io println("time cur: ", state.curtime[], " max: ", state.maxtime[])
-    #diag(mach)
 end
 
 function init()
@@ -395,6 +384,7 @@ function init()
     end
     switch_banks(mach.newcpu, 0x07)
     Rewinding.init(state.rewinder, mach.newcpu, mach.temps)
+    Rewinding.init_undo_session(state.rewinder, state.session)
     labels = mach.labels
     off, total = loadprg("$EDIR/condensed.prg", mach; labelfile="$EDIR/condensed.labels")
     println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")
@@ -419,10 +409,6 @@ function init()
             Base.invokelatest(c64_step, mach, state, addrs, lastlabel, labelcount, maxwid)
         else
             c64_step(mach, state, addrs, lastlabel, labelcount, maxwid)
-        end
-        if mach.emu.clockticks >= nextupdate
-            update_screen(mach)
-            nextupdate += UPDATE_PERIOD
         end
     end
     register(print_n, mach, :print_n)
@@ -459,6 +445,8 @@ end
 function update_screen(mach::Machine)
     c = c64(mach)
     all_dirty = c.all_dirty
+    # TODO remove all_dirty = true -- it's here for testing
+    all_dirty = true
     dirtydefs = Set(i for (i,d) in enumerate(c.dirty_character_defs) if d)
     scr_mem = screen_mem(mach)
     char_mem = character_mem(mach)
@@ -557,23 +545,38 @@ function draw_ui(mach::Machine, width, height)
         CImGui.TableSetupColumn("col3", ImGuiTableColumnFlags_WidthFixed)
         CImGui.TableNextRow()
         CImGui.TableNextColumn()
-#        CImGui.SetNextItemWidth(16)
-        CImGui.SetNextItemWidth(-1)
-        pressed = CImGui.Button("<<")
-        CImGui.TableNextColumn()
-        CImGui.SetNextItemWidth(-1)
         local old = state.curtime[]
         local new = Int32(old)
-        @c CImGui.SliderInt("##timeslider", &new, 0, state.maxtime[])
-        if old != new
-            println("SLIDE TO $new")
-            state.curtime[] = new
+        CImGui.SetNextItemWidth(-1)
+        if CImGui.Button("<<")
+            new -= 0x1
         end
         CImGui.TableNextColumn()
-        #CImGui.SetNextItemWidth(16)
         CImGui.SetNextItemWidth(-1)
-        pressed = CImGui.Button(">>")
+        @c CImGui.SliderInt("##timeslider", &new, 0, state.maxtime[])
+        CImGui.TableNextColumn()
+        CImGui.SetNextItemWidth(-1)
+        if CImGui.Button(">>")
+            new += 0x1
+        end
         CImGui.EndTable()
+        try
+            if old != new
+                state.curtime[] = new
+                Rewinding.update_undo_session(state.rewinder, state.session)
+                pause(mach.newcpu.user_data) do
+                    while state.session.curtime > new
+                        Rewinding.back(mach.newcpu, state.rewinder, state.session)
+                    end
+                    while state.session.curtime < new
+                        Rewinding.forward(mach.newcpu, state.rewinder, state.session)
+                    end
+                end
+            end
+        catch err
+            @error "Error sliding in time" exception=(err,catch_backtrace())
+            state.curtime[] = old
+        end
     end
     CImGui.End()
 end
