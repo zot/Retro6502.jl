@@ -10,7 +10,8 @@ inner_step6502(cpu::Cpu{Rewinder}, temps::Temps) = inner_step6502(cpu.user_data,
 """
 module Rewinding
 
-using ..Fake6502: K, M, SVector, Cpu, Temps, base_inner_step6502, rhex, hex, status, mprintln, screen2ascii
+using ..Fake6502: K, M, SVector, Cpu, Temps, base_inner_step6502, rhex, hex, status, mprintln
+using ..Fake6502: dbyte, screen2ascii
 import ..Fake6502m: write6502, inner_step6502, pc, opsyms
 
 const SNAPLEN = 4M
@@ -146,8 +147,6 @@ function init_undo_session(rewinder::Rewinder, session::RewindSession)
 end
 
 const BLANKSNAP = CpuSnapshot(; opcode = 0xAA) # 0xAA is TAX, which does not affect memory
-
-dbyte(byte::UInt8) = "$(rhex(byte)) '$(screen2ascii(byte))'"
 
 function update_undo_session(rewinder::Rewinder, session::RewindSession)
     rewinder.curtime == session.curtime &&

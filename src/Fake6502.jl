@@ -25,6 +25,8 @@ const RDIR=joinpath(dirname(@__FILE__), "..", "resources")
 mprint(::Any, args...) = print(args...)
 mprintln(::Any, args...) = println(args...)
 
+dbyte(byte::UInt8) = "$(rhex(byte)) '$(screen2ascii(byte))'"
+
 status(s, mask = 0xFF) =
     join([s & (1 << (8 - i)) != 0 ? n : lowercase(n)
           for (i, n) in enumerate("NVXBDIZC") if (1 << (8 - i)) & mask != 0])

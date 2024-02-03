@@ -4,7 +4,7 @@ using ..Fake6502
 using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR, USE_GPL
-using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, check_cpu
+using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, check_cpu, dbyte
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
 using ..Fake6502.Fake6502m: Cpu
 import ..Fake6502.Fake6502m: read6502, write6502
@@ -225,16 +225,18 @@ function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
 end
 
 function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
-    @io println("WRITE BYTE")
     state = c64(cpu)
     adr = A(addr)
     if isvideo(state, addr)
         video(state) do
             if isscreen(state, addr)
                 # writing to screen
-                @io println("WRITING ON SCREEN AT ", A(addr) - state.screen_mem)
                 state.needs_update[] = true
-                state.dirty_characters[adr - state.screen_mem + 1] = true
+                local offset = addr - (state.screen_mem.value - 1)
+                local col = offset % 40
+                local row = offset ÷ 40
+                @io println("WRITING ON SCREEN AT $(A(addr) - state.screen_mem), $col x $row: $(dbyte(byte))")
+                state.dirty_characters[1 + offset] = true
             else
                 # writing to character data
                 @io println("WRITING TO CHARACTER MEM AT ", A(addr) - state.screen_mem)
@@ -445,8 +447,6 @@ end
 function update_screen(mach::Machine)
     c = c64(mach)
     all_dirty = c.all_dirty
-    # TODO remove all_dirty = true -- it's here for testing
-    all_dirty = true
     dirtydefs = Set(i for (i,d) in enumerate(c.dirty_character_defs) if d)
     scr_mem = screen_mem(mach)
     char_mem = character_mem(mach)
@@ -507,7 +507,6 @@ function draw_screen(mach::Machine)
                     end
                     count += 1
                 end
-                ImGuiOpenGLBackend.ImGui_ImplOpenGL3_UpdateImageTexture(state.scr_id, image_buf, scr_width, scr_height)
                 draw_rect(image_id, r.x, r.y, r.w + 1, r.h + 1, pix)
             end
             empty!(state.dirty_rects)
