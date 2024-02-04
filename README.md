@@ -40,8 +40,6 @@ The C64 screen is very basic, it only supports character graphics and no sprites
 
 There is basic support for time travel and the UI has a time slider at the bottom.
 
-<video src='time-travel.mp4' controls width='1280'/>
-
 ### Ease of extension
 
 I'm writing this with easy extension in mind. I want it to be painless to add support for embedded 6502 languages,
