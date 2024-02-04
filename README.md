@@ -40,7 +40,7 @@ The C64 screen is very basic, it only supports character graphics and no sprites
 
 There is basic support for time travel and the UI has a time slider at the bottom.
 
-![timetravel](time-travel.mp4)
+![timetravel](time-travel.gif)
 
 ### Ease of extension
 
