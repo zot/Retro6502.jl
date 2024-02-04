@@ -579,7 +579,7 @@ function with_imgui(func::Function, init::Function)
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE) # required on Mac
     end
     # create window
-    window = glfwCreateWindow(1280, 720, "C64", C_NULL, C_NULL)
+    window = glfwCreateWindow(1280, 720, "Retro6502: C64", C_NULL, C_NULL)
     @assert window != C_NULL
     glfwMakeContextCurrent(window)
     glfwSwapInterval(1)  # enable vsync
