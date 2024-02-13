@@ -136,8 +136,9 @@ const string_bracket_pat = r"\"|\$\("
 const brackets = Dict("("=>")", "["=>"]", "{"=>"}", "\""=>"\"", "'"=>"'", "\$("=>")")
 const close_brackets = ")]}"
 const assignments = Set(["=", "+=", "-=", "|=", "&="])
-const dot_cmds = Set([".var", ".data", ".macro", ".endmacro", ".jmacro", ".endjmacro",
-                      ".fake", ".endfake", ".if", ".else", ".elseif", ".endif"])
+#const dot_cmds = Set([".var", ".data", ".macro", ".endmacro", ".jmacro", ".endjmacro",
+#                      ".fake", ".endfake", ".if", ".else", ".elseif", ".endif"])
+const dot_cmds = Set([".var", ".data"])
 const directives = Set([legal_ops..., assignments..., dot_cmds...])
 
 matches(r, s) = !isnothing(match(r, s))
@@ -286,10 +287,14 @@ function scan_asm_pass2(ctx::CodeContext, lines)
             lineerror(ctx, """Attempt to reassign label $(ctx.label)""")
         !isnothing(ctx.label) &&
             push!(ctx.labels, ctx.label)
-        asm_op(ctx) &&
-            continue
+        local assembled = false
+        for dir in [asm_op, asm_data]
+            dir(ctx) &&
+                @goto bottom
+        end
         !isdirective(ctx) &&
             lineerror(line, """Unknown directive, $(tokstr(ctx))""")
+        lineerror(line, """Unimplemented directive: $(tok(ctx))""")
         #local label = nothing
         #if toks[1].match ∉ legal_ops
         #    label = toks[1].match
@@ -332,13 +337,32 @@ function scan_asm_pass2(ctx::CodeContext, lines)
         #    push!(funcs, deflabel(label))
         #isempty(toks) &&
         #    continue
+        @label bottom
     end
 end
 
-function asm_var(ctx::CodeContext)
-    local var = ctx.label
-    !is(ctx, ".var") &&
+assembleif(func::Function, ctx::CodeContext, pred::AbstractString) =
+    assembleif(func, ctx, ctx-> is(ctx, pred))
+
+function assembleif(func, ctx, pred)
+    !pred(ctx) &&
         return false
+    func()
+    return true
+end
+
+asm_data(ctx::CodeContext) = assembleif(ctx, ".data") do
+    eattok(ctx)
+    println("DATA: $(tokstr(ctx))")
+    local expr = Meta.parse(tokstr(ctx))
+    expr isa Expr && expr.head == :incomplete &&
+        lineerror(ctx, """Incomplete expression: $(tokstr(ctx))""")
+    local func = eval(ctx, :(function() $expr end))
+    push!(ctx.funcs, ()-> emitall(ctx, invokelatest(func)))
+end
+
+asm_var(ctx::CodeContext) = assembleif(ctx, ".var") do
+    local var = ctx.label
     var ∈ ctx.labels &&
         lineerror(ctx, """Attempt to declare $(ctx.label) as a variable but it is already a label""")
     var ∈ ctx.vars &&
@@ -346,7 +370,6 @@ function asm_var(ctx::CodeContext)
     # save the var for resetting after this pass
     push!(ctx.vars, ctx.label)
     assign_var(ctx, numtoks(ctx) == 1 ? "0" : tokstr(ctx, ctx.toks[2], ctx.toks[end]))
-    true
 end
 
 function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
@@ -359,7 +382,7 @@ function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
         push!(ctx.assigned, var)
         println("VAR: $(repr(var)) $(var == :(*)) <- $exprstr")
         local func = var == :(*) ?
-            wrapper(()-> begin ctx.offset = ctx.env.eval(expr); println("SET OFFSET TO $(ctx.offset)") end) :
+            wrapper(()-> begin ctx.offset = ctx.env.eval(expr); println("SET OFFSET TO $(rhex(ctx.offset))") end) :
             wrapper(()-> invokelatest(ctx.env.eval(:(function() global $var = $expr end))))
         # push the func for pass 3
         push!(ctx.funcs, func)
@@ -372,15 +395,11 @@ function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
 end
 
 #TODO
-function asm_call(ctx::CodeContext)
-    !iscall(ctx) &&
-        return false
+asm_call(ctx::CodeContext) = assembleif(ctx, iscall) do
     error("MACRO CALLS NOT IMPLEMENTED")
 end
 
-function asm_assign(ctx::CodeContext)
-    !isassign(ctx) &&
-        return false
+asm_assign(ctx::CodeContext) = assembleif(ctx, isassign) do
     ctx.label ∈ ctx.labels &&
         lineerror(ctx, """Attempt to assign a label""")
     numtoks(ctx) == 1 &&
@@ -414,7 +433,6 @@ function asm_assign(ctx::CodeContext)
             assign_var(ctx, "$var & ($exprstr)")
         end
     end
-    true
 end
 
 function reset(ctx::CodeContext)
@@ -436,6 +454,11 @@ function emit(ctx::CodeContext, bytes::UInt8...)
     println("$(rhex(start)): $(join([rhex(byte) for byte in bytes], " "))")
 end
 
+function emitall(ctx::CodeContext, str::AbstractString)
+    copy!(@view(ctx.memory[ctx.offset + 1:length(str) + ctx.offset]), Vector{UInt8}(str))
+    ctx.offset += length(str)
+end
+
 function assemble(ctx::CodeContext, op, addr, exprs = :())
     local opcode = opcodes[(op, addr)]
     local bytes = opbytes[addr]
@@ -454,9 +477,7 @@ function assemble(ctx::CodeContext, op, addr, exprs = :())
     true
 end
 
-function asm_op(ctx::CodeContext)
-    !isop(ctx) &&
-        return false
+asm_op(ctx::CodeContext) = assembleif(ctx, isop) do
     local op = Symbol(lowercase(tok(ctx)))
     local opname = uppercase(string(op))
     local modes = keys(opcodes)
@@ -494,7 +515,7 @@ function asm_op(ctx::CodeContext)
     is(ctx, "(") &&
         lineerror(ctx, """Incomplete indirect expression, $(tokstr(ctx))""")
     # must be absolute
-    return assemble(ctx, op, :abso, args)
+    assemble(ctx, op, :abso, args)
 end
 
 function macroargs(line, str)
