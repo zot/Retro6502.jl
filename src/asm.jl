@@ -112,10 +112,17 @@ fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine which 
 label   = EXPR  ; change the value of a label -- code following this line will see EXPR as the value of label
 =#
 module Asm
+import ..Fake6502: K, M, G, rhex
 using ..Fake6502m: addrsyms, opsyms
-import ..Fake6502: K, M, G
+using ..AsmTools
 
 const opcodes = Dict((opsyms[i + 1], addrsyms[i + 1]) => i for i in 0x00:0xFF)
+const opbytes = Dict(
+    Iterators.flatten(Pair.(j, Ref(i)) for (i, j) in enumerate([
+                           (:acc,:imp),
+                           (:rel,:imm,:indx,:indy,:zp,:zpx,:zpy),
+                           (:abso,:absx,:absy,:ind)])))
+
 const legal_ops = Set(string.(opsyms))
 #const opcode_addrmodes = foldl((d, (op, addr))-> push!(d[op], addr), keys(addrmodes);
 #                               init = Dict{Symbol,Set}(op => Set() for op in legal_ops))
@@ -140,18 +147,26 @@ struct CodeChunk
     code_func::Function             # code_func(ctx, args...) adds machine code to ctx.memory (64K UInt8 array)
 end
 
+struct Line
+    number::Int
+    line::String
+    tokens::Vector{RegexMatch}
+end
+
 @kwdef mutable struct CodeContext
-    env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16)))) ctxeval(expr) = eval(expr) end))
+    env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16))))
+                         using ..AsmTools
+                         ctxeval(expr) = eval(expr)
+                         end))
     macros::Dict{Symbol,Function} = Dict{Symbol,Function}()
     funcs::Vector{Function} = Function[]
     labels::Set{Symbol} = Set{Symbol}()
-    vars::Set{Symbol} = Set{Symbol}()
-    offset::Int = 0
-    line::String = ""
+    vars::Set{Symbol} = Set{Symbol}([:(*)])
+    line::Line = Line(0, "", RegexMatch[])
     toks::Vector{RegexMatch} = RegexMatch[]
     label::Union{Symbol,Nothing} = nothing
     assigned::Set{Symbol} = Set{Symbol}() # variables which have been assigned
-    output::Int = 0
+    offset::UInt16 = 0 # next address to emit into
     memory::Vector{UInt8} = zeros(UInt8, 64K)         # 64K memory array
     #address::Ref{UInt16} = 0x0000
     #labels::Dict{String,Int} = Dict{String,Int}()
@@ -160,12 +175,6 @@ end
     #changed::Vector{Bool} = Bool[]          # record of each memory cell that has been changed
     #macrostack::Vector{Symbol} = Symbol[]
     #macrovalue::Any = nothing
-end
-
-struct Line
-    number::Int
-    line::String
-    tokens::Vector{RegexMatch}
 end
 
 function tokenize(n, line)
@@ -184,9 +193,9 @@ eattok(ctx::CodeContext) = ctx.toks = @view ctx.toks[2:end]
 
 tok(ctx::CodeContext) = ctx.toks[1].match
 
-tokstr(ctx::CodeContext) = tokstr(ctx.line, ctx.toks[1], ctx.toks[end])
+tokstr(ctx::CodeContext) = tokstr(ctx.line.line, ctx.toks[1], ctx.toks[end])
 
-tokstr(str, tok1, tok2) = @view str[tok1.offset:tok2.offset + length(tok2.match)]
+tokstr(str, tok1, tok2) = @view str[tok1.offset:tok2.offset + length(tok2.match) - 1]
 
 function lasttoks(ctx::CodeContext, items...)
     length(ctx.toks) < length(items) &&
@@ -201,13 +210,13 @@ end
 isdirective(ctx::CodeContext) = hastoks(ctx) &&
     (ctx.toks[1].match ∈ directives || matches(call_pat, tok(ctx)))
 
-isop(ctx::CodeContext) = hastoks(ctx) && tok(ctx) ∈ legal_ops
+isop(ctx::CodeContext) = hastoks(ctx) && lowercase(tok(ctx)) ∈ legal_ops
 
 iscall(ctx::CodeContext) = hastoks(ctx) && matches(call_pat, tok(ctx))
 
 is(ctx::CodeContext, str) = hastoks(ctx) && tok(ctx) == str
 
-isassign(ctx::CodeContext) = hastoks(ctx) && 0 < length(tok(ctx)) < 3 && tok(ctx)[end] == "="
+isassign(ctx::CodeContext) = hastoks(ctx) && 0 < length(tok(ctx)) < 3 && tok(ctx)[end] == '='
 
 isident(ctx::CodeContext) = hastoks(ctx) && matches(ident_pat, tok(ctx))
 
@@ -238,18 +247,21 @@ end
 
 getvar(ctx::CodeContext, var::Symbol) = ctx.env.eval(var)
 
+eval(ctx::CodeContext, expr) = invokelatest(ctx.env.ctxeval, expr)
+
 function setvar(ctx::CodeContext, var::Symbol, value)
+    var == :(*) &&
+        return
     local argname = Symbol("_" * string(var))
-    println("CTX ENV EVAL: ", ctx.env.ctxeval)
-    invokelatest(ctx.env.ctxeval((:(function($argname) global $var = $argname; end))), value)
+    invokelatest(eval(ctx, :(function($argname) global $var = $argname; end)), value)
 end
 
 """
 Scan asm code, find label offsets and construct gen function
 """
-function scan_asm_pass2(ctx, lines)
+function scan_asm_pass2(ctx::CodeContext, lines)
     for line in lines
-        ctx.line = line.line
+        ctx.line = line
         ctx.toks = line.tokens
         ctx.label = nothing
         !hastoks(ctx) &&
@@ -260,7 +272,6 @@ function scan_asm_pass2(ctx, lines)
             eattok(ctx)
             asm_var(ctx) &&
                 continue
-            push!(ctx.labels, ctx.label)
             asm_call(ctx) &&
                 # run the macro, determine the label offset and add code the pass
                 continue
@@ -269,8 +280,13 @@ function scan_asm_pass2(ctx, lines)
             !hastoks(ctx) &&
                 continue
         end
-        (asm_assign(ctx) ||
-            asm_op(ctx)) &&
+        asm_assign(ctx) &&
+            continue
+        !isnothing(ctx.label) && ctx.label ∈ ctx.labels &&
+            lineerror(ctx, """Attempt to reassign label $(ctx.label)""")
+        !isnothing(ctx.label) &&
+            push!(ctx.labels, ctx.label)
+        asm_op(ctx) &&
             continue
         !isdirective(ctx) &&
             lineerror(line, """Unknown directive, $(tokstr(ctx))""")
@@ -329,7 +345,7 @@ function asm_var(ctx::CodeContext)
         lineerror(ctx, """Attempt to redeclare $(ctx.label) as a variable""")
     # save the var for resetting after this pass
     push!(ctx.vars, ctx.label)
-    assign_var(ctx, numtoks(ctx) == 1 ? "0" : tokstr(ctx.line, ctx.toks[2], ctx.toks[end]))
+    assign_var(ctx, numtoks(ctx) == 1 ? "0" : tokstr(ctx, ctx.toks[2], ctx.toks[end]))
     true
 end
 
@@ -341,7 +357,10 @@ function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
         expr isa Expr && expr.head == :incomplete &&
             error()
         push!(ctx.assigned, var)
-        local func = wrapper(ctx.env.eval(:(function() global $var = $expr end)))
+        println("VAR: $(repr(var)) $(var == :(*)) <- $exprstr")
+        local func = var == :(*) ?
+            wrapper(()-> begin ctx.offset = ctx.env.eval(expr); println("SET OFFSET TO $(ctx.offset)") end) :
+            wrapper(()-> invokelatest(ctx.env.eval(:(function() global $var = $expr end))))
         # push the func for pass 3
         push!(ctx.funcs, func)
         # execute the func for the rest of this pass
@@ -370,14 +389,14 @@ function asm_assign(ctx::CodeContext)
     eattok(ctx)
     local exprstr = tokstr(ctx)
     local var = ctx.label
-    if op == "="
-        assign_var(ctx, exprstr, (setfunc)-> begin
-                       var ∈ ctx.assigned &&
-                           lineerror(ctx, """Attempt to reassign label, $var""")
-                       setfunc
-                   end)
-        push!(ctx.labels, var)
-    elseif op == ":="
+    #if op == "="
+    #    assign_var(ctx, exprstr, (setfunc)-> begin
+    #                   var ∈ ctx.assigned &&
+    #                       lineerror(ctx, """Attempt to reassign label, $var""")
+    #                   setfunc
+    #               end)
+    #    push!(ctx.labels, var)
+    if op == "=" || op == ":="
         assign_var(ctx, exprstr)
         push!(ctx.vars, var)
     elseif op == ":?="
@@ -399,7 +418,7 @@ function asm_assign(ctx::CodeContext)
 end
 
 function reset(ctx::CodeContext)
-    ctx.output = 0
+    ctx.offset = 0
     setdiff!(ctx.assigned, ctx.vars)
     ctx.env.eval(
         quote
@@ -408,20 +427,30 @@ function reset(ctx::CodeContext)
     )
 end
 
-function emit(ctx::CodeContext, byte::UInt8)
-    ctx.output += 1
-    ctx.memory[ctx.output] = byte
+function emit(ctx::CodeContext, bytes::UInt8...)
+    local start = ctx.offset
+    for byte in bytes
+        ctx.memory[ctx.offset + 1] = byte
+        ctx.offset += 1
+    end
+    println("$(rhex(start)): $(join([rhex(byte) for byte in bytes], " "))")
 end
 
-function assemble(ctx::CodeContext, op, addr, expr = nothing)
-    #local opcode = opcodes((op, addr))
-    #(addr == :acc || addr == :imp) &&
-    #    push!(ctx.funcs, ()-> emit(ctx, opcode))
-    #local func = function(ctx)
-    #    
-    #end
-    ##push!(ctx.funcs, ()-> assemble_func(ctx, op, addr, expr))
-    #push!(ctx.funcs, ()-> println("assemble $(addrmodes[(op, addr)]) ($op $addr)$(isnothing(expr) ? "" : " " * expr)"))
+function assemble(ctx::CodeContext, op, addr, exprs = :())
+    local opcode = opcodes[(op, addr)]
+    local bytes = opbytes[addr]
+    local args = eval(ctx, exprs)
+    if bytes == 1
+        push!(ctx.funcs, ()-> emit(ctx, opcode))
+    elseif bytes == 2
+        local a1 = args[1]
+        push!(ctx.funcs, ()-> emit(ctx, opcode, a1))
+    elseif bytes == 3
+        local a1 = args[1]
+        local a2 = args[2]
+        push!(ctx.funcs, ()-> emit(ctx, opcode, a1, a2))
+    end
+    push!(ctx.funcs, ()-> println("assemble ($op $addr)$(isempty(args) ? "" : " " * exprs) ->  $(join([rhex(opcode), args...], " "))"))
     true
 end
 
@@ -439,16 +468,12 @@ function asm_op(ctx::CodeContext)
         push!(ctx.assigned, ctx.label)
     end
     eattok(ctx)
-    # consume one address for the opcode
-    ctx.offset += 1
     !hastoks(ctx) && (op, :imp) ∈ modes &&
         return assemble(ctx, op, :imp)
     !hastoks(ctx) && (op, :acc) ∈ modes &&
         return assemble(ctx, op, :acc)
     !hastoks(ctx) &&
         lineerror(ctx, """No arguments for opcode $opname""")
-    # consume one address for the opcode's argument byte
-    ctx.offset += 1
     op ∈ branch_ops &&
         return assemble(ctx, op, :rel, args)
     is(ctx, "#") &&
@@ -458,8 +483,6 @@ function asm_op(ctx::CodeContext)
     is(ctx, "(") && lasttoks(ctx, ",", "x", ")") &&
         return assemble(ctx, op, :indx, args)
     #check for zpx as opposed to absx -- skip for now and assemble ,x as absolute,x
-    # consume one address for the opcode's second argument byte
-    ctx.offset += 1
     lasttoks(ctx, ",", "y") &&
         return assemble(ctx, op, :absy, args)
     lasttoks(ctx, ",", "x") &&
@@ -689,7 +712,7 @@ function eatexpr(line, str)
 end
 
 function test()
-    local loc = joinpath(dirname(dirname(@__FILE__)), "examples", "simple.jsm")
+    local loc = joinpath(dirname(dirname(@__FILE__)), "examples", "simple.jas")
     asm(read(loc, String))
 end
 
