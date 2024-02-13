@@ -37,6 +37,7 @@ import .Rewinding
 import .Rewinding: Rewinder
 include("fakes.jl")
 include("c64.jl")
+include("asm.jl")
 
 run2(mach::Machine, temps::Temps, sym::Symbol, max_ticks::Int64) =
     run2(mach, temps, mach.labels[sym], max_ticks)
