@@ -1,3 +1,10 @@
+        .include "simple-support.jl"
+        .julia begin
+            global floop = 3
+        end
 *       = zorp(0x8000)
         .data string(VERSION)
+        .julia begin
+            println("HELLO $(floop)!")
+        end
 start   PHA

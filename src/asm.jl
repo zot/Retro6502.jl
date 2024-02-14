@@ -138,8 +138,9 @@ const close_brackets = ")]}"
 const assignments = Set(["=", "+=", "-=", "|=", "&="])
 #const dot_cmds = Set([".var", ".data", ".macro", ".endmacro", ".jmacro", ".endjmacro",
 #                      ".fake", ".endfake", ".if", ".else", ".elseif", ".endif"])
-const dot_cmds = Set([".var", ".data"])
+const dot_cmds = Set([".var", ".data", ".julia", ".include"])
 const directives = Set([legal_ops..., assignments..., dot_cmds...])
+const macro_arg_sep = r"(?<!\\),"
 
 matches(r, s) = !isnothing(match(r, s))
 
@@ -163,12 +164,14 @@ end
     funcs::Vector{Function} = Function[]
     labels::Set{Symbol} = Set{Symbol}()
     vars::Set{Symbol} = Set{Symbol}([:(*)])
+    lines::AbstractVector{Line} = Line[]
     line::Line = Line(0, "", RegexMatch[])
     toks::Vector{RegexMatch} = RegexMatch[]
     label::Union{Symbol,Nothing} = nothing
     assigned::Set{Symbol} = Set{Symbol}() # variables which have been assigned
     offset::UInt16 = 0 # next address to emit into
     memory::Vector{UInt8} = zeros(UInt8, 64K)         # 64K memory array
+    pwd::String = pwd()
     #address::Ref{UInt16} = 0x0000
     #labels::Dict{String,Int} = Dict{String,Int}()
     #relative_labels::Set{Int} = Set{Int}()
@@ -189,6 +192,19 @@ const CTX = :__CONTEXT__
 numtoks(ctx::CodeContext) = length(ctx.toks)
 
 hastoks(ctx::CodeContext) = !isempty(ctx.toks)
+
+function eatline(ctx::CodeContext)
+    isempty(ctx.lines) &&
+        return
+    setline(ctx, ctx.lines[1])
+    ctx.lines = @view ctx.lines[2:end]
+    ctx.line
+end
+
+function setline(ctx::CodeContext, line::Line)
+    ctx.line = line
+    ctx.toks = line.tokens
+end
 
 eattok(ctx::CodeContext) = ctx.toks = @view ctx.toks[2:end]
 
@@ -223,27 +239,38 @@ isident(ctx::CodeContext) = hastoks(ctx) && matches(ident_pat, tok(ctx))
 
 islabel(ctx::CodeContext) = hastoks(ctx) && matches(label_pat, tok(ctx))
 
+macro asm_str(str)
+    asm(str)
+end
+
+function asmfile(file)
+    local ctx = CodeContext(; pwd = dirname(file))
+    asm(read(file, String))(ctx)
+    return ctx
+end    
+
 """
     produce a CodeChunk based on str
 """
 function asm(str)
     local lines = [tokenize(n, line)
                    for (n, line) in enumerate(split(str, "\n"))]
-    # pass 1
-    local macros::Dict, remaining = compile_macros_pass1(lines)
-    local ctx = CodeContext(; macros)
-    # pass 2
-    invokelatest() do
-        scan_asm_pass2(ctx, remaining)
-        # pass 3
+    function(ctx)
+        # pass 1
+        remaining = compile_macros_pass1(lines, ctx.macros)
+        # pass 2
         invokelatest() do
-            reset(ctx)
-            for func in ctx.funcs
-                func()
+            scan_asm_pass2(ctx, remaining)
+            # pass 3
+            invokelatest() do
+                reset(ctx)
+                for func in ctx.funcs
+                    func()
+                end
             end
         end
+        ctx
     end
-    ctx
 end
 
 getvar(ctx::CodeContext, var::Symbol) = ctx.env.eval(var)
@@ -261,8 +288,9 @@ end
 Scan asm code, find label offsets and construct gen function
 """
 function scan_asm_pass2(ctx::CodeContext, lines)
-    for line in lines
-        ctx.line = line
+    ctx.lines = lines
+    while !isempty(ctx.lines)
+        local line = eatline(ctx)
         ctx.toks = line.tokens
         ctx.label = nothing
         !hastoks(ctx) &&
@@ -288,7 +316,7 @@ function scan_asm_pass2(ctx::CodeContext, lines)
         !isnothing(ctx.label) &&
             push!(ctx.labels, ctx.label)
         local assembled = false
-        for dir in [asm_op, asm_data]
+        for dir in [asm_op, asm_data, asm_julia, asm_include]
             dir(ctx) &&
                 @goto bottom
         end
@@ -359,6 +387,46 @@ asm_data(ctx::CodeContext) = assembleif(ctx, ".data") do
         lineerror(ctx, """Incomplete expression: $(tokstr(ctx))""")
     local func = eval(ctx, :(function() $expr end))
     push!(ctx.funcs, ()-> emitall(ctx, invokelatest(func)))
+end
+
+asm_include(ctx::CodeContext) = assembleif(ctx, ".include") do
+    eattok(ctx)
+    try
+        local expr = Meta.parse(tokstr(ctx))
+        if expr isa Expr && expr.head == :incomplete
+            error()
+        end
+        eval(ctx, :(include(joinpath($(ctx.pwd), $expr))))
+    catch
+        lineerror(ctx, """Error running .include directive: $(tokstr(ctx))""")
+    end
+end
+
+asm_julia(ctx::CodeContext) = assembleif(ctx, ".julia") do
+    local firstline = ctx.line
+    local firstlines = ctx.lines
+    eattok(ctx)
+    local programtext = tokstr(ctx)
+    while true
+        try
+            local expr = Meta.parse(programtext)
+            if expr isa Expr && expr.head == :incomplete
+                local line = eatline(ctx)
+                if isnothing(line)
+                    setline(ctx, firstline)
+                    ctx.lines = firstlines
+                    lineerror(ctx, """Incomplete Julia code:\n$programtext""")
+                end
+                programtext *= '\n' * line.line
+                continue
+            end
+            push!(ctx.funcs, eval(ctx, :(function() $expr; end)))
+            return
+        catch
+            lineerror(ctx, """Error parsing Julia code:\n$programtext""")
+            rethrow()
+        end
+    end
 end
 
 asm_var(ctx::CodeContext) = assembleif(ctx, ".var") do
@@ -518,75 +586,11 @@ asm_op(ctx::CodeContext) = assembleif(ctx, isop) do
     assemble(ctx, op, :abso, args)
 end
 
-function macroargs(line, str)
-    local remain = str
-    local args = []
-    local cur = []
-    local bracket = []
-    local inquote = false
-    local next
-    local tok
-    offset() = length(str) - length(remain)
-    endtok() = isnothing(next) ? length(str) : next.offset + length(next.match) - 1
-    usetok() = push!(cur, @view remain[1:endtok()])
-    function openbracket()
-        usetok()
-        push!(bracket, (; offset = offset(), close = brackets[tok], inquote, bracket=tok))
-        inquote = false
-    end
-    function closebracket()
-        isempty(bracket) &&
-            lineerror(line, """Close bracket without open, '$tok'""")
-        tok != bracket[end].close &&
-            lineerror(line, """Unbalanced brackets, $(str[bracket[end].offset:endtok()])""")
-        usetok()
-        inquote = bracket[end].inquote
-        pop!(bracket)
-    end
-    while !isempty(remain)
-        next = match((inquote ? string_bracket_pat : bracket_pat), remain)
-        if isnothing(next)
-            push!(cur, remain)
-            break
-        end
-        println("MATCH $next")
-        tok = next.match
-        if inquote
-            if tok == "\$("
-                openbracket()
-            elseif tok == "\""
-                closebracket()
-            else
-                usetok()
-            end
-        elseif tok == ","
-            if isempty(bracket)
-                push!(cur, @view remain[1:next.offset-1])
-                push!(args, strip(join(cur)))
-                empty!(cur)
-            else
-                usetok()
-            end
-        elseif tok == "\""
-            if inquote
-                closebracket()
-            else
-                openbracket()
-                inquote = true
-            end
-        elseif haskey(brackets, tok)
-            openbracket()
-        elseif occursin(tok, close_brackets)
-            closebracket()
-        end
-        remain = @view remain[endtok() + 1:end]
-    end
-    !isempty(bracket) &&
-        lineerror(line, """Unmatched open bracket: $(str[bracket[end].offset:endtok()])""")
-    !isempty(cur) &&
-        push!(args, strip(join(cur)))
-    return args
-end
+"""
+Macro args are like C macro args -- just simple splitting on commas, backslash escapes a comma
+Juila evaluation on args doesn't happen until they are substituted into an ASM string
+"""
+macroargs(str) = [replace(s, "\\,"=>",") for s in strip.(split(str, macro_arg_sep))]
 
 # TODO
 #function callmacro(ctx, args)
@@ -603,9 +607,8 @@ end
 """
 Extract macros from assembly code, returning the compiled macros and the rest of the code
 """
-function compile_macros_pass1(lines)
+function compile_macros_pass1(lines, macros::Dict{Symbol, Function})
     local l = 1
-    local macros = Dict{Symbol,Function}()
     local remain = Line[]
     while l <= length(lines)
         local line = lines[l]
@@ -620,7 +623,7 @@ function compile_macros_pass1(lines)
             l += 1
         end
     end
-    return macros, remain
+    return remain
 end
 
 ismacrodecl(line::Line) = !isnothing(findfirst(m-> m.match == ".macro", line.tokens))
@@ -732,9 +735,6 @@ function eatexpr(line, str)
     lineerror(line, """Could not parse Julia expression: $orig""")
 end
 
-function test()
-    local loc = joinpath(dirname(dirname(@__FILE__)), "examples", "simple.jas")
-    asm(read(loc, String))
-end
+test() = asmfile(joinpath(dirname(dirname(@__FILE__)), "examples", "simple.jas"))
 
 end # module Asm
