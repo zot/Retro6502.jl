@@ -10,36 +10,31 @@
 #=
 ## SYNTAX
 
--- inside asm strings (i.e. macros), \name and \(expr) are macro substitutions
--- when a == "q", \(a)_suffix becomes q_suffix
--- in ASM syntax, both $N and 0xN are hex numbers but 0x is preferred
--- in Julia code, normal Julia syntax holds
+- inside asm strings (i.e. macros), \name and \(expr) are macro substitutions
+- when a == "q", \(a)_suffix becomes q_suffix
+- in ASM syntax, both $N and 0xN are hex numbers but 0x is preferred
+- in Julia code, normal Julia syntax holds
 
 comments start with ; and are considered whitespace in the syntax rules
 
+```
 PROGRAM: { DEF "\n" }
 
 DEF: (LABEL | "*" | "+" | "-") [INSTRUCTION]
  | INSTRUCTION
- | ".include" JULIAFILE
- | LABEL ".macro" ["(" ARGLIST ")"]
- | ".endmacro"
- | LABEL ".jmacro" "(" [ ARGLIST ] ")"
- | ".endjulia"
- | LABEL ".fake" "(" [ ARGLIST ] ")"
- | ".endfake"
- | ".if" EXPR
- | ".else"
- | ".elseif" EXPR
- | ".endif"
- | (LABEL | "*") LABLEOP EXPR
+ | ".include" JULIA_FILE
+ | LABEL ".julia" JULIA_EXPR
+ | LABEL ".macro" ["(" ARGLIST ")" "->" JULIA_EXPR]
+ | LABEL ".value" JULIA_EXPR
+ | LABEL ".fake" JULIA_EXPR
+ | (LABEL | "*") "+" JULIA_EXPR
 
 LABEL: IDENT
 
-LABELOP: "=" | "+=" | "-=" | "*=" | "/=" | "&=" | "|=" | "⊻="
-
 INSTRUCTION: OPCODE [OPARG]
- | "#" IDENT [ARGLIST]
+ | MACROCALL
+
+MACROCALL: "#" IDENT [ARGLIST]
 
 ARGLIST: IDENT { "," IDENT }
 
@@ -47,100 +42,88 @@ OPCODE: ( "ADC" | ... )
 
 OPARG: EXPR
  | "#" EXPR
+ | "#" EXPR "," "x"
+ | "#" EXPR "," "y"
  | "(" EXPR ")"
  | "(" EXPR "," "x" ")"
  | "(" EXPR ")" "," "y"
 
-EXPR: <Julia expression>
-
-JULIADEF: EXPR
- | "begin" JULIACODE "end"
+JULIA_EXPR: <Julia expression>
+```
 
 ## How assembly works
-
-struct CodeChunk
-    label_offsets::Dict{String,Int} # offsets for any labels this code defines
-    code_func::Function             # code_func(ctx, args...) adds machine code to ctx.memory (64K UInt8 array)
-end
-
-struct CodeContext
-    labels::Dict{String,Int}    # all labels
-    chunks::Vector{CodeChunk}
-    memory::Vector{UInt8}       # 64K memory array
-    changed::Vector{Bool}       # record of each memory cell that has been changed
-end
 
 The assembler:
 
 1. Includes Julia source and compiles all macros
-2. Runs the ASM code, during which asm"..." strings add a CodeChunk to CONTEXT.chunks,
-3. Processes the CODE array to generate machine code,
-4. Macro calls get the CodeContext and the current label being defined (or nothing) as arguments.
+2. Runs pass 1 to compile all macros and compute label offsets
+3. Runs pass 2 to assemble the code by running all the functions in the CodeContext's funs array
+4. In Julia code, __CONTEXT__ holds the current CodeContext struct
 
 ## Reference
 
-        .if EXPR        ; conditionally output code until .else, .elseif, or .end
-        .else           ; conditionally output code until .else, .elseif, or .end
-        .elseif EXPR    ; conditionally output code until .else, .elseif, or .end
-        .endif          ; end a .if section
-; .julia declares a Julia-based macro. Can manually add your own CodeChunk to the CODE array if you like
-joe     .julia(a, b)-> JULIA CODE # declares a Julia macro named joe, regular Julia syntax here
-mary    .julia(a, b)-> begin # declares a multi-line Julia macro named mary
-        for i in 1:b    # output b copies of the following assembly
-            asm"        ; output ASM code -- $ substitutes in Julia values
-            STA \a
-            STX \(a + 1)
-            "
-        end
-fred    .macro(a, b) ; shorthand for .julia(a, b)-> asm"..."
+```
+label   = EXPR  ; define a label -- labels are Julia consts
+
+.macro  ; declares a Julia-based macro. This should return an Assembly object, which you can make
+        ; with asm"..." or by calling asm(string). You can concatenate Assembly objects with `*`.
+        ; macro arguments are strings and you can substitute them in with \NAME
+
+joe     .macro (a, b)-> JULIA_EXPR # declares a Julia macro named joe, regular Julia syntax here
+
+        .value JULIA_EXPR ; make JULIA_EXPR the offset value if a label is defined for this macro
+
+fred    .macro(a, b)-> asm"""   ; use asm"..." to define a macro named fred
         STA a
 q       STX b
         STY 0x3110
-        .return q ; makes fred get q instead of the first address of the macro
-        .end
-floop   #macr 1, 2 ; calls macro named "macr", floop gets the returned value of the macro
-fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine which runs at runtime, not asm time
+        .value q ;      makes callers of fred get q instead of the first address of the generated code
+        """
+floop   #macr 1, 2 ; call macro "macr", floop gets the macro's value (defaults to the first line's offset)
+
+fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine
+
         .include file ; load Julia code -- can be called by macros or fake subroutines
 
  ; special labels
-*       ; the current output location
+*       ; the "PC", i.e. the current output location
 -       ; a temporary label, can be referenced by - backwards and + forwards
         ; Use more than one +/- to reference further, like --, ---, +++, and so on.
 +       ; a temporary label
-
- ; label operations
-label   = EXPR  ; change the value of a label -- code following this line will see EXPR as the value of label
+```
 =#
 module Asm
 import ..Fake6502: K, M, G, rhex
 using ..Fake6502m: addrsyms, opsyms
 using ..AsmTools
 
-const opcodes = Dict((opsyms[i + 1], addrsyms[i + 1]) => i for i in 0x00:0xFF)
-const opbytes = Dict(
-    Iterators.flatten(Pair.(j, Ref(i)) for (i, j) in enumerate([
-                           (:acc,:imp),
-                           (:rel,:imm,:indx,:indy,:zp,:zpx,:zpy),
-                           (:abso,:absx,:absy,:ind)])))
+const opcodes = Dict((opsyms[i+1], addrsyms[i+1]) => i for i = 0x00:0xFF)
+const addrmodebytes = Dict(
+    Iterators.flatten(
+        Pair.(j, Ref(i)) for (i, j) in enumerate([
+            (:acc, :imp),
+            (:rel, :imm, :indx, :indy, :zp, :zpx, :zpy),
+            (:abso, :absx, :absy, :ind),
+        ])
+    ),
+)
 
 const legal_ops = Set(string.(opsyms))
-#const opcode_addrmodes = foldl((d, (op, addr))-> push!(d[op], addr), keys(addrmodes);
-#                               init = Dict{Symbol,Set}(op => Set() for op in legal_ops))
-const branch_ops = Set([:bpl,:bmi,:bvc,:bvs,:bcc,:bcs,:bne,:beq])
-const tok_pat = r";.*$|[\w.]+|\$[0-9a-fA-F]+|[0-9]+(?:\.[0-9]*)?+|[][(){},\"'#*]|[^\w\d\s(),]+"
+const branch_ops = Set([:bpl, :bmi, :bvc, :bvs, :bcc, :bcs, :bne, :beq])
+const tok_pat =
+    r";.*$|[\w.]+|\$[0-9a-fA-F]+|[0-9]+(?:\.[0-9]*)?+|[][(){},\"'#*]|[^\w\d\s(),]+"
 const ident_pat = r"^\w+$"
 const label_pat = r"^\w+$|^\*$"
 const call_pat = r"#\w+"
 const bracket_pat = r"[][(){},\"']"
 const string_bracket_pat = r"\"|\$\("
-const brackets = Dict("("=>")", "["=>"]", "{"=>"}", "\""=>"\"", "'"=>"'", "\$("=>")")
+const brackets =
+    Dict("(" => ")", "[" => "]", "{" => "}", "\"" => "\"", "'" => "'", "\$(" => ")")
 const close_brackets = ")]}"
-const assignments = Set(["=", "+=", "-=", "|=", "&="])
-#const dot_cmds = Set([".var", ".data", ".macro", ".endmacro", ".jmacro", ".endjmacro",
-#                      ".fake", ".endfake", ".if", ".else", ".elseif", ".endif"])
-const dot_cmds = Set([".var", ".data", ".julia", ".include"])
-const directives = Set([legal_ops..., assignments..., dot_cmds...])
+const dot_cmds = Set([".data", ".julia", ".include", "=", ".macro", ".value"])
+const directives = Set([legal_ops..., dot_cmds...])
 const macro_arg_sep = r"(?<!\\),"
+const macro_ref_pat = r"\\\w+"
 
 matches(r, s) = !isnothing(match(r, s))
 
@@ -155,12 +138,18 @@ struct Line
     tokens::Vector{RegexMatch}
 end
 
+struct Macro
+    argnames::Vector{Symbol}
+    func::Function
+end
+
 @kwdef mutable struct CodeContext
     env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16))))
-                         using ..AsmTools
-                         ctxeval(expr) = eval(expr)
-                         end))
-    macros::Dict{Symbol,Function} = Dict{Symbol,Function}()
+    using ..AsmTools
+    import ..Asm: @asm_str
+    ctxeval(expr) = eval(expr)
+    end))
+    macros::Dict{Symbol,Macro} = Dict{Symbol,Macro}()
     funcs::Vector{Function} = Function[]
     labels::Set{Symbol} = Set{Symbol}()
     vars::Set{Symbol} = Set{Symbol}([:(*)])
@@ -172,18 +161,80 @@ end
     offset::UInt16 = 0 # next address to emit into
     memory::Vector{UInt8} = zeros(UInt8, 64K)         # 64K memory array
     pwd::String = pwd()
-    #address::Ref{UInt16} = 0x0000
-    #labels::Dict{String,Int} = Dict{String,Int}()
-    #relative_labels::Set{Int} = Set{Int}()
-    #chunks::Vector{CodeChunk} = CodeChunk[]
-    #changed::Vector{Bool} = Bool[]          # record of each memory cell that has been changed
-    #macrostack::Vector{Symbol} = Symbol[]
-    #macrovalue::Any = nothing
+    macrovalue::UInt16 = 0
 end
+
+CodeContext(ctx::CodeContext) = CodeContext(;
+    env = subenv(ctx),
+    labels = Set(ctx.labels),
+    assigned = Set(ctx.assigned),
+    vars = Set(ctx.vars),
+    ctx.offset,
+    ctx.memory,
+    ctx.pwd,
+    macrovalue = ctx.offset,
+)
+
+function subenv(ctx::CodeContext)
+    local subname = Symbol(String(rand('a':'z', 16)))
+    local envnames = [n for n in names(ctx.env, all = true)
+                                            if !isempty(string(n)) &&
+                                                !startswith(string(n), '#') &&
+                                                n ∉ (:eval, nameof(ctx.env), :include, :__CONTEXT__, :*) &&
+                                                !eval(ctx, :($n isa Module))]
+    local imports = :(import ...$(nameof(ctx.env)): x)
+    pop!(imports.args[1].args)
+    for n in envnames
+        push!(imports.args[1].args, Expr(:., n))
+    end
+    local expr = :(module $subname
+                using ....AsmTools
+                import ....Asm
+                import ....Asm: @asm_str
+                ctxeval(expr) = eval(expr)
+                end)
+    local mod = eval(ctx, expr)
+    importall(mod, ctx.env)
+    mod
+end
+
+function importall(child::Module, parent::Module)
+    local envnames = [n for n in names(parent, all = true)
+                          if !isempty(string(n)) &&
+                              !startswith(string(n), '#') &&
+                              n ∉ (:eval, nameof(parent), :include, :__CONTEXT__, :*, :ctxeval) &&
+                              !invokelatest(parent.ctxeval, :($n isa Module))]
+    local imports = :(import ...$(nameof(parent)): x)
+    pop!(imports.args[1].args)
+    for n in envnames
+        push!(imports.args[1].args, Expr(:., n))
+    end
+    invokelatest(child.ctxeval, imports)
+end
+
+struct AssemblyCode
+    pass1::Function
+    pass2::Function
+end
+
+function assemble(ctx::CodeContext, code::AssemblyCode)
+    ctx.macrovalue = ctx.offset
+    code.pass1(ctx)
+    code.pass2(ctx)
+end
+
+Base.:(*)(code1::AssemblyCode, code2::AssemblyCode) = AssemblyCode(ctx -> begin
+    code1.pass1(ctx)
+    code2.pass1(ctx)
+end, ctx -> begin
+    code1.pass2(ctx)
+    code2.pass2(ctx)
+end)
 
 function tokenize(n, line)
     tokens = [eachmatch(tok_pat, line)...]
-    !isempty(tokens) && startswith(tokens[end].match, ';') &&
+    !isempty(tokens) &&
+        startswith(tokens[end].match, ';') &&
         return Line(n, line, @view tokens[1:end-1])
     return Line(n, line, tokens)
 end
@@ -194,11 +245,14 @@ numtoks(ctx::CodeContext) = length(ctx.toks)
 hastoks(ctx::CodeContext) = !isempty(ctx.toks)
 
 function eatline(ctx::CodeContext)
-    isempty(ctx.lines) &&
-        return
-    setline(ctx, ctx.lines[1])
-    ctx.lines = @view ctx.lines[2:end]
+    isempty(ctx.lines) && return
+    setlines(ctx, ctx.lines)
     ctx.line
+end
+
+function setlines(ctx::CodeContext, lines::AbstractVector{Line})
+    setline(ctx, lines[1])
+    ctx.lines = @view lines[2:end]
 end
 
 function setline(ctx::CodeContext, line::Line)
@@ -212,65 +266,79 @@ tok(ctx::CodeContext) = ctx.toks[1].match
 
 tokstr(ctx::CodeContext) = tokstr(ctx.line.line, ctx.toks[1], ctx.toks[end])
 
-tokstr(str, tok1, tok2) = @view str[tok1.offset:tok2.offset + length(tok2.match) - 1]
+tokstr(str, tok1, tok2) = @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
 
 function lasttoks(ctx::CodeContext, items...)
-    length(ctx.toks) < length(items) &&
-        return false
-    for i in 0:length(items)-1
-        lowercase(ctx.toks[end-i].match) != lowercase(items[end-i]) &&
-            return false
+    length(ctx.toks) < length(items) && return false
+    for i = 0:length(items)-1
+        lowercase(ctx.toks[end-i].match) != lowercase(items[end-i]) && return false
     end
     return true
 end
 
-isdirective(ctx::CodeContext) = hastoks(ctx) &&
-    (ctx.toks[1].match ∈ directives || matches(call_pat, tok(ctx)))
+isdirective(ctx::CodeContext) =
+    hastoks(ctx) && (ctx.toks[1].match ∈ directives || matches(call_pat, tok(ctx)))
 
 isop(ctx::CodeContext) = hastoks(ctx) && lowercase(tok(ctx)) ∈ legal_ops
 
-iscall(ctx::CodeContext) = hastoks(ctx) && matches(call_pat, tok(ctx))
+iscall(ctx::CodeContext) =
+    hastoks(ctx) &&
+    (println("CHECK CALL $(tokstr(ctx))"); true) &&
+    matches(call_pat, tokstr(ctx))
 
 is(ctx::CodeContext, str) = hastoks(ctx) && tok(ctx) == str
-
-isassign(ctx::CodeContext) = hastoks(ctx) && 0 < length(tok(ctx)) < 3 && tok(ctx)[end] == '='
 
 isident(ctx::CodeContext) = hastoks(ctx) && matches(ident_pat, tok(ctx))
 
 islabel(ctx::CodeContext) = hastoks(ctx) && matches(label_pat, tok(ctx))
 
 macro asm_str(str)
-    asm(str)
+    local pos = 1
+    local buf = []
+    for match in eachmatch(macro_ref_pat, str)
+        match.offset > pos && push!(buf, str[pos:match.offset-1])
+        push!(buf, :(string($(Symbol(match.match[2:end])))))
+        pos = match.offset + length(match.match)
+    end
+    pos <= length(str) && push!(buf, str[pos:end])
+    esc(:($(asm)(join([$(buf...)]))))
 end
 
 function asmfile(file)
     local ctx = CodeContext(; pwd = dirname(file))
-    asm(read(file, String))(ctx)
+    local assembly = asm(read(file, String))
+    assemble(ctx, assembly)
     return ctx
-end    
+end
 
 """
     produce a CodeChunk based on str
 """
 function asm(str)
-    local lines = [tokenize(n, line)
-                   for (n, line) in enumerate(split(str, "\n"))]
-    function(ctx)
-        # pass 1
-        remaining = compile_macros_pass1(lines, ctx.macros)
-        # pass 2
-        invokelatest() do
-            scan_asm_pass2(ctx, remaining)
-            # pass 3
+    local lines = [tokenize(n, line) for (n, line) in enumerate(split(str, "\n"))]
+    AssemblyCode(
+        function (ctx)
+            println("ASSEMBLING, OFFSET: $(ctx.offset)")
+            setvar(ctx, :__CONTEXT__, ctx)
+            # pass 1
+            #println("@@@\n@@@PASS 1\n###")
+            remaining = compile_macros_pass1(ctx, lines)
+            invokelatest() do
+                scan_asm_pass2(ctx, remaining)
+            end
+            ctx
+        end,
+        function (ctx)
+            # pass 2
+            #println("@@@\n@@@PASS 2\n###")
             invokelatest() do
                 reset(ctx)
                 for func in ctx.funcs
                     func()
                 end
             end
-        end
-        ctx
-    end
+        end,
+    )
 end
 
 getvar(ctx::CodeContext, var::Symbol) = ctx.env.eval(var)
@@ -278,10 +346,11 @@ getvar(ctx::CodeContext, var::Symbol) = ctx.env.eval(var)
 eval(ctx::CodeContext, expr) = invokelatest(ctx.env.ctxeval, expr)
 
 function setvar(ctx::CodeContext, var::Symbol, value)
-    var == :(*) &&
-        return
+    var == :(*) && return
     local argname = Symbol("_" * string(var))
-    invokelatest(eval(ctx, :(function($argname) global $var = $argname; end)), value)
+    invokelatest(eval(ctx, :(function ($argname)
+        global $var = $argname
+    end)), value)
 end
 
 """
@@ -293,151 +362,114 @@ function scan_asm_pass2(ctx::CodeContext, lines)
         local line = eatline(ctx)
         ctx.toks = line.tokens
         ctx.label = nothing
-        !hastoks(ctx) &&
-            continue
+        !hastoks(ctx) && continue
         if !isdirective(ctx) && islabel(ctx)
             # a labeled statement -- statement decides whether this is a label or a variable
             ctx.label = Symbol(tok(ctx))
             eattok(ctx)
-            asm_var(ctx) &&
-                continue
-            asm_call(ctx) &&
-                # run the macro, determine the label offset and add code the pass
-                continue
             # set the label to the current offset
-            setvar(ctx, ctx.label, ctx.offset)
-            !hastoks(ctx) &&
-                continue
+            ctx.label != :* && !iscall(ctx) && deflabel(ctx)
+            !hastoks(ctx) && continue
         end
-        asm_assign(ctx) &&
-            continue
-        !isnothing(ctx.label) && ctx.label ∈ ctx.labels &&
-            lineerror(ctx, """Attempt to reassign label $(ctx.label)""")
+        asm_assign(ctx) && continue
         !isnothing(ctx.label) &&
-            push!(ctx.labels, ctx.label)
-        local assembled = false
-        for dir in [asm_op, asm_data, asm_julia, asm_include]
-            dir(ctx) &&
-                @goto bottom
+            ctx.label ∈ ctx.labels &&
+            lineerror(ctx, """Attempt to reassign label $(ctx.label)""")
+        !isnothing(ctx.label) && push!(ctx.labels, ctx.label)
+        for dir in [asm_op, asm_data, asm_julia, asm_include, asm_call, asm_value]
+            dir(ctx) && @goto bottom
         end
-        !isdirective(ctx) &&
-            lineerror(line, """Unknown directive, $(tokstr(ctx))""")
+        !isdirective(ctx) && lineerror(line, """Unknown directive, $(tokstr(ctx))""")
         lineerror(line, """Unimplemented directive: $(tok(ctx))""")
-        #local label = nothing
-        #if toks[1].match ∉ legal_ops
-        #    label = toks[1].match
-        #    toks = @view toks[2:end]
-        #end
-        #if isempty(toks)
-        #    if !isnothing(label)
-        #        push!(funcs, (ctx)-> ctx.labels[label] = ctx.address)
-        #    end
-        #elseif isassign()
-        #    continue
-        #elseif isop(ctx)
-        #elseif iscall(toks)
-        #    local macroname = Symbol(toks[1].match[2:end])
-        ##    local args = numtoks(ctx) == 1 ? [] :
-        ##        macroargs(@view line[toks[2].offset:length(toks[end].match) + toks[end].offset])
-        ##    !haskey(macros, macroname) &&
-        ##        lineerror(line, "Unknown macro $macroname")
-        ##    if !isnothing(label)
-        ##        push!(funcs, Meta.eval(quote
-        ##                                   $CTX.labels[$(QuoteNode(label))] = callmacro($CTX, args)
-        ##                               end))
-        ##    else
-        ##        push!(funcs, Meta.eval(quote
-        ##                                   #todo gather macro args
-        ##                                   error("gathering macro args not implemented")
-        ##                                   $(QuoteNode(macroname)) ∉ $CTX.macros &&
-        ##                                       lineerror(line, "Unknown macro " * $(string(macroname)))
-        ##                                   callmacro($CTX, args)
-        ##                               end))
-        ##    end
-        ##elseif is(toks, ".return")
-        ##    length(toks) == 1 &&
-        ##        lineerror(line, """.return with no value""")
-        #end
-        #!isempty(toks) && toks[1].match ∉ legal_ops &&
-        #    lineerror(line, """Unknown directive""")
-        #push!(funcs, defop(@view toks[:]))
-        #!isnothing(label) &&
-        #    push!(funcs, deflabel(label))
-        #isempty(toks) &&
-        #    continue
         @label bottom
     end
 end
 
+function deflabel(ctx, value = ctx.offset)
+    println("@@ LABEL $(ctx.label): $value")
+    eval(ctx, :(const $(ctx.label) = $value))
+end
+
 assembleif(func::Function, ctx::CodeContext, pred::AbstractString) =
-    assembleif(func, ctx, ctx-> is(ctx, pred))
+    assembleif(func, ctx, ctx -> is(ctx, pred))
 
 function assembleif(func, ctx, pred)
-    !pred(ctx) &&
-        return false
+    !pred(ctx) && return false
     func()
     return true
 end
 
-asm_data(ctx::CodeContext) = assembleif(ctx, ".data") do
-    eattok(ctx)
-    println("DATA: $(tokstr(ctx))")
-    local expr = Meta.parse(tokstr(ctx))
-    expr isa Expr && expr.head == :incomplete &&
-        lineerror(ctx, """Incomplete expression: $(tokstr(ctx))""")
-    local func = eval(ctx, :(function() $expr end))
-    push!(ctx.funcs, ()-> emitall(ctx, invokelatest(func)))
-end
-
-asm_include(ctx::CodeContext) = assembleif(ctx, ".include") do
-    eattok(ctx)
-    try
+asm_data(ctx::CodeContext) =
+    assembleif(ctx, ".data") do
+        eattok(ctx)
+        println("DATA: $(tokstr(ctx))")
         local expr = Meta.parse(tokstr(ctx))
-        if expr isa Expr && expr.head == :incomplete
-            error()
-        end
-        eval(ctx, :(include(joinpath($(ctx.pwd), $expr))))
-    catch
-        lineerror(ctx, """Error running .include directive: $(tokstr(ctx))""")
+        expr isa Expr &&
+            expr.head == :incomplete &&
+            lineerror(ctx, """Incomplete expression: $(tokstr(ctx))""")
+        local func = eval(ctx, :(function ()
+            $expr
+        end))
+        local data = asbytes(invokelatest(func))
+        push!(ctx.funcs, () -> emitall(ctx, data))
+        ctx.offset += length(data)
     end
-end
 
-asm_julia(ctx::CodeContext) = assembleif(ctx, ".julia") do
-    local firstline = ctx.line
+asbytes(str::AbstractString) = Vector{UInt8}(str)
+
+asm_include(ctx::CodeContext) =
+    assembleif(ctx, ".include") do
+        eattok(ctx)
+        try
+            local expr = Meta.parse(tokstr(ctx))
+            if expr isa Expr && expr.head == :incomplete
+                error()
+            end
+            eval(ctx, :(include(joinpath($(ctx.pwd), $expr))))
+        catch
+            lineerror(ctx, """Error running .include directive: $(tokstr(ctx))""")
+        end
+    end
+
+asm_julia(ctx::CodeContext) =
+    assembleif(ctx, ".julia") do
+        eattok(ctx)
+        local expr = compile_julia(ctx)
+        push!(ctx.funcs, () -> eval(ctx, expr))
+    end
+
+asm_value(ctx::CodeContext) =
+    assembleif(ctx, ".value") do
+        eattok(ctx)
+        !isnothing(ctx.label) && deflabel(ctx)
+        local expr = compile_julia(ctx)
+        try
+            ctx.macrovalue = eval(ctx, expr)
+            println("SET MACRO VALUE TO $(ctx.macrovalue)")
+        catch
+            lineerror(ctx, """Error calculating macro value""")
+        end
+    end
+
+function compile_julia(ctx::CodeContext)
     local firstlines = ctx.lines
-    eattok(ctx)
     local programtext = ctx.line.line[ctx.toks[1].offset:end]
     while true
         try
             local expr = Meta.parse(programtext)
             if expr isa Expr && expr.head == :incomplete
                 local line = eatline(ctx)
-                if isnothing(line)
-                    setline(ctx, firstline)
-                    ctx.lines = firstlines
-                    lineerror(ctx, """Incomplete Julia code:\n$programtext""")
-                end
+                isnothing(line) && error()
                 programtext *= '\n' * line.line
                 continue
             end
-            push!(ctx.funcs, ()-> eval(ctx, expr))
-            return
+            return expr
         catch
+            setlines(ctx, firstlines)
             lineerror(ctx, """Error parsing Julia code:\n$programtext""")
             rethrow()
         end
     end
-end
-
-asm_var(ctx::CodeContext) = assembleif(ctx, ".var") do
-    local var = ctx.label
-    var ∈ ctx.labels &&
-        lineerror(ctx, """Attempt to declare $(ctx.label) as a variable but it is already a label""")
-    var ∈ ctx.vars &&
-        lineerror(ctx, """Attempt to redeclare $(ctx.label) as a variable""")
-    # save the var for resetting after this pass
-    push!(ctx.vars, ctx.label)
-    assign_var(ctx, numtoks(ctx) == 1 ? "0" : tokstr(ctx, ctx.toks[2], ctx.toks[end]))
 end
 
 function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
@@ -445,179 +477,173 @@ function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
     local progress = "compiling expression"
     try
         local expr = Meta.parse(exprstr)
-        expr isa Expr && expr.head == :incomplete &&
-            error()
+        expr isa Expr && expr.head == :incomplete && error()
         push!(ctx.assigned, var)
         println("VAR: $(repr(var)) $(var == :(*)) <- $exprstr")
-        local func = var == :(*) ?
-            wrapper(()-> begin ctx.offset = ctx.env.eval(expr); println("SET OFFSET TO $(rhex(ctx.offset))") end) :
-            wrapper(()-> invokelatest(ctx.env.eval(:(function() global $var = $expr end))))
+        local func =
+            var == :* ? wrapper(() -> begin
+                ctx.offset = ctx.env.eval(expr)
+                println("SET OFFSET TO $(rhex(ctx.offset))")
+            end) : wrapper(() -> invokelatest(ctx.env.eval(:(function ()
+                global $var = $expr
+            end))))
         # push the func for pass 3
         push!(ctx.funcs, func)
         # execute the func for the rest of this pass
         progress = "executing expression"
-        func()
+        var == :* && func()
     catch
         lineerror(ctx, """Error $progress, $exprstr""")
     end
 end
 
-#TODO
-asm_call(ctx::CodeContext) = assembleif(ctx, iscall) do
-    error("MACRO CALLS NOT IMPLEMENTED")
-end
-
-asm_assign(ctx::CodeContext) = assembleif(ctx, isassign) do
-    ctx.label ∈ ctx.labels &&
-        lineerror(ctx, """Attempt to assign a label""")
-    numtoks(ctx) == 1 &&
-        lineerror(ctx, """Assignment needs an expression""")
-    local op = tok(ctx)
-    eattok(ctx)
-    local exprstr = tokstr(ctx)
-    local var = ctx.label
-    #if op == "="
-    #    assign_var(ctx, exprstr, (setfunc)-> begin
-    #                   var ∈ ctx.assigned &&
-    #                       lineerror(ctx, """Attempt to reassign label, $var""")
-    #                   setfunc
-    #               end)
-    #    push!(ctx.labels, var)
-    if op == "=" || op == ":="
-        assign_var(ctx, exprstr)
-        push!(ctx.vars, var)
-    elseif op == ":?="
-        assign_var(ctx, exprstr, (setfunc)-> !haskey(ctx.assigned, var) && setfunc())
-    else
-        ctx.label ∉ ctx.vars &&
-            lineerror(ctx, """Attempt to assign $var but it is not a variable""")
-        if op == "+="
-            assign_var(ctx, "$var + ($exprstr)")
-        elseif op == "-="
-            assign_var(ctx, "$var - ($exprstr)")
-        elseif op == "|="
-            assign_var(ctx, "$var | ($exprstr)")
-        elseif op == "&="
-            assign_var(ctx, "$var & ($exprstr)")
+asm_call(ctx::CodeContext) =
+    assembleif(ctx, iscall) do
+        eattok(ctx)
+        local macname = Symbol(tok(ctx))
+        println("ASSEMBLING CALL $macname")
+        eattok(ctx)
+        !haskey(ctx.macros, macname) && lineerror(ctx, """Reference to unknown macro""")
+        local mac = ctx.macros[macname]
+        local args = macroargs(tokstr(ctx))
+        length(args) != length(mac.argnames) && lineerror(
+            ctx,
+            """Wrong number of macro arguments to $macname, expecting $(length(mac.argnames)) but got $(length(args))""",
+        )
+        try
+            println("ASSEMBLING $macname CALL")
+            local tmpctx = CodeContext(ctx)
+            local assembly = mac.func(args...)
+            println("CALL MACRO, TMP OFFSET: $(tmpctx.offset)")
+            assembly.pass1(tmpctx)
+            !isnothing(ctx.label) && deflabel(ctx, tmpctx.macrovalue)
+            println("PUSHING $macname's FUNC")
+            push!(ctx.funcs, function ()
+                #local tmpctx = CodeContext(ctx)
+                importall(tmpctx.env, ctx.env)
+                println("CALLING $macname's FUNC")
+                assembly.pass2(tmpctx)
+                ctx.offset = tmpctx.offset
+            end)
+        catch err
+            @error "$err" exception = (err, catch_backtrace())
+            lineerror(ctx, """Error calling macro""")
         end
     end
-end
-
-function reset(ctx::CodeContext)
-    ctx.offset = 0
-    setdiff!(ctx.assigned, ctx.vars)
-    ctx.env.eval(
-        quote
-            $((:($var = nothing) for var in ctx.vars)...)
-        end
-    )
-end
-
-function emit(ctx::CodeContext, bytes::UInt8...)
-    local start = ctx.offset
-    for byte in bytes
-        ctx.memory[ctx.offset + 1] = byte
-        ctx.offset += 1
-    end
-    println("$(rhex(start)): $(join([rhex(byte) for byte in bytes], " "))")
-end
-
-function emitall(ctx::CodeContext, str::AbstractString)
-    copy!(@view(ctx.memory[ctx.offset + 1:length(str) + ctx.offset]), Vector{UInt8}(str))
-    ctx.offset += length(str)
-end
-
-function assemble(ctx::CodeContext, op, addr, exprs = :())
-    local opcode = opcodes[(op, addr)]
-    local bytes = opbytes[addr]
-    local args = eval(ctx, exprs)
-    if bytes == 1
-        push!(ctx.funcs, ()-> emit(ctx, opcode))
-    elseif bytes == 2
-        local a1 = args[1]
-        push!(ctx.funcs, ()-> emit(ctx, opcode, a1))
-    elseif bytes == 3
-        local a1 = args[1]
-        local a2 = args[2]
-        push!(ctx.funcs, ()-> emit(ctx, opcode, a1, a2))
-    end
-    push!(ctx.funcs, ()-> println("assemble ($op $addr)$(isempty(args) ? "" : " " * exprs) ->  $(join([rhex(opcode), args...], " "))"))
-    true
-end
-
-asm_op(ctx::CodeContext) = assembleif(ctx, isop) do
-    local op = Symbol(lowercase(tok(ctx)))
-    local opname = uppercase(string(op))
-    local modes = keys(opcodes)
-    local args = strip(tokstr(ctx))
-    if !isnothing(ctx.label)
-        ctx.label ∈ ctx.assigned &&
-            lineerror(ctx, """Redeclaring label $(ctx.label)""")
-        push!(ctx.labels, ctx.label)
-        push!(ctx.assigned, ctx.label)
-    end
-    eattok(ctx)
-    !hastoks(ctx) && (op, :imp) ∈ modes &&
-        return assemble(ctx, op, :imp)
-    !hastoks(ctx) && (op, :acc) ∈ modes &&
-        return assemble(ctx, op, :acc)
-    !hastoks(ctx) &&
-        lineerror(ctx, """No arguments for opcode $opname""")
-    op ∈ branch_ops &&
-        return assemble(ctx, op, :rel, args)
-    is(ctx, "#") &&
-        return assemble(ctx, op, :imm, args)
-    is(ctx, "(") && lasttoks(ctx, ")", ",", "y") &&
-        return assemble(ctx, op, :indy, args)
-    is(ctx, "(") && lasttoks(ctx, ",", "x", ")") &&
-        return assemble(ctx, op, :indx, args)
-    #check for zpx as opposed to absx -- skip for now and assemble ,x as absolute,x
-    lasttoks(ctx, ",", "y") &&
-        return assemble(ctx, op, :absy, args)
-    lasttoks(ctx, ",", "x") &&
-        return assemble(ctx, op, :absx, args)
-    is(ctx, "(") && lasttoks(ctx, ")") && op == :jmp &&
-        return assemble(ctx, op, :ind, args)
-    is(ctx, "(") && lasttoks(ctx, ")") &&
-        lineerror(ctx, """Only JMP can use indirect addressing but this is $opname""")
-    is(ctx, "(") &&
-        lineerror(ctx, """Incomplete indirect expression, $(tokstr(ctx))""")
-    # must be absolute
-    assemble(ctx, op, :abso, args)
-end
 
 """
 Macro args are like C macro args -- just simple splitting on commas, backslash escapes a comma
 Juila evaluation on args doesn't happen until they are substituted into an ASM string
 """
-macroargs(str) = [replace(s, "\\,"=>",") for s in strip.(split(str, macro_arg_sep))]
+macroargs(str) = [replace(s, "\\," => ",") for s in strip.(split(str, macro_arg_sep))]
 
-# TODO
-#function callmacro(ctx, args)
-#    
-#end
+asm_assign(ctx::CodeContext) =
+    assembleif(ctx, "=") do
+        ctx.label ∈ ctx.labels && lineerror(ctx, """Attempt to assign a label""")
+        numtoks(ctx) == 1 && lineerror(ctx, """Assignment needs an expression""")
+        eattok(ctx)
+        local exprstr = tokstr(ctx)
+        assign_var(ctx, exprstr)
+        push!(ctx.vars, ctx.label)
+    end
 
-function deflabel(tok::RegexMatch)
-#    local label = tok.match
-#    (ctx)-> begin
-#        ctx.
-#            end
+function reset(ctx::CodeContext)
+    ctx.offset = 0
+    setdiff!(ctx.assigned, ctx.vars)
+    ctx.env.eval(quote
+        $((:($var = nothing) for var in ctx.vars)...)
+    end)
 end
+
+function emit(ctx::CodeContext, bytes::UInt8...)
+    local start = ctx.offset
+    for byte in bytes
+        ctx.memory[ctx.offset+1] = byte
+        ctx.offset += 1
+    end
+    println("$(rhex(start)): $(join([rhex(byte) for byte in bytes], " "))")
+end
+
+function emitall(ctx::CodeContext, bytes::Vector{UInt8})
+    copy!(@view(ctx.memory[ctx.offset+1:length(bytes)+ctx.offset]), bytes)
+    ctx.offset += length(bytes)
+end
+
+function assemble(ctx::CodeContext, op, addr, exprs = :())
+    local opcode = opcodes[(op, addr)]
+    local bytes = addrmodebytes[addr]
+    local args = eval(ctx, exprs)
+    if bytes == 1
+        push!(ctx.funcs, () -> emit(ctx, opcode))
+    elseif bytes == 2
+        local a1 = args[1]
+        push!(ctx.funcs, () -> emit(ctx, opcode, a1))
+    elseif bytes == 3
+        local a1 = args[1]
+        local a2 = args[2]
+        push!(ctx.funcs, () -> emit(ctx, opcode, a1, a2))
+    end
+    push!(
+        ctx.funcs,
+        () -> println(
+            "assemble ($op $addr)$(isempty(args) ? "" : " " * exprs) ->  $(join([rhex(opcode), args...], " "))",
+        ),
+    )
+    ctx.offset += bytes
+    true
+end
+
+asm_op(ctx::CodeContext) =
+    assembleif(ctx, isop) do
+        local op = Symbol(lowercase(tok(ctx)))
+        local opname = uppercase(string(op))
+        local modes = keys(opcodes)
+        local args = strip(tokstr(ctx))
+        if !isnothing(ctx.label)
+            ctx.label ∈ ctx.assigned && lineerror(ctx, """Redeclaring label $(ctx.label)""")
+            push!(ctx.labels, ctx.label)
+            push!(ctx.assigned, ctx.label)
+        end
+        eattok(ctx)
+        !hastoks(ctx) && (op, :imp) ∈ modes && return assemble(ctx, op, :imp)
+        !hastoks(ctx) && (op, :acc) ∈ modes && return assemble(ctx, op, :acc)
+        !hastoks(ctx) && lineerror(ctx, """No arguments for opcode $opname""")
+        op ∈ branch_ops && return assemble(ctx, op, :rel, args)
+        is(ctx, "#") && return assemble(ctx, op, :imm, args)
+        is(ctx, "(") &&
+            lasttoks(ctx, ")", ",", "y") &&
+            return assemble(ctx, op, :indy, args)
+        is(ctx, "(") &&
+            lasttoks(ctx, ",", "x", ")") &&
+            return assemble(ctx, op, :indx, args)
+        #check for zpx as opposed to absx -- skip for now and assemble ,x as absolute,x
+        lasttoks(ctx, ",", "y") && return assemble(ctx, op, :absy, args)
+        lasttoks(ctx, ",", "x") && return assemble(ctx, op, :absx, args)
+        is(ctx, "(") &&
+            lasttoks(ctx, ")") &&
+            op == :jmp &&
+            return assemble(ctx, op, :ind, args)
+        is(ctx, "(") &&
+            lasttoks(ctx, ")") &&
+            lineerror(ctx, """Only JMP can use indirect addressing but this is $opname""")
+        is(ctx, "(") && lineerror(ctx, """Incomplete indirect expression, $(tokstr(ctx))""")
+        # must be absolute
+        assemble(ctx, op, :abso, args)
+    end
 
 """
 Extract macros from assembly code, returning the compiled macros and the rest of the code
 """
-function compile_macros_pass1(lines, macros::Dict{Symbol, Function})
+function compile_macros_pass1(ctx::CodeContext, lines)
     local l = 1
     local remain = Line[]
     while l <= length(lines)
         local line = lines[l]
         if ismacrodecl(line)
-            local label, func, next_l = compilemacro(lines, l)
-            label ∈ keys(macros) &&
-                lineerror(l[1], """Macro name "$label" already in use""")
-            macros[label] = func
-            l = next_l
+            setlines(ctx, @view lines[l:end])
+            compilemacro(ctx)
+            lines = ctx.lines
+            l = 1
         else
             push!(remain, line)
             l += 1
@@ -626,113 +652,28 @@ function compile_macros_pass1(lines, macros::Dict{Symbol, Function})
     return remain
 end
 
-ismacrodecl(line::Line) = !isnothing(findfirst(m-> m.match == ".macro", line.tokens))
+ismacrodecl(line::Line) = !isnothing(findfirst(m -> m.match == ".macro", line.tokens))
 
-isjmacrodecl(line::Line) = !isnothing(findfirst(m-> m.match == ".jmacro", line.tokens))
-
-isfakedecl(line::Line) = !isnothing(findfirst(m-> m.match == ".fake", line.tokens))
+isfakedecl(line::Line) = !isnothing(findfirst(m -> m.match == ".fake", line.tokens))
 
 lineerror(ctx::CodeContext, msg) = lineerror(ctx.line, msg)
 
-lineerror(line::Line, msg) =
-    error("Error on line $(line.number), $msg: $(line.line)")
+lineerror(line::Line, msg) = error("Error on line $(line.number), $msg: $(line.line)")
 
-function compilemacro(lines, l)
-    local argnames = []
-    local tokens = lines[l].tokens
-    (length(tokens) == 1 || tokens[2].match != ".macro" || startswith(tokens[1].match, '.')) &&
-        lineerror(lines[l], """Expected LABEL ".macro" ["(" [ IDENT { "," IDENT } ] ")"] """)
-    local label = Symbol(tokens[1].match)
-    if length(tokens) > 2
-        eatargs(argnames, lines[l], @view(tokens[3:end]),
-                """Expected LABEL ".macro" ["(" [ IDENT { "," IDENT } ] ")"] """)
-    end
-    l += 1
-    #... generate function that splices arg refs into the macro's string
-    local buf = []
-    while true
-        l > length(lines) &&
-            lineerror(lines[1], "missing .endmacro")
-        local line = lines[l]
-        !isempty(line.tokens) && line.tokens[1].match == ".endmacro" &&
-            break
-        push!(buf, line.line, "\n")
-        l += 1
-    end
-    local str = join(buf)
-    local macr = []
-    while !isempty(str)
-        local idx = findfirst('\\', str)
-        if isnothing(idx)
-            push!(macr, str)
-            break
-        end
-        length(str) == idx && # str ends in \
-            lineerror(lines[l], """Bad macro syntax, expected \\NAME or \\(EXPR)""")
-        push!(macr, @view str[1:idx-1])
-        local expr, nstr = eatexpr(lines[l], @view str[idx+1:end])
-        push!(macr, expr)
-        str = nstr
-    end
-    return label, eval(
-        quote
-            function(ctx, $(argnames...))
-                try
-                    join([$(macr...)])
-                catch err
-                    @error ("Error in macro " * $label) exception=(err,catch_backtrace())
-                end
-            end
-        end
-    ), l
-end
-
-function eatargs(argnames, line, tokens, syntax)
-    if !isempty(tokens) && (tokens[1].match != "(" || tokens[end].match != ")")
-        lineerror(line, """Expected $syntax""")
-    end
-    length(tokens) < 3 &&
-        return
-    tokens = @view tokens[2:end-1]
-    !matches(ident_pat, tokens[1].match) &&
-        lineerror(line, """Expected $syntax""")
-    push!(argnames, Symbol(tokens[1].match))
-    tokens = @view tokens[2:end]
-    # there should be an even number of tokens left (alternating "," and name)
-    length(tokens) % 2 != 0 &&
-        lineerror(line, """Expected $syntax""")
-    for (comma, ident) in Iterators.partition(tokens, 2)
-        (comma.match != "," || !match(ident_pat, ident.match)) &&
-            lineerror(line, """Expected $syntax""")
-        push!(argnames, Symbol(ident.match))
-    end
-end
-
-function eatexpr(line, str)
-    local orig = str
-    if str[1] != '('
-        local m = match(ident_pat, str)
-        (isnothing(m) || m.offset != 1) &&
-            lineerror(line, """Bad macro reference""")
-        return Symbol(m.match), @view str[length(m.match) + 1:end]
-    end
-    local len = 0
-    while !isempty(str)
-        local idx = findfirst(')', str)
-        isnothing(idx) &&
-            break
-        try
-            println("PARSING: $(@view orig[1:len + idx])")
-            local expr = Meta.parse(@view orig[1:len + idx])
-            println("PARSED: $expr")
-            (!(expr isa Expr) || expr.head != :incomplete) &&
-                return expr, @view str[idx+1:end]
-        catch
-        end
-        len += idx
-        str = @view str[idx+1:end]
-    end
-    lineerror(line, """Could not parse Julia expression: $orig""")
+function compilemacro(ctx::CodeContext)
+    local firstline = ctx.line
+    local label = Symbol(ctx.toks[1].match)
+    string(label) == ".macro" && lineerror(ctx, """Attempt to define a nameless macro""")
+    label ∈ keys(ctx.macros) && lineerror(ctx, """Attempt to redefine macro $label""")
+    eattok(ctx)
+    eattok(ctx)
+    local expr = compile_julia(ctx)
+    expr.head != :-> &&
+        lineerror(firstline, """Expected an arrow function ( (args)-> ... )""")
+    println("MACRO $label: $expr")
+    local macargs = expr.args[1]
+    ctx.macros[label] =
+        Macro(macargs isa Symbol ? [macargs] : [expr.args[1].args...], eval(ctx, expr))
 end
 
 test() = asmfile(joinpath(dirname(dirname(@__FILE__)), "examples", "simple.jas"))

@@ -25,7 +25,8 @@ Base.length(r::AddrRange) = r.last.value - r.first.value + 1
 Base.hash(r::AddrRange, h::UInt64) = Base.hash(intRange(r), h)
 
 Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
-Base.show(io::IO, addr::Addr) = print(io, "Addr(0x", lpad(string(UInt16(addr.value) - 1; base=16), 4, "0"), ")")
+Base.show(io::IO, addr::Addr) =
+    print(io, "Addr(0x", lpad(string(UInt16(addr.value) - 1; base = 16), 4, "0"), ")")
 Base.:(>>)(a::Addr, i::UInt64) = Addr((a.value - 1) >> i)
 Base.:(<<)(a::Addr, i::UInt64) = Addr((a.value - 1) << i)
 Base.:(<)(a::Addr, b::Addr) = a.value < b.value
@@ -80,30 +81,29 @@ end
 
 Also, extend access using properties and indices like: `Access(Context).cpu.x`
 """
-struct Access{Base, Leaf}
+struct Access{Base,Leaf}
     offset::UInt
-    Access(type::Type) = new{type, type}(0)
-    Access{T, L}(offset::UInt) where {T, L} = new{T, L}(offset)
+    Access(type::Type) = new{type,type}(0)
+    Access{T,L}(offset::UInt) where {T,L} = new{T,L}(offset)
 end
 
-function Access(a::Access{Base}, field::Symbol) where Base
+function Access(a::Access{Base}, field::Symbol) where {Base}
     T = type(a)
-    for i in 1:fieldcount(T)
+    for i = 1:fieldcount(T)
         name = fieldname(T, i)
-        name === field &&
-            return Access{Base, fieldtype(T, i)}(offset(a) + fieldoffset(T, i))
+        name === field && return Access{Base,fieldtype(T, i)}(offset(a) + fieldoffset(T, i))
     end
     error("No field $field in type $T")
 end
 
-type(::Access{T, L}) where {T, L} = L
+type(::Access{T,L}) where {T,L} = L
 offset(a::Access) = getfield(a, :offset)
-get(a::Access{T, L}, ptr::Ptr{T}) where {T, L} = unsafe_load(Ptr{L}(ptr) + offset(a), 1)
-get(::Access{T}, ::Ptr{U}) where {T, U} =
+get(a::Access{T,L}, ptr::Ptr{T}) where {T,L} = unsafe_load(Ptr{L}(ptr) + offset(a), 1)
+get(::Access{T}, ::Ptr{U}) where {T,U} =
     error("Unsafe get: accessor for $T is not compatible with pointer to $U")
-set!(a::Access{T, L}, ptr::Ptr{T}, value) where {T, L} =
+set!(a::Access{T,L}, ptr::Ptr{T}, value) where {T,L} =
     unsafe_store!(Ptr{L}(ptr) + offset(a), convert(L, value), 1)
-set!(::Access{T}, ::Ptr{U}, value) where {T, U} =
+set!(::Access{T}, ::Ptr{U}, value) where {T,U} =
     error("Unsafe set: accessor for $T is not compatible with pointer to $U")
 
 """
@@ -117,14 +117,14 @@ println(person.id)
 person.name = "fred"
 ```
 """
-struct Accessor{T, L}
-    access::Access{T, L}
+struct Accessor{T,L}
+    access::Access{T,L}
     ptr::Ptr{T}
-    function Accessor(prev::Accessor{T}, field::Symbol) where T
+    function Accessor(prev::Accessor{T}, field::Symbol) where {T}
         newa = Access(access(prev), field)
-        new{T, type(newa)}(newa, ptr(prev))
+        new{T,type(newa)}(newa, ptr(prev))
     end
-    Accessor(ptr::Ptr{T}) where T = new{T, T}(Access(T), ptr)
+    Accessor(ptr::Ptr{T}) where {T} = new{T,T}(Access(T), ptr)
 end
 
 function Base.getproperty(a::Accessor, prop::Symbol)
@@ -136,13 +136,13 @@ Base.setproperty!(a::Accessor, prop::Symbol, value) = set!(Accessor(a, prop), va
 
 offset(a::Accessor, field::Symbol) = offset(access(Accessor(a, field)))
 access(a::Accessor) = getfield(a, :access)
-type(::Accessor{T, L}) where {T, L} = L
+type(::Accessor{T,L}) where {T,L} = L
 ptr(a::Accessor) = getfield(a, :ptr)
 get(a::Accessor) = get(access(a), ptr(a))
 set!(a::Accessor, value) = set!(access(a), ptr(a), value)
 "Create an Accessor with the same path but a different pointer"
-withptr(a::Accessor{T}, ptr::Ptr{T}) where T = Accessor(access(a), ptr)
-withptr(::Accessor{T}, ::Ptr{U}) where {T, U} =
+withptr(a::Accessor{T}, ptr::Ptr{T}) where {T} = Accessor(access(a), ptr)
+withptr(::Accessor{T}, ::Ptr{U}) where {T,U} =
     error("Unsafe set: accessor for $T is not compatible with pointer to $U")
 
 mutable struct Machine{T}
@@ -177,18 +177,20 @@ Base.getindex(mach::Machine, r::AddrRange) = mem(mach)[intRange(r)]
 Base.getindex(mach::Machine, sym::Symbol) = mach[mach.labels[sym]]
 Base.getindex(mach::Machine, addr::Integer) = mach[Addr(addr)]
 Base.getindex(mach::Machine, addr::Addr) = mem(mach)[addr.value]
-Base.getindex(::Machine, addr) =
-    error("Memory locations can only hold be accessed with symbols, integers, and addresses")
+Base.getindex(::Machine, addr) = error(
+    "Memory locations can only hold be accessed with symbols, integers, and addresses",
+)
 Base.setindex!(mach::Machine, byte::UInt8, sym::Symbol) = mach[mach.labels[sym]] = byte
 Base.setindex!(mach::Machine, byte::UInt8, addr::Integer) = mach[Addr(addr)] = byte
 Base.setindex!(mach::Machine, byte::UInt8, addr::Addr) = mem(mach)[addr.value] = byte
 Base.setindex!(::Machine, byte, ::Addr) = error("Memory locations can only hold bytes")
-Base.setindex!(::Machine, ::UInt8, addr) =
-    error("Memory locations can only hold be accessed with symbols, integers, and addresses")
+Base.setindex!(::Machine, ::UInt8, addr) = error(
+    "Memory locations can only hold be accessed with symbols, integers, and addresses",
+)
 
 Base.getproperty(ctx::Ptr{Context}, prop::Symbol) = getproperty(unsafe_load(ctx), prop)
 
-Base.propertynames(::Accessor{T, L}) where {T, L} = Base.fieldnames(L)
+Base.propertynames(::Accessor{T,L}) where {T,L} = Base.fieldnames(L)
 Base.getproperty(a::Access, prop::Symbol) = Access(a, prop)
 Base.setproperty!(a::Access, prop::Symbol, value) = set!(getproperty(a, prop), value)
 
@@ -232,24 +234,23 @@ function write_mem(mach::Machine, addr::UInt16, byte::UInt8)
     mach[addr] = byte
 end
 
-hex(num::Union{UInt8, Int8}) = hex(num, 2)
+hex(num::Union{UInt8,Int8}) = hex(num, 2)
 hex(num::Union{UInt16,Int16}) = hex(num, 4)
-hex(num::Integer, pad =
-    num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base=16), pad, "0")
-rhex(num::Union{UInt8, Int8}) = rhex(num, 2)
+hex(num::Integer, pad = num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base = 16), pad, "0")
+rhex(num::Union{UInt8,Int8}) = rhex(num, 2)
 rhex(num::Union{UInt16,Int16}) = rhex(num, 4)
-rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(string(num; base=16), pad, "0")
+rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(string(num; base = 16), pad, "0")
 
 function call_step(mach::Machine)
     #mprintln(mach, "CALLING STEP")
     #diag(mach)
     if mach[pc(mach)] === JSR
         # check for fake routine
-        addr = A(mach[pc(mach) + 1] + (UInt16(mach[pc(mach) + 2]) << 8))
+        addr = A(mach[pc(mach)+1] + (UInt16(mach[pc(mach)+2]) << 8))
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
         #mprintln(mach,"JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
-            mprintln(mach,"FAKE ROUTINE")
+            mprintln(mach, "FAKE ROUTINE")
             mach.fake_routines[addr](mach)
             incpc(mach, 3)
             return
@@ -277,15 +278,17 @@ const c_write_mem = @cfunction(write_mem, Cvoid, (Ptr{Context}, Cushort, Cuchar)
 
 function push_stack(mach::Machine, addr::Addr)
     adr = addr.value - 1
-    mach.newcpu.memory[0x100 + mach.newcpu.sp + 1] = UInt8(adr >> 8)
-    mach.newcpu.memory[0x100 + mach.newcpu.sp] = UInt8(adr & 0xFF)
+    mach.newcpu.memory[0x100+mach.newcpu.sp+1] = UInt8(adr >> 8)
+    mach.newcpu.memory[0x100+mach.newcpu.sp] = UInt8(adr & 0xFF)
     mach.newcpu.sp -= 0x02
 end
 
 function compare_registers(mach::Machine, c_prop::Symbol, j_prop::Symbol, label = "")
     if getproperty(mach.cpu, c_prop) != getfield(mach.newcpu, j_prop)
         diag(mach, label)
-        error("Different registers, C-code $c_prop: $(getproperty(mach.cpu, c_prop)), Julia $j_prop: $(getfield(mach.newcpu, j_prop))")
+        error(
+            "Different registers, C-code $c_prop: $(getproperty(mach.cpu, c_prop)), Julia $j_prop: $(getfield(mach.newcpu, j_prop))",
+        )
     end
 end
 
@@ -327,18 +330,18 @@ function call_6502(mach::Machine, addr::Addr)
     mach.newcpu = oldstate
     mach.temps = oldtemps
     return newstate, newtemps
- end
+end
 
 function prep_frth(mach::Machine, sym)
     local oldpc = mach.labels[:pc]
     # save pc
     local pclo = mach[:pc]
-    local pchi = mach[mach.labels[:pc] + 1]
+    local pchi = mach[mach.labels[:pc]+1]
     # prep to call frth word
     # set up pc to return to Julia
     retstub = mach.labels[:retstub].value - 1
     mach.newcpu.memory[oldpc.value] = UInt8(retstub & 0xFF)
-    mach.newcpu.memory[oldpc.value + 1] = UInt8(retstub >> 8)
+    mach.newcpu.memory[oldpc.value+1] = UInt8(retstub >> 8)
     state = prep_call(mach, sym)
     return oldpc, pclo, pchi, state
 end
@@ -348,28 +351,33 @@ function finish_frth(mach::Machine, (oldpc, pclo, pchi, state))
     diag(mach)
     # restore pc
     mach.newcpu.memory[oldpc.value] = pclo
-    mach.newcpu.memory[oldpc.value + 1] = pchi
+    mach.newcpu.memory[oldpc.value+1] = pchi
 end
 
 function call_frth(mach::Machine, sym)
     local oldpc = mach.labels[:pc]
     # save pc
     pclo = mach[:pc]
-    pchi = mach[mach.labels[:pc] + 1]
+    pchi = mach[mach.labels[:pc]+1]
     # call frth word
     # set up pc to return to Julia
     retstub = mach.labels[:retstub].value - 1
     mach.newcpu.memory[oldpc.value] = UInt8(retstub & 0xFF)
-    mach.newcpu.memory[oldpc.value + 1] = UInt8(retstub >> 8)
+    mach.newcpu.memory[oldpc.value+1] = UInt8(retstub >> 8)
     # call code
     call_6502(mach, sym)
     diag(mach)
     # restore pc
     mach.newcpu.memory[oldpc.value] = pclo
-    mach.newcpu.memory[oldpc.value + 1] = pchi
+    mach.newcpu.memory[oldpc.value+1] = pchi
 end
 
-function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = step, user_data::T) where T
+function NewMachine(;
+    read_func = read_mem,
+    write_func = write_mem,
+    step_func = step,
+    user_data::T,
+) where {T}
     lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.so"))
     local machine = Machine{T}()
     initfunc = machine.c_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
@@ -387,9 +395,13 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     machine.labels = Dict{Symbol,Addr}()
     machine.addrs = Dict{Addr,Symbol}()
     machine.fake_routines = Dict{Addr,Function}()
-    machine.properties = Dict{Any, Any}()
+    machine.properties = Dict{Any,Any}()
     machine.verbose = false
-    machine.ctx = @ccall $initfunc(machine.c_read_mem::Ptr{Cvoid}, machine.c_write_mem::Ptr{Cvoid}, machine::Ref{Machine})::Ptr{Context}
+    machine.ctx = @ccall $initfunc(
+        machine.c_read_mem::Ptr{Cvoid},
+        machine.c_write_mem::Ptr{Cvoid},
+        machine::Ref{Machine},
+    )::Ptr{Context}
     machine.temps = Fake6502m.reset6502(machine.newcpu, Temps(machine.newcpu))
     mprintln(machine, "CTX ", machine.ctx)
     machine.cpu = Accessor(machine.ctx).cpu
@@ -400,25 +412,33 @@ function NewMachine(; read_func = read_mem, write_func = write_mem, step_func = 
     machine
 end
 
-register(func::Function, mach::Machine, sym::Symbol) = register(func, mach, mach.labels[sym])
+register(func::Function, mach::Machine, sym::Symbol) =
+    register(func, mach, mach.labels[sym])
 function register(func::Function, mach::Machine, addr::Addr)
     mach.fake_routines[addr] = func
 end
 
 function diag(mach::Machine, label = "")
-    mprint(mach,label)
+    mprint(mach, label)
     diag(mach.newcpu, mach.temps)
-    mprintln(mach,)
+    mprintln(mach)
 end
 diag(ctx::Context) = diag(ctx.cpu, ctx.emu)
-diag(cpu::CpuState, emu::EmuState) = @printf "OLD a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.s emu.clockticks
-diag(cpu::Cpu, temps) = mprint(cpu, @sprintf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y pc(cpu, temps) cpu.sp cpu.clockticks6502)
+diag(cpu::CpuState, emu::EmuState) =
+    @printf "OLD a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y cpu.pc cpu.s emu.clockticks
+diag(cpu::Cpu, temps) = mprint(
+    cpu,
+    @sprintf "NEW a: %02x x: %02x y: %02x pc: %04x s: %02x ticks: %d\n" cpu.a cpu.x cpu.y pc(
+        cpu,
+        temps,
+    ) cpu.sp cpu.clockticks6502
+)
 
 run(mach::Machine, sym::Symbol; max_ticks = 100) = run(mach, mach.labels[sym]; max_ticks)
 function run(mach::Machine, addr::Addr; max_ticks = 100)
-    mprintln(mach,"RESETTING")
+    mprintln(mach, "RESETTING")
     reset(mach)
-    mprintln(mach,"FINISHED RESETTING")
+    mprintln(mach, "FINISHED RESETTING")
     mach.cpu.pc = addr.value - 1
     mach.cpu.s = 0xfe
     setpc(mach, addr.value - 1)
@@ -431,7 +451,7 @@ function run(mach::Machine, addr::Addr; max_ticks = 100)
     end
 end
 
-function loadprg(filename, mach::Machine; labelfile="")
+function loadprg(filename, mach::Machine; labelfile = "")
     mem = mach.mem
     total = 1
     off = 0
@@ -456,7 +476,7 @@ function loadprg(filename, mach::Machine; labelfile="")
             end
         end
     end
-    return off, total-1
+    return off, total - 1
 end
 
 function reset(mach::Machine)
@@ -473,19 +493,24 @@ step(mach::Machine) = mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.te
 
 function display_hex(mem::Vector{UInt8})
     area = mem[screen]
-    for i in 1:40:SCREEN_LEN
-        println(lpad(i:i+39, 10), ": ", join((b-> string(b; base=16, pad=2)).(area[i:i+39]), " "))
+    for i = 1:40:SCREEN_LEN
+        println(
+            lpad(i:i+39, 10),
+            ": ",
+            join((b -> string(b; base = 16, pad = 2)).(area[i:i+39]), " "),
+        )
     end
 end
 
-display_chars(screen_mem::AbstractArray{T, 1}) where {T <: UInt8} = display_chars(identity, screen_mem)
+display_chars(screen_mem::AbstractArray{T,1}) where {T<:UInt8} =
+    display_chars(identity, screen_mem)
 
-function display_chars(cvt::Function, screen_mem::AbstractVector{T}) where {T <: UInt8}
-    println("+", join((x->"-").(1:40), ""), "+")
-    for i in 1:40:SCREEN_LEN
+function display_chars(cvt::Function, screen_mem::AbstractVector{T}) where {T<:UInt8}
+    println("+", join((x -> "-").(1:40), ""), "+")
+    for i = 1:40:SCREEN_LEN
         println("|", String(cvt.(screen_mem[i:i+39])), "|")
     end
-    println("+", join((x->"-").(1:40), ""), "+")
+    println("+", join((x -> "-").(1:40), ""), "+")
 end
 
 const CONDENSE_START = 2850

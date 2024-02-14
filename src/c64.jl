@@ -1,8 +1,10 @@
 module C64
 using Revise
 using ..Fake6502
-using ..Fake6502: Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
-using ..Fake6502: ROM, init_rom, Addr, AddrRange, intRange, hex, call_step, SCREEN_CODES, screen2ascii
+using ..Fake6502:
+    Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
+using ..Fake6502:
+    ROM, init_rom, Addr, AddrRange, intRange, hex, call_step, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
 using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
@@ -44,12 +46,7 @@ const BANK_SWITCH = A(0x0001)
 const BASIC_ROM = A(0xA000:0xBFFF)
 const CHAR_ROM = A(0xD000:0xDFFF)
 const KERNAL_ROM = A(0xE000:0xFFFF)
-BANK_CHOICES = [
-    (true, BASIC_ROM),
-    (true, KERNAL_ROM),
-    (),
-    (false, CHAR_ROM),
-]
+BANK_CHOICES = [(true, BASIC_ROM), (true, KERNAL_ROM), (), (false, CHAR_ROM)]
 const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
 const VIC_MEM = A(0xD018)
 const VIC_BANK = A(0xDD00)
@@ -58,28 +55,27 @@ revising = false
 
 color(value::Integer) = ((value >> 16, (value >> 8) & 0xFF, value & 0xff, 0xFF))
 
-const COLOR_DEFS =
-    (;
-     Black = 0x000000,
-     White = 0xFFFFFF,
-     Red = 0x880000,
-     Cyan = 0xAAFFEE,
-     Violet = 0xCC44CC,
-     Green = 0x00CC55,
-     Blue = 0x0000AA,
-     Yellow = 0xEEEE77,
-     Orange = 0xDD8855,
-     Brown = 0x664400,
-     Lightred = 0xFF7777,
-     Darkgrey = 0x333333,
-     Grey = 0x777777,
-     Lightgreen = 0xAAFF66,
-     Lightblue = 0x0088FF,
-     Lightgrey = 0xBBBBBB,
-     )
+const COLOR_DEFS = (;
+    Black = 0x000000,
+    White = 0xFFFFFF,
+    Red = 0x880000,
+    Cyan = 0xAAFFEE,
+    Violet = 0xCC44CC,
+    Green = 0x00CC55,
+    Blue = 0x0000AA,
+    Yellow = 0xEEEE77,
+    Orange = 0xDD8855,
+    Brown = 0x664400,
+    Lightred = 0xFF7777,
+    Darkgrey = 0x333333,
+    Grey = 0x777777,
+    Lightgreen = 0xAAFF66,
+    Lightblue = 0x0088FF,
+    Lightgrey = 0xBBBBBB,
+)
 
 const C64_PALETTE = color.(values(COLOR_DEFS))
-const COLORS = (; (name => i-1 for (i, name) in enumerate(keys(COLOR_DEFS)))...)
+const COLORS = (; (name => i - 1 for (i, name) in enumerate(keys(COLOR_DEFS)))...)
 const iochan = Channel{Function}(1024)
 const scr_width, scr_height = 320, 200
 
@@ -94,14 +90,14 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
 
 @kwdef mutable struct C64_machine
     scr_id::Int
-    scr_buf::Array{GLubyte, 3} = zeros(GLubyte, (4, scr_width, scr_height))
-    scratch_buf::Array{GLubyte, 2} = fill(GLubyte(0xFF), (4, scr_width * scr_height))
+    scr_buf::Array{GLubyte,3} = zeros(GLubyte, (4, scr_width, scr_height))
+    scratch_buf::Array{GLubyte,2} = fill(GLubyte(0xFF), (4, scr_width * scr_height))
     video_lock::ReentrantLock = ReentrantLock()
     needs_update::Atomic{Bool} = Atomic{Bool}(false)
     has_dirty_rects::Atomic{Bool} = Atomic{Bool}(false)
     all_dirty::Bool = true
-    dirty_characters::Array{Bool, 1} = zeros(Bool, (40*25,)) # characters that have changed
-    dirty_character_defs::Array{Bool, 1} = zeros(Bool, (256,)) # character defs that have changed
+    dirty_characters::Array{Bool,1} = zeros(Bool, (40 * 25,)) # characters that have changed
+    dirty_character_defs::Array{Bool,1} = zeros(Bool, (256,)) # character defs that have changed
     dirty_rects::Vector{Rect} = Rect[]
     multicolor::Bool = false
     banks::Set{AddrRange} = Set{AddrRange}()
@@ -142,8 +138,7 @@ function wait_for_pause(c::C64_machine)
     # note: this use of the "double-checked locking pattern" is valid because pausing is atomic
     if !c.pausing[]
         lock(c.actually_paused) do
-            !c.pausing[] &&
-                wait(c.actually_paused)
+            !c.pausing[] && wait(c.actually_paused)
         end
     end
 end
@@ -151,8 +146,7 @@ end
 function resume(c::C64_machine)
     lock(c.pause) do
         c.pause_count[] -= 1
-        c.pause_count[] == 0 &&
-            notify(c.pause)
+        c.pause_count[] == 0 && notify(c.pause)
     end
 end
 
@@ -168,11 +162,15 @@ above_or_left(r1::Rect, r2::Rect) = right(r1) + 1 < r2.x || bottom(r1) + 1 < r2.
 
 intersects(r1::Rect, r2::Rect) = !(above_or_left(r1, r2) || above_or_left(r2, r1))
 
-merge(r1::Rect, r2::Rect) =
-    Rect(min(r1.x, r2.x), min(r1.y, r2.y); r = max(right(r1), right(r2)), b = max(bottom(r1), bottom(r2)))
+merge(r1::Rect, r2::Rect) = Rect(
+    min(r1.x, r2.x),
+    min(r1.y, r2.y);
+    r = max(right(r1), right(r2)),
+    b = max(bottom(r1), bottom(r2)),
+)
 
 macro io(args)
-    :(use_io(()-> $(esc(args))))
+    :(use_io(() -> $(esc(args))))
 end
 
 usingio = true
@@ -204,13 +202,13 @@ c64(mach::Machine)::C64_machine = c64(mach.newcpu)
 function screen_mem(mach::Machine)
     c = c64(mach)
     screen = mem(mach)
-    @view screen[c.screen_mem.value:c.screen_mem.value + 999]
-end    
+    @view screen[c.screen_mem.value:c.screen_mem.value+999]
+end
 
 function character_mem(mach::Machine)
     c = c64(mach)
     characters = c.character_mem ∈ VIC_SETS ? ROM : mem(mach)
-    @view characters[c.character_mem.value:c.character_mem.value + 0x7FF]
+    @view characters[c.character_mem.value:c.character_mem.value+0x7FF]
 end
 
 function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
@@ -218,8 +216,7 @@ function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
     banks = state.banks
     adr = A(addr)
     for bank in banks
-        adr ∈ bank &&
-            return ROM[adr.value]
+        adr ∈ bank && return ROM[adr.value]
     end
     cpu.memory[adr.value]
 end
@@ -240,13 +237,15 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
                 local offset = addr - (state.screen_mem.value - 1)
                 local col = offset % 40
                 local row = offset ÷ 40
-                @io println("WRITING ON SCREEN AT $(A(addr) - state.screen_mem), $col x $row: $(dbyte(byte))")
-                state.dirty_characters[1 + offset] = true
+                @io println(
+                    "WRITING ON SCREEN AT $(A(addr) - state.screen_mem), $col x $row: $(dbyte(byte))",
+                )
+                state.dirty_characters[1+offset] = true
             else
                 # writing to character data
                 @io println("WRITING TO CHARACTER MEM AT ", A(addr) - state.screen_mem)
                 state.needs_update[] = true
-                state.dirty_character_defs[(adr - state.character_mem) >> 8] = true
+                state.dirty_character_defs[(adr-state.character_mem)>>8] = true
             end
             c64_set_mem(cpu, addr, byte)
         end
@@ -275,8 +274,7 @@ function c64_read_mem(mach::Machine, addr::UInt16)
     banks = state.banks
     adr = A(addr)
     for bank in banks
-        adr ∈ bank &&
-            return ROM[adr.value]
+        adr ∈ bank && return ROM[adr.value]
     end
     return mach[adr]
 end
@@ -300,7 +298,8 @@ function switch_banks(cpu::Cpu{C64_machine}, value::UInt8)
     end
     if settings != original
         @io println("BANK CHOICES CHANGED")
-        settings != value && @io println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
+        settings != value &&
+            @io println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
         c64_set_mem(cpu, BANK_SWITCH, settings)
     else
         @io println("BANK CHOICES DID NOT CHANGE")
@@ -351,8 +350,12 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
 end
 
 function init()
-    state =
-        C64_machine(; scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(scr_width, scr_height))
+    state = C64_machine(;
+        scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(
+            scr_width,
+            scr_height,
+        ),
+    )
     mach = NewMachine(; user_data = state)
     mem(mach)[intRange(screen)] .= ' '
     mach[BORDER] = 0xE
@@ -360,7 +363,7 @@ function init()
     mach[BG1] = 0x1
     mach[BG2] = 0x2
     mach[BG3] = 0x3
-    for mem in 0xD800:0xDBE7
+    for mem = 0xD800:0xDBE7
         mach[mem] = 0x01
     end
     init_rom()
@@ -369,11 +372,19 @@ function init()
     Rewinding.init(state.rewinder, mach.newcpu, mach.temps)
     Rewinding.init_undo_session(state.rewinder, state.session)
     labels = mach.labels
-    off, total = loadprg("$EDIR/condensed.prg", mach; labelfile="$EDIR/condensed.labels")
-    println("Loaded ", total, " bytes at 0x", string(off; base=16, pad=4), ", ", length(labels), " labels")
+    off, total = loadprg("$EDIR/condensed.prg", mach; labelfile = "$EDIR/condensed.labels")
+    println(
+        "Loaded ",
+        total,
+        " bytes at 0x",
+        string(off; base = 16, pad = 4),
+        ", ",
+        length(labels),
+        " labels",
+    )
     print("labels:")
     for name in sort([keys(labels)...])
-        @printf "\n  %04x %s" labels[name].value-1 name
+        @printf "\n  %04x %s" labels[name].value - 1 name
     end
     println()
     println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
@@ -385,7 +396,7 @@ function init()
     state.all_dirty = true
     update_screen(mach)
     nextupdate = UPDATE_PERIOD
-    mach.step = function(mach::Machine)
+    mach.step = function (mach::Machine)
         global revising
 
         if revising
@@ -403,7 +414,7 @@ function merge_dirty(mach::C64_machine, rect::Rect)
     changed = true
     while changed
         changed = false
-        for i in length(dirty):-1:1
+        for i = length(dirty):-1:1
             if intersects(rect, dirty[i])
                 rect = merge(rect, dirty[i])
                 deleteat!(dirty, i)
@@ -417,7 +428,7 @@ end
 
 function video(func::Function, mach::C64_machine)
     #try
-	#    error("attempt lock")
+    #    error("attempt lock")
     #catch ex
     #    @error "Attempt lock" exception=(ex,catch_backtrace())
     #end
@@ -428,29 +439,27 @@ end
 function update_screen(mach::Machine)
     c = c64(mach)
     all_dirty = c.all_dirty
-    dirtydefs = Set(i for (i,d) in enumerate(c.dirty_character_defs) if d)
+    dirtydefs = Set(i for (i, d) in enumerate(c.dirty_character_defs) if d)
     scr_mem = screen_mem(mach)
     char_mem = character_mem(mach)
-    for col in 0:39
-        for row in 0:24
+    for col = 0:39
+        for row = 0:24
             i = row * 40 + col
-            char = scr_mem[1 + i]
-            !all_dirty && !c.dirty_characters[1 + i] && char ∉ dirtydefs &&
-                continue
+            char = scr_mem[1+i]
+            !all_dirty && !c.dirty_characters[1+i] && char ∉ dirtydefs && continue
             merge_dirty(c, Rect(col * 8, row * 8, 7, 7))
-            for pixel in 0 : 7
+            for pixel = 0:7
                 x = col * 8 + pixel
-                c.multicolor &&
-                    error("multicolor not supported")
-                bg = C64_PALETTE[1 + mach[BG0]]
-                fg = C64_PALETTE[1 + mach[COLOR_MEM + i]]
-                for rowbyte in 0 : 7
+                c.multicolor && error("multicolor not supported")
+                bg = C64_PALETTE[1+mach[BG0]]
+                fg = C64_PALETTE[1+mach[COLOR_MEM+i]]
+                for rowbyte = 0:7
                     y = row * 8 + rowbyte
-                    pixels = char_mem[1 + 8 * char + rowbyte]
+                    pixels = char_mem[1+8*char+rowbyte]
                     color = (pixels >> (7 - pixel)) & 1 == 1 ? fg : bg
-                    c.scr_buf[1, x + 1, y + 1] = GLubyte(color[1])
-                    c.scr_buf[2, x + 1, y + 1] = GLubyte(color[2])
-                    c.scr_buf[3, x + 1, y + 1] = GLubyte(color[3])
+                    c.scr_buf[1, x+1, y+1] = GLubyte(color[1])
+                    c.scr_buf[2, x+1, y+1] = GLubyte(color[2])
+                    c.scr_buf[3, x+1, y+1] = GLubyte(color[3])
                 end
             end
         end
@@ -466,16 +475,24 @@ struct Close <: Exception end
 
 function draw_rect(id, x, y, w, h, pixels)
     ImGuiOpenGLBackend.glBindTexture(GL_TEXTURE_2D, ImGuiOpenGLBackend.g_ImageTexture[id])
-    ImGuiOpenGLBackend.glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, GLsizei(w), GLsizei(h), ImGuiOpenGLBackend.GL_RGBA, ImGuiOpenGLBackend.GL_UNSIGNED_BYTE, pixels)
+    ImGuiOpenGLBackend.glTexSubImage2D(
+        GL_TEXTURE_2D,
+        0,
+        x,
+        y,
+        GLsizei(w),
+        GLsizei(h),
+        ImGuiOpenGLBackend.GL_RGBA,
+        ImGuiOpenGLBackend.GL_UNSIGNED_BYTE,
+        pixels,
+    )
 end
 
 function draw_screen(mach::Machine)
     state = c64(mach)
-    !state.needs_update[] && !state.has_dirty_rects[] &&
-        return
+    !state.needs_update[] && !state.has_dirty_rects[] && return
     video(state) do
-        state.needs_update[] &&
-            update_screen(mach)
+        state.needs_update[] && update_screen(mach)
         if state.has_dirty_rects[]
             image_buf = state.scr_buf
             image_id = state.scr_id
@@ -483,8 +500,8 @@ function draw_screen(mach::Machine)
             for r in state.dirty_rects
                 count = 1
                 for y = r.y:bottom(r), x = r.x:right(r)
-                    for c in 1:3
-                        pix[c, count] = image_buf[c, x + 1, y + 1]
+                    for c = 1:3
+                        pix[c, count] = image_buf[c, x+1, y+1]
                     end
                     count += 1
                 end
@@ -509,17 +526,26 @@ function draw_ui(mach::Machine, width, height)
     local fborder = style.FrameBorderSize
     local space = pad + ispacing + fpad + fborder
 
-    if CImGui.Begin("Screen", Ptr{Nothing}(0), nodeco,)
+    if CImGui.Begin("Screen", Ptr{Nothing}(0), nodeco)
         CImGui.SetWindowPos((0, 0))
         CImGui.SetWindowSize(ImVec2(width, height))
         draw_screen(mach)
         sz = CImGui.GetContentRegionAvail()
         antialias(false)
-        CImGui.Image(Ptr{Cvoid}(state.scr_id), CImGui.ImVec2(sz.x, sz.y - GetTextLineHeight() - space))
+        CImGui.Image(
+            Ptr{Cvoid}(state.scr_id),
+            CImGui.ImVec2(sz.x, sz.y - GetTextLineHeight() - space),
+        )
         antialias(true)
         #table for these next three
         CImGui.SetNextItemWidth(-1)
-        CImGui.BeginTable("sliderrow", 3, ImGuiTableFlags_NoPadInnerX | ImGuiTableFlags_NoPadOuterX | ImGuiTableFlags_SizingFixedFit)
+        CImGui.BeginTable(
+            "sliderrow",
+            3,
+            ImGuiTableFlags_NoPadInnerX |
+            ImGuiTableFlags_NoPadOuterX |
+            ImGuiTableFlags_SizingFixedFit,
+        )
         CImGui.TableSetupColumn("col1", ImGuiTableColumnFlags_WidthFixed)
         CImGui.TableSetupColumn("col2", ImGuiTableColumnFlags_WidthStretch)
         CImGui.TableSetupColumn("col3", ImGuiTableColumnFlags_WidthFixed)
@@ -554,7 +580,7 @@ function draw_ui(mach::Machine, width, height)
                 end
             end
         catch err
-            @error "Error sliding in time" exception=(err,catch_backtrace())
+            @error "Error sliding in time" exception = (err, catch_backtrace())
             state.curtime[] = old
         end
     end
@@ -596,7 +622,14 @@ function with_imgui(func::Function, init::Function)
     try
         clear_color = Cfloat[0.45, 0.55, 0.60, 1.00]
         init()
-        println("pad: ", unsafe_load(CImGui.GetStyle().WindowPadding), " line height: ", GetTextLineHeight(), " with spacing: ", GetTextLineHeightWithSpacing)
+        println(
+            "pad: ",
+            unsafe_load(CImGui.GetStyle().WindowPadding),
+            " line height: ",
+            GetTextLineHeight(),
+            " with spacing: ",
+            GetTextLineHeightWithSpacing,
+        )
         while glfwWindowShouldClose(window) == 0
             revising && revise()
             glfwPollEvents()
@@ -617,16 +650,20 @@ function with_imgui(func::Function, init::Function)
             glClearColor(clear_color...)
             glClear(GL_COLOR_BUFFER_BIT)
             ImGuiOpenGLBackend.render(gl_ctx)
-            if unsafe_load(igGetIO().ConfigFlags) & ImGuiConfigFlags_ViewportsEnable == ImGuiConfigFlags_ViewportsEnable
+            if unsafe_load(igGetIO().ConfigFlags) & ImGuiConfigFlags_ViewportsEnable ==
+               ImGuiConfigFlags_ViewportsEnable
                 backup_current_context = glfwGetCurrentContext()
                 igUpdatePlatformWindows()
-                GC.@preserve gl_ctx igRenderPlatformWindowsDefault(C_NULL, pointer_from_objref(gl_ctx))
+                GC.@preserve gl_ctx igRenderPlatformWindowsDefault(
+                    C_NULL,
+                    pointer_from_objref(gl_ctx),
+                )
                 glfwMakeContextCurrent(backup_current_context)
             end
             glfwSwapBuffers(window)
         end
     catch e
-        @error "Error in renderloop!" exception=(e,catch_backtrace())
+        @error "Error in renderloop!" exception = (e, catch_backtrace())
         #Base.show_backtrace(stderr, catch_backtrace())
     finally
         ImGuiOpenGLBackend.shutdown(gl_ctx)
@@ -658,14 +695,17 @@ function test_c64(; revise = false)
                     print("RESULT: ")
                     diag(result, temps)
                 end
-                
+
                 @io println("CALLING FRTHTEST")
                 reset(mach)
                 mach.cpu.s = 0xfe
                 mach.newcpu.sp = 0xfe
                 call_frth(mach, :frthtest_def)
-                @io println("RESULT: ", A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult] + 1]) << 8)))
-                
+                @io println(
+                    "RESULT: ",
+                    A(mach[:frthresult] | (UInt16(mach[mach.labels[:frthresult]+1]) << 8)),
+                )
+
                 run(mach, mach.labels[:main]; max_ticks = 10000)
                 state.all_dirty = true
                 update_screen(mach)
@@ -674,7 +714,7 @@ function test_c64(; revise = false)
             catch err
                 cb = catch_backtrace()
                 use_io() do
-                    @error "Error in 6502 thread" exception=(err,cb)
+                    @error "Error in 6502 thread" exception = (err, cb)
                 end
             end
         end

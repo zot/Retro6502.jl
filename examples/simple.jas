@@ -1,12 +1,20 @@
 ;; semicolon is the comment character, except in .julia or .jmacro code, which uses normal Julia code
 
         .include "simple-support.jl" ; contains the zorp function
-        .julia begin
-            floop = "fred"
-        end
+        .julia floop = "fred"
 *       = zorp(0x8000)
+        .julia println("CURRENT PC: $(__CONTEXT__.offset)")
         .data string(VERSION)        ; place the current Julia version at this location
         .julia begin #only Julia-style comments here -- ; is a separator
             println("HELLO $floop, start = $start.")
         end
+mac     .macro (a)-> asm"""
+        .julia println("Hello \a")
+        .data "hello"
+blub    .value blub
+        """
+joe
+fred    #mac maluba
+        .julia println("Fred: $fred")
+        ;#mac fred
 start   PHA

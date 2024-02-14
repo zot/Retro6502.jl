@@ -27,13 +27,11 @@ Here's an [example](examples/simple.jas):
 
 ```asm
         .include "simple-support.jl" ; contains the zorp function
-        .julia begin
-            global floop = "fred"
-        end
+        .julia floop = "fred"
 *       = zorp(0x8000)
         .data string(VERSION)        ; place the current Julia version at this location
-        .julia begin                  #only Julia-style comments in .julia code, ; is a separator
-            println("HELLO $(floop)!")
+        .julia begin #only Julia-style comments here -- ; is a separator
+            println("HELLO $floop, start = $start.")
         end
 start   PHA
 ```

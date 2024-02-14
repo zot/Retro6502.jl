@@ -232,48 +232,288 @@ function copy(src::Cpu{T}) where {T}
 end
 
 function copy(src::Cpu, dst::Cpu)
-     #dst.pc = src.pc
-     dst.a = src.a
-     dst.x = src.x
-     dst.y = src.y
-     dst.sp = src.sp
-     dst.status = src.status
-     dst.instructions = src.instructions
-     #dst.clockticks6502 = src.clockticks6502
-     dst.oldpc = src.oldpc
-     dst.ea = src.ea
-     dst.reladdr = src.reladdr
-     #dst.value = src.value
-     #dst.result = src.result
-     dst.opcode = src.opcode
-     #dst.penaltyop = src.penaltyop
-     #dst.penaltyaddr = src.penaltyaddr
-     dst.memory = src.memory
+    #dst.pc = src.pc
+    dst.a = src.a
+    dst.x = src.x
+    dst.y = src.y
+    dst.sp = src.sp
+    dst.status = src.status
+    dst.instructions = src.instructions
+    #dst.clockticks6502 = src.clockticks6502
+    dst.oldpc = src.oldpc
+    dst.ea = src.ea
+    dst.reladdr = src.reladdr
+    #dst.value = src.value
+    #dst.result = src.result
+    dst.opcode = src.opcode
+    #dst.penaltyop = src.penaltyop
+    #dst.penaltyaddr = src.penaltyaddr
+    dst.memory = src.memory
 end
 
 # Basic Cpu does not interfere with computation
-read6502(cpu, addr::UInt16) = cpu.memory[addr + 1]
-write6502(cpu, addr::UInt16, value::UInt8) = cpu.memory[addr + 1] = value
+read6502(cpu, addr::UInt16) = cpu.memory[addr+1]
+write6502(cpu, addr::UInt16, value::UInt8) = cpu.memory[addr+1] = value
 hookexternal() = nothing
 
 const ticktable = SVector(
-#       |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  A  |  B  |  C  |  D  |  E  |  F  |
-#=0=#      7,    6,    2,    8,    3,    3,    5,    5,    3,    2,    2,    2,    4,    4,    6,    6,  #=0=#
-#=1=#      2,    5,    2,    8,    4,    4,    6,    6,    2,    4,    2,    7,    4,    4,    7,    7,  #=1=#
-#=2=#      6,    6,    2,    8,    3,    3,    5,    5,    4,    2,    2,    2,    4,    4,    6,    6,  #=2=#
-#=3=#      2,    5,    2,    8,    4,    4,    6,    6,    2,    4,    2,    7,    4,    4,    7,    7,  #=3=#
-#=4=#      6,    6,    2,    8,    3,    3,    5,    5,    3,    2,    2,    2,    3,    4,    6,    6,  #=4=#
-#=5=#      2,    5,    2,    8,    4,    4,    6,    6,    2,    4,    2,    7,    4,    4,    7,    7,  #=5=#
-#=6=#      6,    6,    2,    8,    3,    3,    5,    5,    4,    2,    2,    2,    5,    4,    6,    6,  #=6=#
-#=7=#      2,    5,    2,    8,    4,    4,    6,    6,    2,    4,    2,    7,    4,    4,    7,    7,  #=7=#
-#=8=#      2,    6,    2,    6,    3,    3,    3,    3,    2,    2,    2,    2,    4,    4,    4,    4,  #=8=#
-#=9=#      2,    6,    2,    6,    4,    4,    4,    4,    2,    5,    2,    5,    5,    5,    5,    5,  #=9=#
-#=A=#      2,    6,    2,    6,    3,    3,    3,    3,    2,    2,    2,    2,    4,    4,    4,    4,  #=A=#
-#=B=#      2,    5,    2,    5,    4,    4,    4,    4,    2,    4,    2,    4,    4,    4,    4,    4,  #=B=#
-#=C=#      2,    6,    2,    8,    3,    3,    5,    5,    2,    2,    2,    2,    4,    4,    6,    6,  #=C=#
-#=D=#      2,    5,    2,    8,    4,    4,    6,    6,    2,    4,    2,    7,    4,    4,    7,    7,  #=D=#
-#=E=#      2,    6,    2,    8,    3,    3,    5,    5,    2,    2,    2,    2,    4,    4,    6,    6,  #=E=#
-#=F=#      2,    5,    2,    8,    4,    4,    6,    6,    2,    4,    2,    7,    4,    4,    7,    7   #=F=#
+    #       |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  A  |  B  |  C  |  D  |  E  |  F  |
+    7,
+    6,
+    2,
+    8,
+    3,
+    3,
+    5,
+    5,
+    3,
+    2,
+    2,
+    2,
+    4,
+    4,
+    6,
+    6,  #=0=#
+    2,
+    5,
+    2,
+    8,
+    4,
+    4,
+    6,
+    6,
+    2,
+    4,
+    2,
+    7,
+    4,
+    4,
+    7,
+    7,  #=1=#
+    6,
+    6,
+    2,
+    8,
+    3,
+    3,
+    5,
+    5,
+    4,
+    2,
+    2,
+    2,
+    4,
+    4,
+    6,
+    6,  #=2=#
+    2,
+    5,
+    2,
+    8,
+    4,
+    4,
+    6,
+    6,
+    2,
+    4,
+    2,
+    7,
+    4,
+    4,
+    7,
+    7,  #=3=#
+    6,
+    6,
+    2,
+    8,
+    3,
+    3,
+    5,
+    5,
+    3,
+    2,
+    2,
+    2,
+    3,
+    4,
+    6,
+    6,  #=4=#
+    2,
+    5,
+    2,
+    8,
+    4,
+    4,
+    6,
+    6,
+    2,
+    4,
+    2,
+    7,
+    4,
+    4,
+    7,
+    7,  #=5=#
+    6,
+    6,
+    2,
+    8,
+    3,
+    3,
+    5,
+    5,
+    4,
+    2,
+    2,
+    2,
+    5,
+    4,
+    6,
+    6,  #=6=#
+    2,
+    5,
+    2,
+    8,
+    4,
+    4,
+    6,
+    6,
+    2,
+    4,
+    2,
+    7,
+    4,
+    4,
+    7,
+    7,  #=7=#
+    2,
+    6,
+    2,
+    6,
+    3,
+    3,
+    3,
+    3,
+    2,
+    2,
+    2,
+    2,
+    4,
+    4,
+    4,
+    4,  #=8=#
+    2,
+    6,
+    2,
+    6,
+    4,
+    4,
+    4,
+    4,
+    2,
+    5,
+    2,
+    5,
+    5,
+    5,
+    5,
+    5,  #=9=#
+    2,
+    6,
+    2,
+    6,
+    3,
+    3,
+    3,
+    3,
+    2,
+    2,
+    2,
+    2,
+    4,
+    4,
+    4,
+    4,  #=A=#
+    2,
+    5,
+    2,
+    5,
+    4,
+    4,
+    4,
+    4,
+    2,
+    4,
+    2,
+    4,
+    4,
+    4,
+    4,
+    4,  #=B=#
+    2,
+    6,
+    2,
+    8,
+    3,
+    3,
+    5,
+    5,
+    2,
+    2,
+    2,
+    2,
+    4,
+    4,
+    6,
+    6,  #=C=#
+    2,
+    5,
+    2,
+    8,
+    4,
+    4,
+    6,
+    6,
+    2,
+    4,
+    2,
+    7,
+    4,
+    4,
+    7,
+    7,  #=D=#
+    2,
+    6,
+    2,
+    8,
+    3,
+    3,
+    5,
+    5,
+    2,
+    2,
+    2,
+    2,
+    4,
+    4,
+    6,
+    6,  #=E=#
+    2,
+    5,
+    2,
+    8,
+    4,
+    4,
+    6,
+    6,
+    2,
+    4,
+    2,
+    7,
+    4,
+    4,
+    7,
+    7,   #=F=#
 )
 
 saveaccum(cpu, n) = cpu.a = UInt8(n & 0xFF)
@@ -340,7 +580,7 @@ overflowcalc(cpu, result, accumulator, memory) =
 function push_6502_16(cpu, pushval::UInt16)
     write6502(cpu, BASE_STACK + cpu.sp, UInt8((pushval >> 8) & 0xFF))
     write6502(cpu, BASE_STACK + UInt16((cpu.sp - 0x1) & 0xFF), UInt8(pushval & 0xFF))
-    cpu.sp -= 0x2;
+    cpu.sp -= 0x2
 end
 
 function push_6502_8(cpu, pushval::UInt8)
@@ -349,8 +589,10 @@ function push_6502_8(cpu, pushval::UInt8)
 end
 
 function pull_6502_16(cpu)
-    temp16 = read6502(cpu, BASE_STACK + ((cpu.sp + 0x01) & 0xFF)) | (UInt16(read6502(cpu, BASE_STACK + ((cpu.sp + 0x02) & 0xFF))) << 8)
-    cpu.sp += 0x2;
+    temp16 =
+        read6502(cpu, BASE_STACK + ((cpu.sp + 0x01) & 0xFF)) |
+        (UInt16(read6502(cpu, BASE_STACK + ((cpu.sp + 0x02) & 0xFF))) << 8)
+    cpu.sp += 0x2
     return temp16
 end
 
@@ -360,19 +602,18 @@ function pull_6502_8(cpu)
 end
 
 function mem_6502_read16(cpu, addr::UInt16)
-    return UInt16(read6502(cpu, addr)) |
-        (UInt16(read6502(cpu, addr + 0x1)) << 8)
+    return UInt16(read6502(cpu, addr)) | (UInt16(read6502(cpu, addr + 0x1)) << 8)
 end
 
 function reset6502(cpu, temps)
-#	/*
-#	    pc = (ushort)read6502(0xFFFC) | ((ushort)read6502(0xFFFD) << 8);
-#	    a = 0;
-#	    x = 0;
-#	    y = 0;
-#	    sp = 0xFD;
-#	    status |= FLAG_CONSTANT;
-#    */
+    #	/*
+    #	    pc = (ushort)read6502(0xFFFC) | ((ushort)read6502(0xFFFD) << 8);
+    #	    a = 0;
+    #	    x = 0;
+    #	    y = 0;
+    #	    sp = 0xFD;
+    #	    status |= FLAG_CONSTANT;
+    #    */
     read6502(cpu, 0x00ff)
     read6502(cpu, 0x00ff)
     read6502(cpu, 0x00ff)
@@ -462,7 +703,9 @@ end
 function abso(cpu, temps) #/*absolute*/
     #local ea  =UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
     #cpu.ea = UInt16(read6502(cpu, cpu.pc)) | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
-    cpu.ea = UInt16(read6502(cpu, pc(cpu, temps))) | (UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8)
+    cpu.ea =
+        UInt16(read6502(cpu, pc(cpu, temps))) |
+        (UInt16(read6502(cpu, UInt16(pc(cpu, temps) + 0x1))) << 8)
     #cpu.pc += 0x2
     return incpc(cpu, temps, 0x02)
     #Temps(temps; ea)
@@ -475,7 +718,7 @@ function absx(cpu, temps) #/*absolute,X*/
     #local addr = UInt16(read6502(cpu, cpu.pc))
     local addr = UInt16(read6502(cpu, pc(cpu, temps)))
     #local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
-    local ea = addr | (UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8)
+    local ea = addr | (UInt16(read6502(cpu, UInt16(pc(cpu, temps) + 0x1))) << 8)
     startpage = ea & 0xFF00
     ea += UInt16(cpu.x)
     if (startpage != (ea & 0xFF00)) #/*one cycle penlty for page-crossing on some opcodes*/
@@ -494,8 +737,8 @@ function absy(cpu, temps) # /*absolute,Y*/
     #local addr = UInt16(read6502(cpu, cpu.pc))
     local addr = UInt16(read6502(cpu, pc(cpu, temps)))
     #local ea = addr | (UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8)
-    local ea = addr | (UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8)
-    startpage = ea & 0xFF00;
+    local ea = addr | (UInt16(read6502(cpu, UInt16(pc(cpu, temps) + 0x1))) << 8)
+    startpage = ea & 0xFF00
     ea += UInt16(cpu.y)
     if (startpage != (ea & 0xFF00)) # /*one cycle penlty for page-crossing on some opcodes*/
         TEST_COMPAT && read6502(cpu, startpage | (ea & 0xFF))
@@ -512,7 +755,9 @@ end
 function ind(cpu, temps) # /*indirect*/
     local eahelp, eahelp2
     #eahelp = UInt16(read6502(cpu, cpu.pc)) | UInt16(UInt16(read6502(cpu, UInt16(cpu.pc+0x1))) << 8);
-    eahelp = UInt16(read6502(cpu, pc(cpu, temps))) | UInt16(UInt16(read6502(cpu, UInt16(pc(cpu, temps)+0x1))) << 8);
+    eahelp =
+        UInt16(read6502(cpu, pc(cpu, temps))) |
+        UInt16(UInt16(read6502(cpu, UInt16(pc(cpu, temps) + 0x1))) << 8)
     eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*replicate 6502 page-boundary wraparound bug*/
     #local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
     cpu.ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
@@ -529,7 +774,9 @@ function indx(cpu, temps) # /* (indirect,X)*/
     local eahelp = UInt16((zp + UInt16(cpu.x)) & 0xFF) # /*zero-page wraparound for table pointer*/
     #cpu.pc += 0x1
     #local ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
-    cpu.ea = UInt16(read6502(cpu, eahelp & 0x00FF)) | (UInt16(read6502(cpu, UInt16((eahelp+0x1) & 0x00FF))) << 8)
+    cpu.ea =
+        UInt16(read6502(cpu, eahelp & 0x00FF)) |
+        (UInt16(read6502(cpu, UInt16((eahelp + 0x1) & 0x00FF))) << 8)
     return incpc(cpu, temps, 0x01)
     #Temps(temps; ea)
     #temps
@@ -537,11 +784,11 @@ end
 
 function indy(cpu, temps) # /* (indirect),Y*/
     #local eahelp = UInt16(read6502(cpu, cpu.pc));
-    local eahelp = UInt16(read6502(cpu, pc(cpu, temps)));
+    local eahelp = UInt16(read6502(cpu, pc(cpu, temps)))
     #cpu.pc += 0x1
     local eahelp2 = (eahelp & 0xFF00) | ((eahelp + 0x0001) & 0x00FF) # /*zero-page wraparound*/
-    local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8);
-    local startpage = ea & 0xFF00;
+    local ea = UInt16(read6502(cpu, eahelp)) | (UInt16(read6502(cpu, eahelp2)) << 8)
+    local startpage = ea & 0xFF00
     ea += UInt16(cpu.y)
     if startpage != (ea & 0xFF00) # /*one cycle penlty for page-crossing on some opcodes*/
         cpu.penaltyaddr = 0x1
@@ -557,20 +804,21 @@ end
 function getvalue(cpu, temps)
     is_acc(cpu.opcode) && return UInt16(cpu.a)
     #is_acc(temps.opcode) && return UInt16(cpu.a)
-    return UInt16(read6502(cpu, cpu.ea));
+    return UInt16(read6502(cpu, cpu.ea))
     #return UInt16(read6502(cpu, temps.ea));
 end
 
 function getvalue16(cpu, temps)
-    return UInt16(read6502(cpu, cpu.ea)) | (UInt16(read6502(cpu, UInt16(cpu.ea+0x1))) << 8);
+    return UInt16(read6502(cpu, cpu.ea)) |
+           (UInt16(read6502(cpu, UInt16(cpu.ea + 0x1))) << 8)
     #return UInt16(read6502(cpu, temps.ea)) | (UInt16(read6502(cpu, UInt16(temps.ea+0x1))) << 8);
 end
 
 function putvalue(cpu, temps, saveval::UInt16)
     if is_acc(cpu.opcode)
-    #if is_acc(temps.opcode)
+        #if is_acc(temps.opcode)
         # addr mode is acc
-        cpu.a = UInt8(saveval & 0x00FF);
+        cpu.a = UInt8(saveval & 0x00FF)
     else
         write6502(cpu, cpu.ea, UInt8(saveval & 0x00FF))
         #write6502(cpu, temps.ea, UInt8(saveval & 0x00FF))
@@ -584,8 +832,7 @@ signed(i::UInt16) = reinterpret(Int16, i)
 
 # Thanks to Bruce Clark: http://www.6502.org/tutorials/decimal_mode.html
 function adc_non_nes(cpu, temps, value)
-    (cpu.status & FLAG_DECIMAL) == 0 &&
-        return adc_nes(cpu, temps, value)
+    (cpu.status & FLAG_DECIMAL) == 0 && return adc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
     #temps = penaltyop(temps)
     local A::UInt8 = cpu.a
@@ -647,7 +894,7 @@ end
 
 function asl(cpu, temps)
     local value = getvalue(cpu, temps)
-    TEST_COMPAT && addrsyms[cpu.opcode + 1] != :acc && putvalue(cpu, temps, value)
+    TEST_COMPAT && addrsyms[cpu.opcode+1] != :acc && putvalue(cpu, temps, value)
     #TEST_COMPAT && addrsyms[temps.opcode + 1] != :acc && putvalue(cpu, temps, value)
     local result = value << 1
     carrycalc(cpu, result)
@@ -658,8 +905,7 @@ function asl(cpu, temps)
 end
 
 function check_cross_page_boundary(cpu, temps)
-    TEST_COMPAT &&
-        read6502(cpu, cpu.oldpc)
+    TEST_COMPAT && read6502(cpu, cpu.oldpc)
     #if cpu.oldpc & 0xFF00 != cpu.pc & 0xFF00
     if cpu.oldpc & 0xFF00 != pc(cpu, temps) & 0xFF00
         # /*check if jump crossed a page boundary*/
@@ -711,10 +957,10 @@ end
 
 
 function bit(cpu, temps)
-    local value = getvalue(cpu, temps);
+    local value = getvalue(cpu, temps)
     local result = UInt16(cpu.a) & value
     zerocalc(cpu, result)
-    cpu.status = (cpu.status & 0x3F) | (UInt8(value) & 0xC0);
+    cpu.status = (cpu.status & 0x3F) | (UInt8(value) & 0xC0)
     temps
 end
 
@@ -731,7 +977,7 @@ function bmi(cpu, temps)
 end
 
 function bne(cpu, temps)
-    if  isstatusclear(cpu, FLAG_ZERO)
+    if isstatusclear(cpu, FLAG_ZERO)
         #cpu.oldpc = cpu.pc
         cpu.oldpc = pc(cpu, temps)
         #cpu.pc += cpu.reladdr
@@ -764,7 +1010,10 @@ function brk_6502(cpu, temps)
     push_6502_8(cpu, cpu.status | FLAG_BREAK)
     setinterrupt(cpu)
     #cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
-    return Temps(temps; pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8))
+    return Temps(
+        temps;
+        pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8),
+    )
     #temps
 end
 
@@ -870,11 +1119,11 @@ end
 function eor(cpu, temps)
     cpu.penaltyop = 0x1
     #temps = penaltyop(temps)
-    local value = getvalue(cpu, temps);
-    local result = UInt16(cpu.a) ⊻ value;
-    zerocalc(cpu, result);
-    signcalc(cpu, result);
-    saveaccum(cpu, result);
+    local value = getvalue(cpu, temps)
+    local result = UInt16(cpu.a) ⊻ value
+    zerocalc(cpu, result)
+    signcalc(cpu, result)
+    saveaccum(cpu, result)
     temps
 end
 
@@ -918,7 +1167,8 @@ end
 function jsr(cpu, temps)
     local oldsp = cpu.sp
     #TEST_COMPAT && (cpu.pc - 0x0001) != 0x0100 | oldsp && # not in page zero
-    TEST_COMPAT && (pc(cpu, temps) - 0x0001) != 0x0100 | oldsp && # not in page zero
+    TEST_COMPAT &&
+        (pc(cpu, temps) - 0x0001) != 0x0100 | oldsp && # not in page zero
         read6502(cpu, 0x0100 | oldsp)
     #push_6502_16(cpu, cpu.pc - 0x1)
     push_6502_16(cpu, pc(cpu, temps) - 0x1)
@@ -950,7 +1200,7 @@ function ldx(cpu, temps)
     #temps = penaltyop(temps)
     local value = getvalue(cpu, temps)
     cpu.x = UInt8(value & 0x00FF)
-   
+
     zerocalc(cpu, cpu.x)
     signcalc(cpu, cpu.x)
     temps
@@ -961,7 +1211,7 @@ function ldy(cpu, temps)
     #temps = penaltyop(temps)
     local value = getvalue(cpu, temps)
     cpu.y = UInt8(value & 0x00FF)
-   
+
     zerocalc(cpu, cpu.y)
     signcalc(cpu, cpu.y)
     temps
@@ -985,7 +1235,7 @@ function nop(cpu, temps)
         #temps = penaltyop(temps)
     end
     if TEST_COMPAT
-        addr = addrsyms[op + 1]
+        addr = addrsyms[op+1]
         if addr == :absx || addr == :absy
             cpu.penaltyaddr == 0x0 &&
             #temps.penaltyaddr == 0x0 &&
@@ -1072,8 +1322,7 @@ end
 
 # Thanks to Bruce Clark: http://www.6502.org/tutorials/decimal_mode.html
 function sbc_non_nes(cpu, temps, value)
-    isstatusclear(cpu, FLAG_DECIMAL) &&
-        return sbc_nes(cpu, temps, value)
+    isstatusclear(cpu, FLAG_DECIMAL) && return sbc_nes(cpu, temps, value)
     cpu.penaltyop = 0x1
     #temps = penaltyop(temps)
     local A::Int16 = Int16(cpu.a)
@@ -1343,7 +1592,7 @@ end
 
 function checkpenalty(cpu, temps)
     if cpu.penaltyop == 0 || cpu.penaltyaddr == 0
-    #if temps.penaltyop != 0 && temps.penaltyaddr != 0
+        #if temps.penaltyop != 0 && temps.penaltyaddr != 0
         temps
     else
         addticks(cpu, temps, -1)
@@ -1368,50 +1617,296 @@ const usbc = sbc # really an sbc + nop
 function nmi6502(cpu, temps)
     #push_6502_16(cpu, cpu.pc)
     push_6502_16(cpu, pc(cpu, temps))
-    push_6502_8(cpu, cpu.status  & ~FLAG_BREAK)
+    push_6502_8(cpu, cpu.status & ~FLAG_BREAK)
     cpu.status |= FLAG_INTERRUPT
     #cpu.pc = UInt16(read6502(cpu, 0xFFFA)) | (UInt16(read6502(cpu, 0xFFFB)) << 8)
-    return Temps(temps; pc = UInt16(read6502(cpu, 0xFFFA)) | (UInt16(read6502(cpu, 0xFFFB)) << 8))
+    return Temps(
+        temps;
+        pc = UInt16(read6502(cpu, 0xFFFA)) | (UInt16(read6502(cpu, 0xFFFB)) << 8),
+    )
     #temps
 end
 
 function irq6502(cpu, temps::Temps)
-	#/*
+    #/*
     #push_6502_16(pc);
     #push_6502_8(status);
     #status |= FLAG_INTERRUPT;
     #pc = (ushort)read6502(0xFFFE) | ((ushort)read6502(0xFFFF) << 8);
     #*/
-	if (cpu.status & FLAG_INTERRUPT) == 0x0
-		#push_6502_16(cpu, cpu.pc)
-		push_6502_16(cpu, pc(cpu, temps))
-		push_6502_8(cpu, cpu.status & ~FLAG_BREAK)
-		cpu.status |= FLAG_INTERRUPT
-		#/*pc = mem_6502_read16(0xfffe);*/
-		#cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
-		return Temps(temps, pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8))
+    if (cpu.status & FLAG_INTERRUPT) == 0x0
+        #push_6502_16(cpu, cpu.pc)
+        push_6502_16(cpu, pc(cpu, temps))
+        push_6502_8(cpu, cpu.status & ~FLAG_BREAK)
+        cpu.status |= FLAG_INTERRUPT
+        #/*pc = mem_6502_read16(0xfffe);*/
+        #cpu.pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8)
+        return Temps(
+            temps,
+            pc = UInt16(read6502(cpu, 0xFFFE)) | (UInt16(read6502(cpu, 0xFFFF)) << 8),
+        )
     end
     return temps
 end
 
 const addrsyms = (
-#    |  0  |  1  |  2 |  3  |  4 |  5 |  6 |  7 |  8 |  9  |  A |  B  |  C  |  D  |  E  |  F  |
-#=0=#  :imp,:indx,:imp,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:acc, :imm,:abso,:abso,:abso,:abso,  #0
-#=1=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #1
-#=2=# :abso,:indx,:imp,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:acc, :imm,:abso,:abso,:abso,:abso,  #2
-#=3=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #3
-#=4=#  :imp,:indx,:imp,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:acc, :imm,:abso,:abso,:abso,:abso,  #4
-#=5=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #5
-#=6=#  :imp,:indx,:imp,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:acc, :imm, :ind,:abso,:abso,:abso,  #6
-#=7=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #7
-#=8=#  :imm,:indx,:imm,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:imp, :imm,:abso,:abso,:abso,:abso,  #8
-#=9=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpy,:zpy,:imp,:absy,:imp,:absy,:absx,:absx,:absy,:absy,  #9
-#=A=#  :imm,:indx,:imm,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:imp, :imm,:abso,:abso,:abso,:abso,  #A
-#=B=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpy,:zpy,:imp,:absy,:imp,:absy,:absx,:absx,:absy,:absy,  #B
-#=C=#  :imm,:indx,:imm,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:imp, :imm,:abso,:abso,:abso,:abso,  #C
-#=D=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #D
-#=E=#  :imm,:indx,:imm,:indx, :zp, :zp, :zp, :zp,:imp, :imm,:imp, :imm,:abso,:abso,:abso,:abso,  #E
-#=F=#  :rel,:indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx,  #F
+    #    |  0  |  1  |  2 |  3  |  4 |  5 |  6 |  7 |  8 |  9  |  A |  B  |  C  |  D  |  E  |  F  |
+    :imp,
+    :indx,
+    :imp,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :acc,
+    :imm,
+    :abso,
+    :abso,
+    :abso,
+    :abso,  #0
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpx,
+    :zpx,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absx,
+    :absx,  #1
+    :abso,
+    :indx,
+    :imp,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :acc,
+    :imm,
+    :abso,
+    :abso,
+    :abso,
+    :abso,  #2
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpx,
+    :zpx,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absx,
+    :absx,  #3
+    :imp,
+    :indx,
+    :imp,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :acc,
+    :imm,
+    :abso,
+    :abso,
+    :abso,
+    :abso,  #4
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpx,
+    :zpx,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absx,
+    :absx,  #5
+    :imp,
+    :indx,
+    :imp,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :acc,
+    :imm,
+    :ind,
+    :abso,
+    :abso,
+    :abso,  #6
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpx,
+    :zpx,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absx,
+    :absx,  #7
+    :imm,
+    :indx,
+    :imm,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :imp,
+    :imm,
+    :abso,
+    :abso,
+    :abso,
+    :abso,  #8
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpy,
+    :zpy,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absy,
+    :absy,  #9
+    :imm,
+    :indx,
+    :imm,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :imp,
+    :imm,
+    :abso,
+    :abso,
+    :abso,
+    :abso,  #A
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpy,
+    :zpy,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absy,
+    :absy,  #B
+    :imm,
+    :indx,
+    :imm,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :imp,
+    :imm,
+    :abso,
+    :abso,
+    :abso,
+    :abso,  #C
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpx,
+    :zpx,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absx,
+    :absx,  #D
+    :imm,
+    :indx,
+    :imm,
+    :indx,
+    :zp,
+    :zp,
+    :zp,
+    :zp,
+    :imp,
+    :imm,
+    :imp,
+    :imm,
+    :abso,
+    :abso,
+    :abso,
+    :abso,  #E
+    :rel,
+    :indy,
+    :imp,
+    :indy,
+    :zpx,
+    :zpx,
+    :zpx,
+    :zpx,
+    :imp,
+    :absy,
+    :imp,
+    :absy,
+    :absx,
+    :absx,
+    :absx,
+    :absx,  #F
 )
 
 is_acc(op::UInt8) = op & 0x90 == 0x00 && op & 0x0F == 0x0A
@@ -1423,91 +1918,779 @@ is_imm(op::UInt8) =
 function address(c::Cpu, t::Temps)::Temps
     local o = c.opcode
     #o = t.opcode
-    if     o==0x00  imp(c, t) elseif o==0x01  indx(c, t) elseif o==0x02  imp(c, t) elseif o==0x03 indx(c, t)
-    elseif o==0x04   zp(c, t) elseif o==0x05    zp(c, t) elseif o==0x06   zp(c, t) elseif o==0x07   zp(c, t)
-    elseif o==0x08  imp(c, t) elseif o==0x09   imm(c, t) elseif o==0x0A  acc(c, t) elseif o==0x0B  imm(c, t)
-    elseif o==0x0C abso(c, t) elseif o==0x0D  abso(c, t) elseif o==0x0E abso(c, t) elseif o==0x0F abso(c, t)
-    elseif o==0x10  rel(c, t) elseif o==0x11  indy(c, t) elseif o==0x12  imp(c, t) elseif o==0x13 indy(c, t)
-    elseif o==0x14  zpx(c, t) elseif o==0x15   zpx(c, t) elseif o==0x16  zpx(c, t) elseif o==0x17  zpx(c, t)
-    elseif o==0x18  imp(c, t) elseif o==0x19  absy(c, t) elseif o==0x1A  imp(c, t) elseif o==0x1B absy(c, t)
-    elseif o==0x1C absx(c, t) elseif o==0x1D  absx(c, t) elseif o==0x1E absx(c, t) elseif o==0x1F absx(c, t)
-    elseif o==0x20 abso(c, t) elseif o==0x21  indx(c, t) elseif o==0x22  imp(c, t) elseif o==0x23 indx(c, t)
-    elseif o==0x24   zp(c, t) elseif o==0x25    zp(c, t) elseif o==0x26   zp(c, t) elseif o==0x27   zp(c, t)
-    elseif o==0x28  imp(c, t) elseif o==0x29   imm(c, t) elseif o==0x2A  acc(c, t) elseif o==0x2B  imm(c, t)
-    elseif o==0x2C abso(c, t) elseif o==0x2D  abso(c, t) elseif o==0x2E abso(c, t) elseif o==0x2F abso(c, t)
-    elseif o==0x30  rel(c, t) elseif o==0x31  indy(c, t) elseif o==0x32  imp(c, t) elseif o==0x33 indy(c, t)
-    elseif o==0x34  zpx(c, t) elseif o==0x35   zpx(c, t) elseif o==0x36  zpx(c, t) elseif o==0x37  zpx(c, t)
-    elseif o==0x38  imp(c, t) elseif o==0x39  absy(c, t) elseif o==0x3A  imp(c, t) elseif o==0x3B absy(c, t)
-    elseif o==0x3C absx(c, t) elseif o==0x3D  absx(c, t) elseif o==0x3E absx(c, t) elseif o==0x3F absx(c, t)
-    elseif o==0x40  imp(c, t) elseif o==0x41  indx(c, t) elseif o==0x42  imp(c, t) elseif o==0x43 indx(c, t)
-    elseif o==0x44   zp(c, t) elseif o==0x45    zp(c, t) elseif o==0x46   zp(c, t) elseif o==0x47   zp(c, t)
-    elseif o==0x48  imp(c, t) elseif o==0x49   imm(c, t) elseif o==0x4A  acc(c, t) elseif o==0x4B  imm(c, t)
-    elseif o==0x4C abso(c, t) elseif o==0x4D  abso(c, t) elseif o==0x4E abso(c, t) elseif o==0x4F abso(c, t)
-    elseif o==0x50  rel(c, t) elseif o==0x51  indy(c, t) elseif o==0x52  imp(c, t) elseif o==0x53 indy(c, t)
-    elseif o==0x54  zpx(c, t) elseif o==0x55   zpx(c, t) elseif o==0x56  zpx(c, t) elseif o==0x57  zpx(c, t)
-    elseif o==0x58  imp(c, t) elseif o==0x59  absy(c, t) elseif o==0x5A  imp(c, t) elseif o==0x5B absy(c, t)
-    elseif o==0x5C absx(c, t) elseif o==0x5D  absx(c, t) elseif o==0x5E absx(c, t) elseif o==0x5F absx(c, t)
-    elseif o==0x60  imp(c, t) elseif o==0x61  indx(c, t) elseif o==0x62  imp(c, t) elseif o==0x63 indx(c, t)
-    elseif o==0x64   zp(c, t) elseif o==0x65    zp(c, t) elseif o==0x66   zp(c, t) elseif o==0x67   zp(c, t)
-    elseif o==0x68  imp(c, t) elseif o==0x69   imm(c, t) elseif o==0x6A  acc(c, t) elseif o==0x6B  imm(c, t)
-    elseif o==0x6C  ind(c, t) elseif o==0x6D  abso(c, t) elseif o==0x6E abso(c, t) elseif o==0x6F abso(c, t)
-    elseif o==0x70  rel(c, t) elseif o==0x71  indy(c, t) elseif o==0x72  imp(c, t) elseif o==0x73 indy(c, t)
-    elseif o==0x74  zpx(c, t) elseif o==0x75   zpx(c, t) elseif o==0x76  zpx(c, t) elseif o==0x77  zpx(c, t)
-    elseif o==0x78  imp(c, t) elseif o==0x79  absy(c, t) elseif o==0x7A  imp(c, t) elseif o==0x7B absy(c, t)
-    elseif o==0x7C absx(c, t) elseif o==0x7D  absx(c, t) elseif o==0x7E absx(c, t) elseif o==0x7F absx(c, t)
-    elseif o==0x80  imm(c, t) elseif o==0x81  indx(c, t) elseif o==0x82  imm(c, t) elseif o==0x83 indx(c, t)
-    elseif o==0x84   zp(c, t) elseif o==0x85    zp(c, t) elseif o==0x86   zp(c, t) elseif o==0x87   zp(c, t)
-    elseif o==0x88  imp(c, t) elseif o==0x89   imm(c, t) elseif o==0x8A  imp(c, t) elseif o==0x8B  imm(c, t)
-    elseif o==0x8C abso(c, t) elseif o==0x8D  abso(c, t) elseif o==0x8E abso(c, t) elseif o==0x8F abso(c, t)
-    elseif o==0x90  rel(c, t) elseif o==0x91  indy(c, t) elseif o==0x92  imp(c, t) elseif o==0x93 indy(c, t)
-    elseif o==0x94  zpx(c, t) elseif o==0x95   zpx(c, t) elseif o==0x96  zpy(c, t) elseif o==0x97  zpy(c, t)
-    elseif o==0x98  imp(c, t) elseif o==0x99  absy(c, t) elseif o==0x9A  imp(c, t) elseif o==0x9B absy(c, t)
-    elseif o==0x9C absx(c, t) elseif o==0x9D  absx(c, t) elseif o==0x9E absy(c, t) elseif o==0x9F absy(c, t)
-    elseif o==0xA0  imm(c, t) elseif o==0xA1  indx(c, t) elseif o==0xA2  imm(c, t) elseif o==0xA3 indx(c, t)
-    elseif o==0xA4   zp(c, t) elseif o==0xA5    zp(c, t) elseif o==0xA6   zp(c, t) elseif o==0xA7   zp(c, t)
-    elseif o==0xA8  imp(c, t) elseif o==0xA9   imm(c, t) elseif o==0xAA  imp(c, t) elseif o==0xAB  imm(c, t)
-    elseif o==0xAC abso(c, t) elseif o==0xAD  abso(c, t) elseif o==0xAE abso(c, t) elseif o==0xAF abso(c, t)
-    elseif o==0xB0  rel(c, t) elseif o==0xB1  indy(c, t) elseif o==0xB2  imp(c, t) elseif o==0xB3 indy(c, t)
-    elseif o==0xB4  zpx(c, t) elseif o==0xB5   zpx(c, t) elseif o==0xB6  zpy(c, t) elseif o==0xB7  zpy(c, t)
-    elseif o==0xB8  imp(c, t) elseif o==0xB9  absy(c, t) elseif o==0xBA  imp(c, t) elseif o==0xBB absy(c, t)
-    elseif o==0xBC absx(c, t) elseif o==0xBD  absx(c, t) elseif o==0xBE absy(c, t) elseif o==0xBF absy(c, t)
-    elseif o==0xC0  imm(c, t) elseif o==0xC1  indx(c, t) elseif o==0xC2  imm(c, t) elseif o==0xC3 indx(c, t)
-    elseif o==0xC4   zp(c, t) elseif o==0xC5    zp(c, t) elseif o==0xC6   zp(c, t) elseif o==0xC7   zp(c, t)
-    elseif o==0xC8  imp(c, t) elseif o==0xC9   imm(c, t) elseif o==0xCA  imp(c, t) elseif o==0xCB  imm(c, t)
-    elseif o==0xCC abso(c, t) elseif o==0xCD  abso(c, t) elseif o==0xCE abso(c, t) elseif o==0xCF abso(c, t)
-    elseif o==0xD0  rel(c, t) elseif o==0xD1  indy(c, t) elseif o==0xD2  imp(c, t) elseif o==0xD3 indy(c, t)
-    elseif o==0xD4  zpx(c, t) elseif o==0xD5   zpx(c, t) elseif o==0xD6  zpx(c, t) elseif o==0xD7  zpx(c, t)
-    elseif o==0xD8  imp(c, t) elseif o==0xD9  absy(c, t) elseif o==0xDA  imp(c, t) elseif o==0xDB absy(c, t)
-    elseif o==0xDC absx(c, t) elseif o==0xDD  absx(c, t) elseif o==0xDE absx(c, t) elseif o==0xDF absx(c, t)
-    elseif o==0xE0  imm(c, t) elseif o==0xE1  indx(c, t) elseif o==0xE2  imm(c, t) elseif o==0xE3 indx(c, t)
-    elseif o==0xE4   zp(c, t) elseif o==0xE5    zp(c, t) elseif o==0xE6   zp(c, t) elseif o==0xE7   zp(c, t)
-    elseif o==0xE8  imp(c, t) elseif o==0xE9   imm(c, t) elseif o==0xEA  imp(c, t) elseif o==0xEB  imm(c, t)
-    elseif o==0xEC abso(c, t) elseif o==0xED  abso(c, t) elseif o==0xEE abso(c, t) elseif o==0xEF abso(c, t)
-    elseif o==0xF0  rel(c, t) elseif o==0xF1  indy(c, t) elseif o==0xF2  imp(c, t) elseif o==0xF3 indy(c, t)
-    elseif o==0xF4  zpx(c, t) elseif o==0xF5   zpx(c, t) elseif o==0xF6  zpx(c, t) elseif o==0xF7  zpx(c, t)
-    elseif o==0xF8  imp(c, t) elseif o==0xF9  absy(c, t) elseif o==0xFA  imp(c, t) elseif o==0xFB absy(c, t)
-    elseif o==0xFC absx(c, t) elseif o==0xFD  absx(c, t) elseif o==0xFE absx(c, t) elseif o==0xFF absx(c, t)
+    if o == 0x00
+        imp(c, t)
+    elseif o == 0x01
+        indx(c, t)
+    elseif o == 0x02
+        imp(c, t)
+    elseif o == 0x03
+        indx(c, t)
+    elseif o == 0x04
+        zp(c, t)
+    elseif o == 0x05
+        zp(c, t)
+    elseif o == 0x06
+        zp(c, t)
+    elseif o == 0x07
+        zp(c, t)
+    elseif o == 0x08
+        imp(c, t)
+    elseif o == 0x09
+        imm(c, t)
+    elseif o == 0x0A
+        acc(c, t)
+    elseif o == 0x0B
+        imm(c, t)
+    elseif o == 0x0C
+        abso(c, t)
+    elseif o == 0x0D
+        abso(c, t)
+    elseif o == 0x0E
+        abso(c, t)
+    elseif o == 0x0F
+        abso(c, t)
+    elseif o == 0x10
+        rel(c, t)
+    elseif o == 0x11
+        indy(c, t)
+    elseif o == 0x12
+        imp(c, t)
+    elseif o == 0x13
+        indy(c, t)
+    elseif o == 0x14
+        zpx(c, t)
+    elseif o == 0x15
+        zpx(c, t)
+    elseif o == 0x16
+        zpx(c, t)
+    elseif o == 0x17
+        zpx(c, t)
+    elseif o == 0x18
+        imp(c, t)
+    elseif o == 0x19
+        absy(c, t)
+    elseif o == 0x1A
+        imp(c, t)
+    elseif o == 0x1B
+        absy(c, t)
+    elseif o == 0x1C
+        absx(c, t)
+    elseif o == 0x1D
+        absx(c, t)
+    elseif o == 0x1E
+        absx(c, t)
+    elseif o == 0x1F
+        absx(c, t)
+    elseif o == 0x20
+        abso(c, t)
+    elseif o == 0x21
+        indx(c, t)
+    elseif o == 0x22
+        imp(c, t)
+    elseif o == 0x23
+        indx(c, t)
+    elseif o == 0x24
+        zp(c, t)
+    elseif o == 0x25
+        zp(c, t)
+    elseif o == 0x26
+        zp(c, t)
+    elseif o == 0x27
+        zp(c, t)
+    elseif o == 0x28
+        imp(c, t)
+    elseif o == 0x29
+        imm(c, t)
+    elseif o == 0x2A
+        acc(c, t)
+    elseif o == 0x2B
+        imm(c, t)
+    elseif o == 0x2C
+        abso(c, t)
+    elseif o == 0x2D
+        abso(c, t)
+    elseif o == 0x2E
+        abso(c, t)
+    elseif o == 0x2F
+        abso(c, t)
+    elseif o == 0x30
+        rel(c, t)
+    elseif o == 0x31
+        indy(c, t)
+    elseif o == 0x32
+        imp(c, t)
+    elseif o == 0x33
+        indy(c, t)
+    elseif o == 0x34
+        zpx(c, t)
+    elseif o == 0x35
+        zpx(c, t)
+    elseif o == 0x36
+        zpx(c, t)
+    elseif o == 0x37
+        zpx(c, t)
+    elseif o == 0x38
+        imp(c, t)
+    elseif o == 0x39
+        absy(c, t)
+    elseif o == 0x3A
+        imp(c, t)
+    elseif o == 0x3B
+        absy(c, t)
+    elseif o == 0x3C
+        absx(c, t)
+    elseif o == 0x3D
+        absx(c, t)
+    elseif o == 0x3E
+        absx(c, t)
+    elseif o == 0x3F
+        absx(c, t)
+    elseif o == 0x40
+        imp(c, t)
+    elseif o == 0x41
+        indx(c, t)
+    elseif o == 0x42
+        imp(c, t)
+    elseif o == 0x43
+        indx(c, t)
+    elseif o == 0x44
+        zp(c, t)
+    elseif o == 0x45
+        zp(c, t)
+    elseif o == 0x46
+        zp(c, t)
+    elseif o == 0x47
+        zp(c, t)
+    elseif o == 0x48
+        imp(c, t)
+    elseif o == 0x49
+        imm(c, t)
+    elseif o == 0x4A
+        acc(c, t)
+    elseif o == 0x4B
+        imm(c, t)
+    elseif o == 0x4C
+        abso(c, t)
+    elseif o == 0x4D
+        abso(c, t)
+    elseif o == 0x4E
+        abso(c, t)
+    elseif o == 0x4F
+        abso(c, t)
+    elseif o == 0x50
+        rel(c, t)
+    elseif o == 0x51
+        indy(c, t)
+    elseif o == 0x52
+        imp(c, t)
+    elseif o == 0x53
+        indy(c, t)
+    elseif o == 0x54
+        zpx(c, t)
+    elseif o == 0x55
+        zpx(c, t)
+    elseif o == 0x56
+        zpx(c, t)
+    elseif o == 0x57
+        zpx(c, t)
+    elseif o == 0x58
+        imp(c, t)
+    elseif o == 0x59
+        absy(c, t)
+    elseif o == 0x5A
+        imp(c, t)
+    elseif o == 0x5B
+        absy(c, t)
+    elseif o == 0x5C
+        absx(c, t)
+    elseif o == 0x5D
+        absx(c, t)
+    elseif o == 0x5E
+        absx(c, t)
+    elseif o == 0x5F
+        absx(c, t)
+    elseif o == 0x60
+        imp(c, t)
+    elseif o == 0x61
+        indx(c, t)
+    elseif o == 0x62
+        imp(c, t)
+    elseif o == 0x63
+        indx(c, t)
+    elseif o == 0x64
+        zp(c, t)
+    elseif o == 0x65
+        zp(c, t)
+    elseif o == 0x66
+        zp(c, t)
+    elseif o == 0x67
+        zp(c, t)
+    elseif o == 0x68
+        imp(c, t)
+    elseif o == 0x69
+        imm(c, t)
+    elseif o == 0x6A
+        acc(c, t)
+    elseif o == 0x6B
+        imm(c, t)
+    elseif o == 0x6C
+        ind(c, t)
+    elseif o == 0x6D
+        abso(c, t)
+    elseif o == 0x6E
+        abso(c, t)
+    elseif o == 0x6F
+        abso(c, t)
+    elseif o == 0x70
+        rel(c, t)
+    elseif o == 0x71
+        indy(c, t)
+    elseif o == 0x72
+        imp(c, t)
+    elseif o == 0x73
+        indy(c, t)
+    elseif o == 0x74
+        zpx(c, t)
+    elseif o == 0x75
+        zpx(c, t)
+    elseif o == 0x76
+        zpx(c, t)
+    elseif o == 0x77
+        zpx(c, t)
+    elseif o == 0x78
+        imp(c, t)
+    elseif o == 0x79
+        absy(c, t)
+    elseif o == 0x7A
+        imp(c, t)
+    elseif o == 0x7B
+        absy(c, t)
+    elseif o == 0x7C
+        absx(c, t)
+    elseif o == 0x7D
+        absx(c, t)
+    elseif o == 0x7E
+        absx(c, t)
+    elseif o == 0x7F
+        absx(c, t)
+    elseif o == 0x80
+        imm(c, t)
+    elseif o == 0x81
+        indx(c, t)
+    elseif o == 0x82
+        imm(c, t)
+    elseif o == 0x83
+        indx(c, t)
+    elseif o == 0x84
+        zp(c, t)
+    elseif o == 0x85
+        zp(c, t)
+    elseif o == 0x86
+        zp(c, t)
+    elseif o == 0x87
+        zp(c, t)
+    elseif o == 0x88
+        imp(c, t)
+    elseif o == 0x89
+        imm(c, t)
+    elseif o == 0x8A
+        imp(c, t)
+    elseif o == 0x8B
+        imm(c, t)
+    elseif o == 0x8C
+        abso(c, t)
+    elseif o == 0x8D
+        abso(c, t)
+    elseif o == 0x8E
+        abso(c, t)
+    elseif o == 0x8F
+        abso(c, t)
+    elseif o == 0x90
+        rel(c, t)
+    elseif o == 0x91
+        indy(c, t)
+    elseif o == 0x92
+        imp(c, t)
+    elseif o == 0x93
+        indy(c, t)
+    elseif o == 0x94
+        zpx(c, t)
+    elseif o == 0x95
+        zpx(c, t)
+    elseif o == 0x96
+        zpy(c, t)
+    elseif o == 0x97
+        zpy(c, t)
+    elseif o == 0x98
+        imp(c, t)
+    elseif o == 0x99
+        absy(c, t)
+    elseif o == 0x9A
+        imp(c, t)
+    elseif o == 0x9B
+        absy(c, t)
+    elseif o == 0x9C
+        absx(c, t)
+    elseif o == 0x9D
+        absx(c, t)
+    elseif o == 0x9E
+        absy(c, t)
+    elseif o == 0x9F
+        absy(c, t)
+    elseif o == 0xA0
+        imm(c, t)
+    elseif o == 0xA1
+        indx(c, t)
+    elseif o == 0xA2
+        imm(c, t)
+    elseif o == 0xA3
+        indx(c, t)
+    elseif o == 0xA4
+        zp(c, t)
+    elseif o == 0xA5
+        zp(c, t)
+    elseif o == 0xA6
+        zp(c, t)
+    elseif o == 0xA7
+        zp(c, t)
+    elseif o == 0xA8
+        imp(c, t)
+    elseif o == 0xA9
+        imm(c, t)
+    elseif o == 0xAA
+        imp(c, t)
+    elseif o == 0xAB
+        imm(c, t)
+    elseif o == 0xAC
+        abso(c, t)
+    elseif o == 0xAD
+        abso(c, t)
+    elseif o == 0xAE
+        abso(c, t)
+    elseif o == 0xAF
+        abso(c, t)
+    elseif o == 0xB0
+        rel(c, t)
+    elseif o == 0xB1
+        indy(c, t)
+    elseif o == 0xB2
+        imp(c, t)
+    elseif o == 0xB3
+        indy(c, t)
+    elseif o == 0xB4
+        zpx(c, t)
+    elseif o == 0xB5
+        zpx(c, t)
+    elseif o == 0xB6
+        zpy(c, t)
+    elseif o == 0xB7
+        zpy(c, t)
+    elseif o == 0xB8
+        imp(c, t)
+    elseif o == 0xB9
+        absy(c, t)
+    elseif o == 0xBA
+        imp(c, t)
+    elseif o == 0xBB
+        absy(c, t)
+    elseif o == 0xBC
+        absx(c, t)
+    elseif o == 0xBD
+        absx(c, t)
+    elseif o == 0xBE
+        absy(c, t)
+    elseif o == 0xBF
+        absy(c, t)
+    elseif o == 0xC0
+        imm(c, t)
+    elseif o == 0xC1
+        indx(c, t)
+    elseif o == 0xC2
+        imm(c, t)
+    elseif o == 0xC3
+        indx(c, t)
+    elseif o == 0xC4
+        zp(c, t)
+    elseif o == 0xC5
+        zp(c, t)
+    elseif o == 0xC6
+        zp(c, t)
+    elseif o == 0xC7
+        zp(c, t)
+    elseif o == 0xC8
+        imp(c, t)
+    elseif o == 0xC9
+        imm(c, t)
+    elseif o == 0xCA
+        imp(c, t)
+    elseif o == 0xCB
+        imm(c, t)
+    elseif o == 0xCC
+        abso(c, t)
+    elseif o == 0xCD
+        abso(c, t)
+    elseif o == 0xCE
+        abso(c, t)
+    elseif o == 0xCF
+        abso(c, t)
+    elseif o == 0xD0
+        rel(c, t)
+    elseif o == 0xD1
+        indy(c, t)
+    elseif o == 0xD2
+        imp(c, t)
+    elseif o == 0xD3
+        indy(c, t)
+    elseif o == 0xD4
+        zpx(c, t)
+    elseif o == 0xD5
+        zpx(c, t)
+    elseif o == 0xD6
+        zpx(c, t)
+    elseif o == 0xD7
+        zpx(c, t)
+    elseif o == 0xD8
+        imp(c, t)
+    elseif o == 0xD9
+        absy(c, t)
+    elseif o == 0xDA
+        imp(c, t)
+    elseif o == 0xDB
+        absy(c, t)
+    elseif o == 0xDC
+        absx(c, t)
+    elseif o == 0xDD
+        absx(c, t)
+    elseif o == 0xDE
+        absx(c, t)
+    elseif o == 0xDF
+        absx(c, t)
+    elseif o == 0xE0
+        imm(c, t)
+    elseif o == 0xE1
+        indx(c, t)
+    elseif o == 0xE2
+        imm(c, t)
+    elseif o == 0xE3
+        indx(c, t)
+    elseif o == 0xE4
+        zp(c, t)
+    elseif o == 0xE5
+        zp(c, t)
+    elseif o == 0xE6
+        zp(c, t)
+    elseif o == 0xE7
+        zp(c, t)
+    elseif o == 0xE8
+        imp(c, t)
+    elseif o == 0xE9
+        imm(c, t)
+    elseif o == 0xEA
+        imp(c, t)
+    elseif o == 0xEB
+        imm(c, t)
+    elseif o == 0xEC
+        abso(c, t)
+    elseif o == 0xED
+        abso(c, t)
+    elseif o == 0xEE
+        abso(c, t)
+    elseif o == 0xEF
+        abso(c, t)
+    elseif o == 0xF0
+        rel(c, t)
+    elseif o == 0xF1
+        indy(c, t)
+    elseif o == 0xF2
+        imp(c, t)
+    elseif o == 0xF3
+        indy(c, t)
+    elseif o == 0xF4
+        zpx(c, t)
+    elseif o == 0xF5
+        zpx(c, t)
+    elseif o == 0xF6
+        zpx(c, t)
+    elseif o == 0xF7
+        zpx(c, t)
+    elseif o == 0xF8
+        imp(c, t)
+    elseif o == 0xF9
+        absy(c, t)
+    elseif o == 0xFA
+        imp(c, t)
+    elseif o == 0xFB
+        absy(c, t)
+    elseif o == 0xFC
+        absx(c, t)
+    elseif o == 0xFD
+        absx(c, t)
+    elseif o == 0xFE
+        absx(c, t)
+    elseif o == 0xFF
+        absx(c, t)
     end
 end
 
 const opsyms = (
-#     |  0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |  A |  B |   C |  D |  E |  F |
-#=0=#  :brk,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:php,:ora,:asl,:anc, :nop,:ora,:asl,:slo, # 0
-#=1=#  :bpl,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:clc,:ora,:nop,:slo, :nop,:ora,:asl,:slo, # 1
-#=2=#  :jsr,:and,:jam,:rla,:bit,:and,:rol,:rla,:plp,:and,:rol,:anc, :bit,:and,:rol,:rla, # 2
-#=3=#  :bmi,:and,:jam,:rla,:nop,:and,:rol,:rla,:sec,:and,:nop,:rla, :nop,:and,:rol,:rla, # 3
-#=4=#  :rti,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:pha,:eor,:lsr,:alr, :jmp,:eor,:lsr,:sre, # 4
-#=5=#  :bvc,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:cli,:eor,:nop,:sre, :nop,:eor,:lsr,:sre, # 5
-#=6=#  :rts,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:pla,:adc,:ror,:arr, :jmp,:adc,:ror,:rra, # 6
-#=7=#  :bvs,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:sei,:adc,:nop,:rra, :nop,:adc,:ror,:rra, # 7
-#=8=#  :nop,:sta,:nop,:sax,:sty,:sta,:stx,:sax,:dey,:nop,:txa,:ane, :sty,:sta,:stx,:sax, # 8
-#=9=#  :bcc,:sta,:jam,:sha,:sty,:sta,:stx,:sax,:tya,:sta,:txs,:tas, :shy,:sta,:shy,:sha, # 9
-#=A=#  :ldy,:lda,:ldx,:lax,:ldy,:lda,:ldx,:lax,:tay,:lda,:tax,:lxa, :ldy,:lda,:ldx,:lax, # A
-#=B=#  :bcs,:lda,:jam,:lax,:ldy,:lda,:ldx,:lax,:clv,:lda,:tsx,:las, :ldy,:lda,:ldx,:lax, # B
-#=C=#  :cpy,:cmp,:nop,:dcp,:cpy,:cmp,:dec,:dcp,:iny,:cmp,:dex,:sbx, :cpy,:cmp,:dec,:dcp, # C
-#=D=#  :bne,:cmp,:jam,:dcp,:nop,:cmp,:dec,:dcp,:cld,:cmp,:nop,:dcp, :nop,:cmp,:dec,:dcp, # D
-#=E=#  :cpx,:sbc,:nop,:isc,:cpx,:sbc,:inc,:isc,:inx,:sbc,:nop,:usbc,:cpx,:sbc,:inc,:isc, # E
-#=F=#  :beq,:sbc,:jam,:isc,:nop,:sbc,:inc,:isc,:sed,:sbc,:nop,:isc, :nop,:sbc,:inc,:isc  # F
+    #     |  0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |  A |  B |   C |  D |  E |  F |
+    :brk,
+    :ora,
+    :jam,
+    :slo,
+    :nop,
+    :ora,
+    :asl,
+    :slo,
+    :php,
+    :ora,
+    :asl,
+    :anc,
+    :nop,
+    :ora,
+    :asl,
+    :slo, # 0
+    :bpl,
+    :ora,
+    :jam,
+    :slo,
+    :nop,
+    :ora,
+    :asl,
+    :slo,
+    :clc,
+    :ora,
+    :nop,
+    :slo,
+    :nop,
+    :ora,
+    :asl,
+    :slo, # 1
+    :jsr,
+    :and,
+    :jam,
+    :rla,
+    :bit,
+    :and,
+    :rol,
+    :rla,
+    :plp,
+    :and,
+    :rol,
+    :anc,
+    :bit,
+    :and,
+    :rol,
+    :rla, # 2
+    :bmi,
+    :and,
+    :jam,
+    :rla,
+    :nop,
+    :and,
+    :rol,
+    :rla,
+    :sec,
+    :and,
+    :nop,
+    :rla,
+    :nop,
+    :and,
+    :rol,
+    :rla, # 3
+    :rti,
+    :eor,
+    :jam,
+    :sre,
+    :nop,
+    :eor,
+    :lsr,
+    :sre,
+    :pha,
+    :eor,
+    :lsr,
+    :alr,
+    :jmp,
+    :eor,
+    :lsr,
+    :sre, # 4
+    :bvc,
+    :eor,
+    :jam,
+    :sre,
+    :nop,
+    :eor,
+    :lsr,
+    :sre,
+    :cli,
+    :eor,
+    :nop,
+    :sre,
+    :nop,
+    :eor,
+    :lsr,
+    :sre, # 5
+    :rts,
+    :adc,
+    :jam,
+    :rra,
+    :nop,
+    :adc,
+    :ror,
+    :rra,
+    :pla,
+    :adc,
+    :ror,
+    :arr,
+    :jmp,
+    :adc,
+    :ror,
+    :rra, # 6
+    :bvs,
+    :adc,
+    :jam,
+    :rra,
+    :nop,
+    :adc,
+    :ror,
+    :rra,
+    :sei,
+    :adc,
+    :nop,
+    :rra,
+    :nop,
+    :adc,
+    :ror,
+    :rra, # 7
+    :nop,
+    :sta,
+    :nop,
+    :sax,
+    :sty,
+    :sta,
+    :stx,
+    :sax,
+    :dey,
+    :nop,
+    :txa,
+    :ane,
+    :sty,
+    :sta,
+    :stx,
+    :sax, # 8
+    :bcc,
+    :sta,
+    :jam,
+    :sha,
+    :sty,
+    :sta,
+    :stx,
+    :sax,
+    :tya,
+    :sta,
+    :txs,
+    :tas,
+    :shy,
+    :sta,
+    :shy,
+    :sha, # 9
+    :ldy,
+    :lda,
+    :ldx,
+    :lax,
+    :ldy,
+    :lda,
+    :ldx,
+    :lax,
+    :tay,
+    :lda,
+    :tax,
+    :lxa,
+    :ldy,
+    :lda,
+    :ldx,
+    :lax, # A
+    :bcs,
+    :lda,
+    :jam,
+    :lax,
+    :ldy,
+    :lda,
+    :ldx,
+    :lax,
+    :clv,
+    :lda,
+    :tsx,
+    :las,
+    :ldy,
+    :lda,
+    :ldx,
+    :lax, # B
+    :cpy,
+    :cmp,
+    :nop,
+    :dcp,
+    :cpy,
+    :cmp,
+    :dec,
+    :dcp,
+    :iny,
+    :cmp,
+    :dex,
+    :sbx,
+    :cpy,
+    :cmp,
+    :dec,
+    :dcp, # C
+    :bne,
+    :cmp,
+    :jam,
+    :dcp,
+    :nop,
+    :cmp,
+    :dec,
+    :dcp,
+    :cld,
+    :cmp,
+    :nop,
+    :dcp,
+    :nop,
+    :cmp,
+    :dec,
+    :dcp, # D
+    :cpx,
+    :sbc,
+    :nop,
+    :isc,
+    :cpx,
+    :sbc,
+    :inc,
+    :isc,
+    :inx,
+    :sbc,
+    :nop,
+    :usbc,
+    :cpx,
+    :sbc,
+    :inc,
+    :isc, # E
+    :beq,
+    :sbc,
+    :jam,
+    :isc,
+    :nop,
+    :sbc,
+    :inc,
+    :isc,
+    :sed,
+    :sbc,
+    :nop,
+    :isc,
+    :nop,
+    :sbc,
+    :inc,
+    :isc,  # F
 )
 
 #opcode_cmp(i) = :(opcode == $(UInt8(i - 1)))
@@ -1535,81 +2718,529 @@ const opsyms = (
 function opcode(c::Cpu, t::Temps)::Temps #::Cpu)
     local o = c.opcode
     #o = t.opcode
-    if o==0x00 brk_6502(c, t) elseif o==0x01 ora(c, t) elseif o==0x02 jam(c, t) elseif o==0x03 slo(c, t)
-    elseif o==0x04  nop(c, t) elseif o==0x05 ora(c, t) elseif o==0x06 asl(c, t) elseif o==0x07 slo(c, t)
-    elseif o==0x08  php(c, t) elseif o==0x09 ora(c, t) elseif o==0x0A asl(c, t) elseif o==0x0B anc(c, t)
-    elseif o==0x0C  nop(c, t) elseif o==0x0D ora(c, t) elseif o==0x0E asl(c, t) elseif o==0x0F slo(c, t)
-    elseif o==0x10  bpl(c, t) elseif o==0x11 ora(c, t) elseif o==0x12 jam(c, t) elseif o==0x13 slo(c, t)
-    elseif o==0x14  nop(c, t) elseif o==0x15 ora(c, t) elseif o==0x16 asl(c, t) elseif o==0x17 slo(c, t)
-    elseif o==0x18  clc(c, t) elseif o==0x19 ora(c, t) elseif o==0x1A nop(c, t) elseif o==0x1B slo(c, t)
-    elseif o==0x1C  nop(c, t) elseif o==0x1D ora(c, t) elseif o==0x1E asl(c, t) elseif o==0x1F slo(c, t)
-    elseif o==0x20  jsr(c, t) elseif o==0x21 and(c, t) elseif o==0x22 jam(c, t) elseif o==0x23 rla(c, t)
-    elseif o==0x24  bit(c, t) elseif o==0x25 and(c, t) elseif o==0x26 rol(c, t) elseif o==0x27 rla(c, t)
-    elseif o==0x28  plp(c, t) elseif o==0x29 and(c, t) elseif o==0x2A rol(c, t) elseif o==0x2B anc(c, t)
-    elseif o==0x2C  bit(c, t) elseif o==0x2D and(c, t) elseif o==0x2E rol(c, t) elseif o==0x2F rla(c, t)
-    elseif o==0x30  bmi(c, t) elseif o==0x31 and(c, t) elseif o==0x32 jam(c, t) elseif o==0x33 rla(c, t)
-    elseif o==0x34  nop(c, t) elseif o==0x35 and(c, t) elseif o==0x36 rol(c, t) elseif o==0x37 rla(c, t)
-    elseif o==0x38  sec(c, t) elseif o==0x39 and(c, t) elseif o==0x3A nop(c, t) elseif o==0x3B rla(c, t)
-    elseif o==0x3C  nop(c, t) elseif o==0x3D and(c, t) elseif o==0x3E rol(c, t) elseif o==0x3F rla(c, t)
-    elseif o==0x40  rti(c, t) elseif o==0x41 eor(c, t) elseif o==0x42 jam(c, t) elseif o==0x43 sre(c, t)
-    elseif o==0x44  nop(c, t) elseif o==0x45 eor(c, t) elseif o==0x46 lsr(c, t) elseif o==0x47 sre(c, t)
-    elseif o==0x48  pha(c, t) elseif o==0x49 eor(c, t) elseif o==0x4A lsr(c, t) elseif o==0x4B alr(c, t)
-    elseif o==0x4C  jmp(c, t) elseif o==0x4D eor(c, t) elseif o==0x4E lsr(c, t) elseif o==0x4F sre(c, t)
-    elseif o==0x50  bvc(c, t) elseif o==0x51 eor(c, t) elseif o==0x52 jam(c, t) elseif o==0x53 sre(c, t)
-    elseif o==0x54  nop(c, t) elseif o==0x55 eor(c, t) elseif o==0x56 lsr(c, t) elseif o==0x57 sre(c, t)
-    elseif o==0x58  cli(c, t) elseif o==0x59 eor(c, t) elseif o==0x5A nop(c, t) elseif o==0x5B sre(c, t)
-    elseif o==0x5C  nop(c, t) elseif o==0x5D eor(c, t) elseif o==0x5E lsr(c, t) elseif o==0x5F sre(c, t)
-    elseif o==0x60  rts(c, t) elseif o==0x61 adc(c, t) elseif o==0x62 jam(c, t) elseif o==0x63 rra(c, t)
-    elseif o==0x64  nop(c, t) elseif o==0x65 adc(c, t) elseif o==0x66 ror(c, t) elseif o==0x67 rra(c, t)
-    elseif o==0x68  pla(c, t) elseif o==0x69 adc(c, t) elseif o==0x6A ror(c, t) elseif o==0x6B arr(c, t)
-    elseif o==0x6C  jmp(c, t) elseif o==0x6D adc(c, t) elseif o==0x6E ror(c, t) elseif o==0x6F rra(c, t)
-    elseif o==0x70  bvs(c, t) elseif o==0x71 adc(c, t) elseif o==0x72 jam(c, t) elseif o==0x73 rra(c, t)
-    elseif o==0x74  nop(c, t) elseif o==0x75 adc(c, t) elseif o==0x76 ror(c, t) elseif o==0x77 rra(c, t)
-    elseif o==0x78  sei(c, t) elseif o==0x79 adc(c, t) elseif o==0x7A nop(c, t) elseif o==0x7B rra(c, t)
-    elseif o==0x7C  nop(c, t) elseif o==0x7D adc(c, t) elseif o==0x7E ror(c, t) elseif o==0x7F rra(c, t)
-    elseif o==0x80  nop(c, t) elseif o==0x81 sta(c, t) elseif o==0x82 nop(c, t) elseif o==0x83 sax(c, t)
-    elseif o==0x84  sty(c, t) elseif o==0x85 sta(c, t) elseif o==0x86 stx(c, t) elseif o==0x87 sax(c, t)
-    elseif o==0x88  dey(c, t) elseif o==0x89 nop(c, t) elseif o==0x8A txa(c, t) elseif o==0x8B ane(c, t)
-    elseif o==0x8C  sty(c, t) elseif o==0x8D sta(c, t) elseif o==0x8E stx(c, t) elseif o==0x8F sax(c, t)
-    elseif o==0x90  bcc(c, t) elseif o==0x91 sta(c, t) elseif o==0x92 jam(c, t) elseif o==0x93 sha(c, t)
-    elseif o==0x94  sty(c, t) elseif o==0x95 sta(c, t) elseif o==0x96 stx(c, t) elseif o==0x97 sax(c, t)
-    elseif o==0x98  tya(c, t) elseif o==0x99 sta(c, t) elseif o==0x9A txs(c, t) elseif o==0x9B tas(c, t)
-    elseif o==0x9C  shy(c, t) elseif o==0x9D sta(c, t) elseif o==0x9E shx(c, t) elseif o==0x9F sha(c, t)
-    elseif o==0xA0  ldy(c, t) elseif o==0xA1 lda(c, t) elseif o==0xA2 ldx(c, t) elseif o==0xA3 lax(c, t)
-    elseif o==0xA4  ldy(c, t) elseif o==0xA5 lda(c, t) elseif o==0xA6 ldx(c, t) elseif o==0xA7 lax(c, t)
-    elseif o==0xA8  tay(c, t) elseif o==0xA9 lda(c, t) elseif o==0xAA tax(c, t) elseif o==0xAB lxa(c, t)
-    elseif o==0xAC  ldy(c, t) elseif o==0xAD lda(c, t) elseif o==0xAE ldx(c, t) elseif o==0xAF lax(c, t)
-    elseif o==0xB0  bcs(c, t) elseif o==0xB1 lda(c, t) elseif o==0xB2 jam(c, t) elseif o==0xB3 lax(c, t)
-    elseif o==0xB4  ldy(c, t) elseif o==0xB5 lda(c, t) elseif o==0xB6 ldx(c, t) elseif o==0xB7 lax(c, t)
-    elseif o==0xB8  clv(c, t) elseif o==0xB9 lda(c, t) elseif o==0xBA tsx(c, t) elseif o==0xBB las(c, t)
-    elseif o==0xBC  ldy(c, t) elseif o==0xBD lda(c, t) elseif o==0xBE ldx(c, t) elseif o==0xBF lax(c, t)
-    elseif o==0xC0  cpy(c, t) elseif o==0xC1 cmp(c, t) elseif o==0xC2 nop(c, t) elseif o==0xC3 dcp(c, t)
-    elseif o==0xC4  cpy(c, t) elseif o==0xC5 cmp(c, t) elseif o==0xC6 dec(c, t) elseif o==0xC7 dcp(c, t)
-    elseif o==0xC8  iny(c, t) elseif o==0xC9 cmp(c, t) elseif o==0xCA dex(c, t) elseif o==0xCB sbx(c, t)
-    elseif o==0xCC  cpy(c, t) elseif o==0xCD cmp(c, t) elseif o==0xCE dec(c, t) elseif o==0xCF dcp(c, t)
-    elseif o==0xD0  bne(c, t) elseif o==0xD1 cmp(c, t) elseif o==0xD2 jam(c, t) elseif o==0xD3 dcp(c, t)
-    elseif o==0xD4  nop(c, t) elseif o==0xD5 cmp(c, t) elseif o==0xD6 dec(c, t) elseif o==0xD7 dcp(c, t)
-    elseif o==0xD8  cld(c, t) elseif o==0xD9 cmp(c, t) elseif o==0xDA nop(c, t) elseif o==0xDB dcp(c, t)
-    elseif o==0xDC  nop(c, t) elseif o==0xDD cmp(c, t) elseif o==0xDE dec(c, t) elseif o==0xDF dcp(c, t)
-    elseif o==0xE0  cpx(c, t) elseif o==0xE1 sbc(c, t) elseif o==0xE2 nop(c, t) elseif o==0xE3 isc(c, t)
-    elseif o==0xE4  cpx(c, t) elseif o==0xE5 sbc(c, t) elseif o==0xE6 inc(c, t) elseif o==0xE7 isc(c, t)
-    elseif o==0xE8  inx(c, t) elseif o==0xE9 sbc(c, t) elseif o==0xEA nop(c, t) elseif o==0xEB sbc(c, t)
-    elseif o==0xEC  cpx(c, t) elseif o==0xED sbc(c, t) elseif o==0xEE inc(c, t) elseif o==0xEF isc(c, t)
-    elseif o==0xF0  beq(c, t) elseif o==0xF1 sbc(c, t) elseif o==0xF2 jam(c, t) elseif o==0xF3 isc(c, t)
-    elseif o==0xF4  nop(c, t) elseif o==0xF5 sbc(c, t) elseif o==0xF6 inc(c, t) elseif o==0xF7 isc(c, t)
-    elseif o==0xF8  sed(c, t) elseif o==0xF9 sbc(c, t) elseif o==0xFA nop(c, t) elseif o==0xFB isc(c, t)
-    elseif o==0xFC  nop(c, t) elseif o==0xFD sbc(c, t) elseif o==0xFE inc(c, t) elseif o==0xFF isc(c, t)
+    if o == 0x00
+        brk_6502(c, t)
+    elseif o == 0x01
+        ora(c, t)
+    elseif o == 0x02
+        jam(c, t)
+    elseif o == 0x03
+        slo(c, t)
+    elseif o == 0x04
+        nop(c, t)
+    elseif o == 0x05
+        ora(c, t)
+    elseif o == 0x06
+        asl(c, t)
+    elseif o == 0x07
+        slo(c, t)
+    elseif o == 0x08
+        php(c, t)
+    elseif o == 0x09
+        ora(c, t)
+    elseif o == 0x0A
+        asl(c, t)
+    elseif o == 0x0B
+        anc(c, t)
+    elseif o == 0x0C
+        nop(c, t)
+    elseif o == 0x0D
+        ora(c, t)
+    elseif o == 0x0E
+        asl(c, t)
+    elseif o == 0x0F
+        slo(c, t)
+    elseif o == 0x10
+        bpl(c, t)
+    elseif o == 0x11
+        ora(c, t)
+    elseif o == 0x12
+        jam(c, t)
+    elseif o == 0x13
+        slo(c, t)
+    elseif o == 0x14
+        nop(c, t)
+    elseif o == 0x15
+        ora(c, t)
+    elseif o == 0x16
+        asl(c, t)
+    elseif o == 0x17
+        slo(c, t)
+    elseif o == 0x18
+        clc(c, t)
+    elseif o == 0x19
+        ora(c, t)
+    elseif o == 0x1A
+        nop(c, t)
+    elseif o == 0x1B
+        slo(c, t)
+    elseif o == 0x1C
+        nop(c, t)
+    elseif o == 0x1D
+        ora(c, t)
+    elseif o == 0x1E
+        asl(c, t)
+    elseif o == 0x1F
+        slo(c, t)
+    elseif o == 0x20
+        jsr(c, t)
+    elseif o == 0x21
+        and(c, t)
+    elseif o == 0x22
+        jam(c, t)
+    elseif o == 0x23
+        rla(c, t)
+    elseif o == 0x24
+        bit(c, t)
+    elseif o == 0x25
+        and(c, t)
+    elseif o == 0x26
+        rol(c, t)
+    elseif o == 0x27
+        rla(c, t)
+    elseif o == 0x28
+        plp(c, t)
+    elseif o == 0x29
+        and(c, t)
+    elseif o == 0x2A
+        rol(c, t)
+    elseif o == 0x2B
+        anc(c, t)
+    elseif o == 0x2C
+        bit(c, t)
+    elseif o == 0x2D
+        and(c, t)
+    elseif o == 0x2E
+        rol(c, t)
+    elseif o == 0x2F
+        rla(c, t)
+    elseif o == 0x30
+        bmi(c, t)
+    elseif o == 0x31
+        and(c, t)
+    elseif o == 0x32
+        jam(c, t)
+    elseif o == 0x33
+        rla(c, t)
+    elseif o == 0x34
+        nop(c, t)
+    elseif o == 0x35
+        and(c, t)
+    elseif o == 0x36
+        rol(c, t)
+    elseif o == 0x37
+        rla(c, t)
+    elseif o == 0x38
+        sec(c, t)
+    elseif o == 0x39
+        and(c, t)
+    elseif o == 0x3A
+        nop(c, t)
+    elseif o == 0x3B
+        rla(c, t)
+    elseif o == 0x3C
+        nop(c, t)
+    elseif o == 0x3D
+        and(c, t)
+    elseif o == 0x3E
+        rol(c, t)
+    elseif o == 0x3F
+        rla(c, t)
+    elseif o == 0x40
+        rti(c, t)
+    elseif o == 0x41
+        eor(c, t)
+    elseif o == 0x42
+        jam(c, t)
+    elseif o == 0x43
+        sre(c, t)
+    elseif o == 0x44
+        nop(c, t)
+    elseif o == 0x45
+        eor(c, t)
+    elseif o == 0x46
+        lsr(c, t)
+    elseif o == 0x47
+        sre(c, t)
+    elseif o == 0x48
+        pha(c, t)
+    elseif o == 0x49
+        eor(c, t)
+    elseif o == 0x4A
+        lsr(c, t)
+    elseif o == 0x4B
+        alr(c, t)
+    elseif o == 0x4C
+        jmp(c, t)
+    elseif o == 0x4D
+        eor(c, t)
+    elseif o == 0x4E
+        lsr(c, t)
+    elseif o == 0x4F
+        sre(c, t)
+    elseif o == 0x50
+        bvc(c, t)
+    elseif o == 0x51
+        eor(c, t)
+    elseif o == 0x52
+        jam(c, t)
+    elseif o == 0x53
+        sre(c, t)
+    elseif o == 0x54
+        nop(c, t)
+    elseif o == 0x55
+        eor(c, t)
+    elseif o == 0x56
+        lsr(c, t)
+    elseif o == 0x57
+        sre(c, t)
+    elseif o == 0x58
+        cli(c, t)
+    elseif o == 0x59
+        eor(c, t)
+    elseif o == 0x5A
+        nop(c, t)
+    elseif o == 0x5B
+        sre(c, t)
+    elseif o == 0x5C
+        nop(c, t)
+    elseif o == 0x5D
+        eor(c, t)
+    elseif o == 0x5E
+        lsr(c, t)
+    elseif o == 0x5F
+        sre(c, t)
+    elseif o == 0x60
+        rts(c, t)
+    elseif o == 0x61
+        adc(c, t)
+    elseif o == 0x62
+        jam(c, t)
+    elseif o == 0x63
+        rra(c, t)
+    elseif o == 0x64
+        nop(c, t)
+    elseif o == 0x65
+        adc(c, t)
+    elseif o == 0x66
+        ror(c, t)
+    elseif o == 0x67
+        rra(c, t)
+    elseif o == 0x68
+        pla(c, t)
+    elseif o == 0x69
+        adc(c, t)
+    elseif o == 0x6A
+        ror(c, t)
+    elseif o == 0x6B
+        arr(c, t)
+    elseif o == 0x6C
+        jmp(c, t)
+    elseif o == 0x6D
+        adc(c, t)
+    elseif o == 0x6E
+        ror(c, t)
+    elseif o == 0x6F
+        rra(c, t)
+    elseif o == 0x70
+        bvs(c, t)
+    elseif o == 0x71
+        adc(c, t)
+    elseif o == 0x72
+        jam(c, t)
+    elseif o == 0x73
+        rra(c, t)
+    elseif o == 0x74
+        nop(c, t)
+    elseif o == 0x75
+        adc(c, t)
+    elseif o == 0x76
+        ror(c, t)
+    elseif o == 0x77
+        rra(c, t)
+    elseif o == 0x78
+        sei(c, t)
+    elseif o == 0x79
+        adc(c, t)
+    elseif o == 0x7A
+        nop(c, t)
+    elseif o == 0x7B
+        rra(c, t)
+    elseif o == 0x7C
+        nop(c, t)
+    elseif o == 0x7D
+        adc(c, t)
+    elseif o == 0x7E
+        ror(c, t)
+    elseif o == 0x7F
+        rra(c, t)
+    elseif o == 0x80
+        nop(c, t)
+    elseif o == 0x81
+        sta(c, t)
+    elseif o == 0x82
+        nop(c, t)
+    elseif o == 0x83
+        sax(c, t)
+    elseif o == 0x84
+        sty(c, t)
+    elseif o == 0x85
+        sta(c, t)
+    elseif o == 0x86
+        stx(c, t)
+    elseif o == 0x87
+        sax(c, t)
+    elseif o == 0x88
+        dey(c, t)
+    elseif o == 0x89
+        nop(c, t)
+    elseif o == 0x8A
+        txa(c, t)
+    elseif o == 0x8B
+        ane(c, t)
+    elseif o == 0x8C
+        sty(c, t)
+    elseif o == 0x8D
+        sta(c, t)
+    elseif o == 0x8E
+        stx(c, t)
+    elseif o == 0x8F
+        sax(c, t)
+    elseif o == 0x90
+        bcc(c, t)
+    elseif o == 0x91
+        sta(c, t)
+    elseif o == 0x92
+        jam(c, t)
+    elseif o == 0x93
+        sha(c, t)
+    elseif o == 0x94
+        sty(c, t)
+    elseif o == 0x95
+        sta(c, t)
+    elseif o == 0x96
+        stx(c, t)
+    elseif o == 0x97
+        sax(c, t)
+    elseif o == 0x98
+        tya(c, t)
+    elseif o == 0x99
+        sta(c, t)
+    elseif o == 0x9A
+        txs(c, t)
+    elseif o == 0x9B
+        tas(c, t)
+    elseif o == 0x9C
+        shy(c, t)
+    elseif o == 0x9D
+        sta(c, t)
+    elseif o == 0x9E
+        shx(c, t)
+    elseif o == 0x9F
+        sha(c, t)
+    elseif o == 0xA0
+        ldy(c, t)
+    elseif o == 0xA1
+        lda(c, t)
+    elseif o == 0xA2
+        ldx(c, t)
+    elseif o == 0xA3
+        lax(c, t)
+    elseif o == 0xA4
+        ldy(c, t)
+    elseif o == 0xA5
+        lda(c, t)
+    elseif o == 0xA6
+        ldx(c, t)
+    elseif o == 0xA7
+        lax(c, t)
+    elseif o == 0xA8
+        tay(c, t)
+    elseif o == 0xA9
+        lda(c, t)
+    elseif o == 0xAA
+        tax(c, t)
+    elseif o == 0xAB
+        lxa(c, t)
+    elseif o == 0xAC
+        ldy(c, t)
+    elseif o == 0xAD
+        lda(c, t)
+    elseif o == 0xAE
+        ldx(c, t)
+    elseif o == 0xAF
+        lax(c, t)
+    elseif o == 0xB0
+        bcs(c, t)
+    elseif o == 0xB1
+        lda(c, t)
+    elseif o == 0xB2
+        jam(c, t)
+    elseif o == 0xB3
+        lax(c, t)
+    elseif o == 0xB4
+        ldy(c, t)
+    elseif o == 0xB5
+        lda(c, t)
+    elseif o == 0xB6
+        ldx(c, t)
+    elseif o == 0xB7
+        lax(c, t)
+    elseif o == 0xB8
+        clv(c, t)
+    elseif o == 0xB9
+        lda(c, t)
+    elseif o == 0xBA
+        tsx(c, t)
+    elseif o == 0xBB
+        las(c, t)
+    elseif o == 0xBC
+        ldy(c, t)
+    elseif o == 0xBD
+        lda(c, t)
+    elseif o == 0xBE
+        ldx(c, t)
+    elseif o == 0xBF
+        lax(c, t)
+    elseif o == 0xC0
+        cpy(c, t)
+    elseif o == 0xC1
+        cmp(c, t)
+    elseif o == 0xC2
+        nop(c, t)
+    elseif o == 0xC3
+        dcp(c, t)
+    elseif o == 0xC4
+        cpy(c, t)
+    elseif o == 0xC5
+        cmp(c, t)
+    elseif o == 0xC6
+        dec(c, t)
+    elseif o == 0xC7
+        dcp(c, t)
+    elseif o == 0xC8
+        iny(c, t)
+    elseif o == 0xC9
+        cmp(c, t)
+    elseif o == 0xCA
+        dex(c, t)
+    elseif o == 0xCB
+        sbx(c, t)
+    elseif o == 0xCC
+        cpy(c, t)
+    elseif o == 0xCD
+        cmp(c, t)
+    elseif o == 0xCE
+        dec(c, t)
+    elseif o == 0xCF
+        dcp(c, t)
+    elseif o == 0xD0
+        bne(c, t)
+    elseif o == 0xD1
+        cmp(c, t)
+    elseif o == 0xD2
+        jam(c, t)
+    elseif o == 0xD3
+        dcp(c, t)
+    elseif o == 0xD4
+        nop(c, t)
+    elseif o == 0xD5
+        cmp(c, t)
+    elseif o == 0xD6
+        dec(c, t)
+    elseif o == 0xD7
+        dcp(c, t)
+    elseif o == 0xD8
+        cld(c, t)
+    elseif o == 0xD9
+        cmp(c, t)
+    elseif o == 0xDA
+        nop(c, t)
+    elseif o == 0xDB
+        dcp(c, t)
+    elseif o == 0xDC
+        nop(c, t)
+    elseif o == 0xDD
+        cmp(c, t)
+    elseif o == 0xDE
+        dec(c, t)
+    elseif o == 0xDF
+        dcp(c, t)
+    elseif o == 0xE0
+        cpx(c, t)
+    elseif o == 0xE1
+        sbc(c, t)
+    elseif o == 0xE2
+        nop(c, t)
+    elseif o == 0xE3
+        isc(c, t)
+    elseif o == 0xE4
+        cpx(c, t)
+    elseif o == 0xE5
+        sbc(c, t)
+    elseif o == 0xE6
+        inc(c, t)
+    elseif o == 0xE7
+        isc(c, t)
+    elseif o == 0xE8
+        inx(c, t)
+    elseif o == 0xE9
+        sbc(c, t)
+    elseif o == 0xEA
+        nop(c, t)
+    elseif o == 0xEB
+        sbc(c, t)
+    elseif o == 0xEC
+        cpx(c, t)
+    elseif o == 0xED
+        sbc(c, t)
+    elseif o == 0xEE
+        inc(c, t)
+    elseif o == 0xEF
+        isc(c, t)
+    elseif o == 0xF0
+        beq(c, t)
+    elseif o == 0xF1
+        sbc(c, t)
+    elseif o == 0xF2
+        jam(c, t)
+    elseif o == 0xF3
+        isc(c, t)
+    elseif o == 0xF4
+        nop(c, t)
+    elseif o == 0xF5
+        sbc(c, t)
+    elseif o == 0xF6
+        inc(c, t)
+    elseif o == 0xF7
+        isc(c, t)
+    elseif o == 0xF8
+        sed(c, t)
+    elseif o == 0xF9
+        sbc(c, t)
+    elseif o == 0xFA
+        nop(c, t)
+    elseif o == 0xFB
+        isc(c, t)
+    elseif o == 0xFC
+        nop(c, t)
+    elseif o == 0xFD
+        sbc(c, t)
+    elseif o == 0xFE
+        inc(c, t)
+    elseif o == 0xFF
+        isc(c, t)
     end
 end
 
 function exec6502(cpu, temps, tickcount::Int64)
-	#/*
-	#	BUG FIX:
-	#	overflow of unsigned 32 bit integer causes emulation to hang.
-	#	An instruction might cause the tick count to wrap around into the billions.
+    #/*
+    #	BUG FIX:
+    #	overflow of unsigned 32 bit integer causes emulation to hang.
+    #	An instruction might cause the tick count to wrap around into the billions.
 
-	#	The system is changed so that now clockticks 6502 is reset every single time that exec is called.
-	#*/
+    #	The system is changed so that now clockticks 6502 is reset every single time that exec is called.
+    #*/
     local instructions = 0
     temps = setticks(cpu, temps, 0)
     while ticks(cpu, temps) < tickcount
@@ -1633,11 +3264,11 @@ function base_inner_step6502(cpu, temps::Temps)
     temps = incpc(cpu, temps, 0x01)
     cpu.status |= FLAG_CONSTANT
     temps = opcode(cpu, address(cpu, temps))
-    local base_ticks::Int64 = ticktable[cpu.opcode + 1]::Int64
+    local base_ticks::Int64 = ticktable[cpu.opcode+1]::Int64
     #local base_ticks::Int64 = ticktable[temps.opcode + 1]::Int64
     #/*The is commented out in Mike Chamber's usage of the 6502 emulator for MOARNES*/
     if cpu.penaltyop == 0x00 || cpu.penaltyaddr == 0x00
-    #if temps.penaltyop != 0x0 && temps.penaltyaddr != 0x0
+        #if temps.penaltyop != 0x0 && temps.penaltyaddr != 0x0
         addticks(cpu, temps, base_ticks)
     else
         addticks(cpu, temps, base_ticks + 1)
