@@ -2,7 +2,7 @@
 
         .include "simple-support.jl" ; contains the zorp function
         .julia begin
-            global floop = "fred"
+            floop = "fred"
         end
 *       = zorp(0x8000)
         .data string(VERSION)        ; place the current Julia version at this location

@@ -86,17 +86,16 @@ FORTH language development to prioritize new features...
 
 ### Intended features
 
-1. Julia-based assembler -- use Julia as the macro language and generate 6502 data and code
-2. raster line accuracy
-3. Instrumentation -- jump to Julia first before running a 6502 subroutine, writing to a memory location, etc. so
+1. raster line accuracy
+2. Instrumentation -- jump to Julia first before running a 6502 subroutine, writing to a memory location, etc. so
    Julia can keep tabs on your code. Use this to inform Julia about subsystems, interpreters, etc.
-4. Call Julia code on raster line changes
-5. Live coding / hot patching -- watch files for changes patch the results into the emulator (like Revise for 6502)
-6. Read-only memory -- halt the machine when it attempts to write to a restricted address
-7. Future screens -- show futures based on potential future inputs
-8. Input record / replay -- show screens based on recorded inputs and explore with hot patching
-9. Julia-based prototyping -- map Julia functions to 6502 addresses as "virtual 6502 subroutines"
+3. Call Julia code on raster line changes
+4. Live coding / hot patching -- watch files for changes patch the results into the emulator (like Revise for 6502)
+5. Read-only memory -- halt the machine when it attempts to write to a restricted address
+6. Future screens -- show futures based on potential future inputs
+7. Input record / replay -- show screens based on recorded inputs and explore with hot patching
+8. Julia-based prototyping -- map Julia functions to 6502 addresses as "virtual 6502 subroutines"
    Use these to prorotype parts of your game in Julia so you can get program functionality going quickly and
    code in 6502 when you see fit.
-10. Julia-based testing -- a unit test framework. Keep prototype code around for test confirmation after you code
+9. Julia-based testing -- a unit test framework. Keep prototype code around for test confirmation after you code
    it in 6502.

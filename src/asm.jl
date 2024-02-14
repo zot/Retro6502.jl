@@ -420,7 +420,7 @@ asm_julia(ctx::CodeContext) = assembleif(ctx, ".julia") do
                 programtext *= '\n' * line.line
                 continue
             end
-            push!(ctx.funcs, eval(ctx, :(function() $expr; end)))
+            push!(ctx.funcs, ()-> eval(ctx, expr))
             return
         catch
             lineerror(ctx, """Error parsing Julia code:\n$programtext""")
