@@ -17,6 +17,27 @@ development time and relieving a lot of pain.
 
 ## What it does today
 
+### JULIA-BASED ASSEMBLY
+
+Expressions are all evaluated in Julia and your assembly file can contain Julia code. This
+code runs in a sandbox module which contains the ASM labels as variables. This assembler is
+multipass, so your Julia code can refer to labels anyplace in the code.
+
+Here's an [example](examples/simple.jas):
+
+```asm
+        .include "simple-support.jl" ; contains the zorp function
+        .julia begin
+            global floop = "fred"
+        end
+*       = zorp(0x8000)
+        .data string(VERSION)        ; place the current Julia version at this location
+        .julia begin                  #only Julia-style comments in .julia code, ; is a separator
+            println("HELLO $(floop)!")
+        end
+start   PHA
+```
+
 ### Native Julia 6502 emulation
 
 Retro6502 provides a fast, pure Julia 6502 emulator to provide developers an easy path to extension in a very high

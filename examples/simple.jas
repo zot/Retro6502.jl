@@ -1,10 +1,12 @@
-        .include "simple-support.jl"
+;; semicolon is the comment character, except in .julia or .jmacro code, which uses normal Julia code
+
+        .include "simple-support.jl" ; contains the zorp function
         .julia begin
-            global floop = 3
+            global floop = "fred"
         end
 *       = zorp(0x8000)
-        .data string(VERSION)
-        .julia begin
-            println("HELLO $(floop)!")
+        .data string(VERSION)        ; place the current Julia version at this location
+        .julia begin #only Julia-style comments here -- ; is a separator
+            println("HELLO $floop, start = $start.")
         end
 start   PHA

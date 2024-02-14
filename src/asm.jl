@@ -406,7 +406,7 @@ asm_julia(ctx::CodeContext) = assembleif(ctx, ".julia") do
     local firstline = ctx.line
     local firstlines = ctx.lines
     eattok(ctx)
-    local programtext = tokstr(ctx)
+    local programtext = ctx.line.line[ctx.toks[1].offset:end]
     while true
         try
             local expr = Meta.parse(programtext)
