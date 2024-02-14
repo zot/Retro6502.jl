@@ -15,9 +15,9 @@ cost even more. If your 6502 code could somehow call Julia code outside the emul
 in Julia and then, after the prototype code worked properly, you could write the 6502 code, radically reducing
 development time and relieving a lot of pain.
 
-## What it does today
+# What it does today
 
-### JULIA-BASED ASSEMBLY
+## JULIA-BASED ASSEMBLY
 
 Expressions are all evaluated in Julia and your assembly file can contain Julia code. This
 code runs in a sandbox module which contains the ASM labels as variables. This assembler is
@@ -38,7 +38,7 @@ Here's an [example](examples/simple.jas):
 start   PHA
 ```
 
-### Native Julia 6502 emulation
+## Native Julia 6502 emulation
 
 Retro6502 provides a fast, pure Julia 6502 emulator to provide developers an easy path to extension in a very high
 level language without needing to dip down into C / C++ do to the fast parts. The emulator comes with a
@@ -50,7 +50,7 @@ accurate", meaning that it does not do the redundant writes and reads that the r
 potentially have implications for high-fidelity hardware emulation. Nevertheless, I think this is a decent place
 to start for game development.
 
-### UI with C64 screen
+## UI with C64 screen
 
 This uses Dear ImGui for its UI. For performance reasons, this uses a separate thread for the emulator -- the
 emulator is well encapsulated and you can run more than one if you like.
@@ -58,18 +58,18 @@ emulator is well encapsulated and you can run more than one if you like.
 The C64 screen is very basic, it only supports character graphics, no sprites yet, and does not have raster line
 accuracy.
 
-### Time travel
+## Time travel
 
 There is basic support for time travel and the UI has a time slider at the bottom.
 
 ![timetravel](time-travel.gif)
 
-### Ease of extension
+## Ease of extension
 
 I'm writing this with easy extension in mind. I want it to be painless to add support for embedded 6502 languages,
 like FORTH, PICO-8, and others and also support for extra features.
 
-## Why?
+# Why?
 
 I wanted to make a 6502 game in FORTH, so I wrote a simple FORTH interpreter that supports 1-byte instructions
 and literal integers in addition to the normal 2-byte FORTH instructions, with the goal of saving memory and
@@ -79,12 +79,12 @@ As I wrote it, I became dissatisfied with the 6502 assembler I was using and I r
 easier to write macros in Julia instead of the provided macro language. I wondered what kind of advantages Julia
 might lend to a 6502 developer in a fully-integrated environment.
 
-## Where is it going?
+# Where is it going?
 
 This project is one month old now. Here are some of the features I'd like to add to it. I will use my game and
 FORTH language development to prioritize new features...
 
-### Intended features
+## Intended features
 
 1. raster line accuracy
 2. Instrumentation -- jump to Julia first before running a 6502 subroutine, writing to a memory location, etc. so
