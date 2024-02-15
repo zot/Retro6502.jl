@@ -15,6 +15,7 @@ blub    .value blub
         """
 joe
 fred    #mac maluba
+fred2   #mac maluba2
         .data 0x01
 align1  .imm align(4)
         .data 0x01
@@ -25,7 +26,7 @@ align3  .imm align(4)
 align4  .imm align(4)
         .julia println("Fred: $fred")
         .imm noasm"""
-        nasm ignores
+        noasm ignores
         everything in
         its string
         """

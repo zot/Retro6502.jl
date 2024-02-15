@@ -43,6 +43,7 @@ blub    .value blub
         """
 joe
 fred    #mac maluba
+fred2   #mac maluba2
         .data 0x01
 align1  .imm align(4)
         .data 0x01
@@ -53,7 +54,7 @@ align3  .imm align(4)
 align4  .imm align(4)
         .julia println("Fred: $fred")
         .imm noasm"""
-        nasm ignores
+        noasm ignores
         everything in
         its string
         """
@@ -72,7 +73,7 @@ start   PHA
 ### Julia functions and macros
 
 - `data(value)`: the `.data` directive uses this to compute a byte array from Julia data. You can add methods for your own types.
-- `align`: align the current context to a byte boundary.
+- `align(boundarysize)`: align the current context to a byte boundary.
 - `asm"..."`: produce an AssemblyCode structure. \NAME is substituted with the current value of NAME. You can use `*` to concatenate AssemblyCode structures.
 - `noasm"..."`: project an empty AssemblyCode structure.
 
