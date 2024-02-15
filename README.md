@@ -21,20 +21,60 @@ development time and relieving a lot of pain.
 
 Expressions are all evaluated in Julia and your assembly file can contain Julia code. This
 code runs in a sandbox module which contains the ASM labels as variables. This assembler is
-multipass, so your Julia code can refer to labels anyplace in the code.
+2-pass, so your Julia code can refer to labels anyplace in the code.
 
 Here's an [example](examples/simple.jas):
 
 ```asm
+;; semicolon is the comment character, except in .julia or .jmacro code, which uses normal Julia code
+
         .include "simple-support.jl" ; contains the zorp function
         .julia floop = "fred"
 *       = zorp(0x8000)
+        .julia println("CURRENT PC: $(__CONTEXT__.offset)")
         .data string(VERSION)        ; place the current Julia version at this location
         .julia begin #only Julia-style comments here -- ; is a separator
             println("HELLO $floop, start = $start.")
         end
+mac     .macro (a)-> asm"""
+        .julia println("Hello \a")
+        .data "hello"
+blub    .value blub
+        """
+joe
+fred    #mac maluba
+        .data 0x01
+align1  .imm align(4)
+        .data 0x01
+align2  .imm align(4)
+        .data 0x2
+align3  .imm align(4)
+        .data 0x3
+align4  .imm align(4)
+        .julia println("Fred: $fred")
+        .imm noasm"""
+        nasm ignores
+        everything in
+        its string
+        """
 start   PHA
 ```
+
+### Directives
+
+- `.include`: include a Julia file
+- `.data EXPR`: convert Julia result into bytes and add to memory
+- `.imm EXPR`: execute Julia expression on pass 1
+- `.julia EXPR`: execute Julia expression on pass 2
+- `.macro (ARGS)-> EXPR`: define an asm macro in Julia -- must return an AssemblyCode struct
+- `.value EXPR`: specify the value of a macro which gets assigned to the label on its call. This defaults to the first location the macro assembles.
+
+### Julia functions and macros
+
+- `data(value)`: the `.data` directive uses this to compute a byte array from Julia data. You can add methods for your own types.
+- `align`: align the current context to a byte boundary.
+- `asm"..."`: produce an AssemblyCode structure. \NAME is substituted with the current value of NAME. You can use `*` to concatenate AssemblyCode structures.
+- `noasm"..."`: project an empty AssemblyCode structure.
 
 ## Native Julia 6502 emulation
 

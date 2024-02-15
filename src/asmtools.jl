@@ -33,8 +33,7 @@ function data(tup::Tuple)
     local offset = 1
     for t in tup
         store(bytes, offset, t)
-        !isbits(t) &&
-            error("Cannot convert data to bytes")
+        !isbits(t) && error("Cannot convert data to bytes")
         len += sizeof(t)
     end
     bytes
@@ -44,9 +43,8 @@ data(bytes::Vector{UInt8}) = bytes
 
 data(str::AbstractString) = Vector{UInt8}(str)
 
-function data(a::A) where {T, A <: Vector{T}}
-    !isbitstype(T) &&
-        error("Cannot convert $T to bytes")
+function data(a::A) where {T,A<:Vector{T}}
+    !isbitstype(T) && error("Cannot convert $T to bytes")
     if htol(1) == 1
         @inbounds reinterpret(UInt8, a)
     else
@@ -55,13 +53,11 @@ function data(a::A) where {T, A <: Vector{T}}
 end
 
 function data(value::T) where {T}
-    !isbitstype(T) &&
-        error("Cannot convert $T to bytes")
+    !isbitstype(T) && error("Cannot convert $T to bytes")
     @inbounds reinterpret(UInt8, [htol(value)])
 end
 
-store(bytes::AbstractVector{UInt8}, offset, value::UInt8) =
-    bytes[offset] = value
+store(bytes::AbstractVector{UInt8}, offset, value::UInt8) = bytes[offset] = value
 
 store(bytes::AbstractVector{UInt8}, offset, value::Int8) =
     bytes[offset] = reinterpret(UInt8, value)
@@ -75,9 +71,8 @@ store(bytes::AbstractVector{UInt8}, offset, value::AbstractString) =
 store(bytes::AbstractVector{UInt8}, offset, value::AbstractVector{T}) where {T} =
     store(bytes, offset, data(value))
 
-function store(bytes::AbstractVector{UInt8}, offset, value::T) where T
-    !isbitstype(T) &&
-        error("Cannot convert $T to bytes")
+function store(bytes::AbstractVector{UInt8}, offset, value::T) where {T}
+    !isbitstype(T) && error("Cannot convert $T to bytes")
     store(bytes, offset, @inbounds reinterpret(UInt8, [htol(value)]))
 end
 

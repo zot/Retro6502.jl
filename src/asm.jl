@@ -178,33 +178,30 @@ CodeContext(ctx::CodeContext) = CodeContext(;
 
 function subenv(ctx::CodeContext)
     local subname = Symbol(String(rand('a':'z', 16)))
-    local envnames = [n for n in names(ctx.env, all = true)
-                                            if !isempty(string(n)) &&
-                                                !startswith(string(n), '#') &&
-                                                n ∉ (:eval, nameof(ctx.env), :include, CTX, :*) &&
-                                                !eval(ctx, :($n isa Module))]
-    local imports = :(import ...$(nameof(ctx.env)): x)
-    pop!(imports.args[1].args)
-    for n in envnames
-        push!(imports.args[1].args, Expr(:., n))
-    end
+    local envnames = [
+        n for n in names(ctx.env, all = true) if !isempty(string(n)) &&
+        !startswith(string(n), '#') &&
+        n ∉ (:eval, nameof(ctx.env), :include, CTX, :*) &&
+        !eval(ctx, :($n isa Module))
+    ]
     local expr = :(module $subname
-                using ....AsmTools
-                import ....Asm
-                import ....Asm: @asm_str, @noasm_str
-                ctxeval(expr) = eval(expr)
-                end)
+    using ....AsmTools
+    import ....Asm
+    import ....Asm: @asm_str, @noasm_str
+    ctxeval(expr) = eval(expr)
+    end)
     local mod = eval(ctx, expr)
     importall(mod, ctx.env)
     mod
 end
 
 function importall(child::Module, parent::Module)
-    local envnames = [n for n in names(parent, all = true)
-                          if !isempty(string(n)) &&
-                              !startswith(string(n), '#') &&
-                              n ∉ (:eval, nameof(parent), :include, CTX, :*, :ctxeval) &&
-                              !invokelatest(parent.ctxeval, :($n isa Module))]
+    local envnames = [
+        n for n in names(parent, all = true) if !isempty(string(n)) &&
+        !startswith(string(n), '#') &&
+        n ∉ (:eval, nameof(parent), :include, CTX, :*, :ctxeval) &&
+        !invokelatest(parent.ctxeval, :($n isa Module))
+    ]
     local imports = :(import ...$(nameof(parent)): x)
     pop!(imports.args[1].args)
     for n in envnames
@@ -218,7 +215,7 @@ struct AssemblyCode
     pass2::Function
 end
 
-AssemblyCode() = AssemblyCode(()->nothing, ()->nothing)
+AssemblyCode() = AssemblyCode(() -> nothing, () -> nothing)
 
 function assemble(ctx::CodeContext, code::AssemblyCode)
     AsmTools.withcontext(ctx) do
@@ -286,9 +283,7 @@ isdirective(ctx::CodeContext) =
 
 isop(ctx::CodeContext) = hastoks(ctx) && lowercase(tok(ctx)) ∈ legal_ops
 
-iscall(ctx::CodeContext) =
-    hastoks(ctx) &&
-        matches(call_pat, tokstr(ctx))
+iscall(ctx::CodeContext) = hastoks(ctx) && matches(call_pat, tokstr(ctx))
 
 is(ctx::CodeContext, str) = hastoks(ctx) && tok(ctx) == str
 
@@ -431,7 +426,8 @@ asm_include(ctx::CodeContext) =
             if expr isa Expr && expr.head == :incomplete
                 error()
             end
-            eval(ctx, :(include(joinpath($(ctx.pwd), $expr))))
+            local file = joinpath(ctx.pwd, eval(ctx, expr))
+            eval(ctx, :(include($file)))
         catch
             lineerror(ctx, """Error running .include directive: $(tokstr(ctx))""")
         end
@@ -449,8 +445,7 @@ asm_imm(ctx::CodeContext) =
         eattok(ctx)
         local expr = compile_julia(ctx)
         eval(ctx, expr)
-        !isnothing(ctx.label) &&
-            deflabel(ctx)
+        !isnothing(ctx.label) && deflabel(ctx)
     end
 
 asm_value(ctx::CodeContext) =
@@ -581,7 +576,9 @@ function emit(ctx::CodeContext, bytes::UInt8...)
 end
 
 function emitall(ctx::CodeContext, bytes::Vector{UInt8})
-    println("EMIT $(rhex(ctx.offset)): $(length(bytes)) byte$(length(bytes) != 1 ? "s" : "")")
+    println(
+        "EMIT $(rhex(ctx.offset)): $(length(bytes)) byte$(length(bytes) != 1 ? "s" : "")",
+    )
     copy!(@view(ctx.memory[ctx.offset+1:length(bytes)+ctx.offset]), bytes)
     ctx.offset += length(bytes)
 end
