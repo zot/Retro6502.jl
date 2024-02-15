@@ -15,6 +15,18 @@ blub    .value blub
         """
 joe
 fred    #mac maluba
+        .data 0x01
+align1  .imm align(4)
+        .data 0x01
+align2  .imm align(4)
+        .data 0x2
+align3  .imm align(4)
+        .data 0x3
+align4  .imm align(4)
         .julia println("Fred: $fred")
-        ;#mac fred
+        .imm noasm"""
+        nasm ignores
+        everything in
+        its string
+        """
 start   PHA

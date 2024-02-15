@@ -120,10 +120,11 @@ const string_bracket_pat = r"\"|\$\("
 const brackets =
     Dict("(" => ")", "[" => "]", "{" => "}", "\"" => "\"", "'" => "'", "\$(" => ")")
 const close_brackets = ")]}"
-const dot_cmds = Set([".data", ".julia", ".include", "=", ".macro", ".value"])
+const dot_cmds = Set([".data", ".julia", ".include", "=", ".macro", ".value", ".imm"])
 const directives = Set([legal_ops..., dot_cmds...])
 const macro_arg_sep = r"(?<!\\),"
 const macro_ref_pat = r"\\\w+"
+const CTX = :__CONTEXT__
 
 matches(r, s) = !isnothing(match(r, s))
 
@@ -146,7 +147,7 @@ end
 @kwdef mutable struct CodeContext
     env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16))))
     using ..AsmTools
-    import ..Asm: @asm_str
+    import ..Asm: @asm_str, @noasm_str
     ctxeval(expr) = eval(expr)
     end))
     macros::Dict{Symbol,Macro} = Dict{Symbol,Macro}()
@@ -180,7 +181,7 @@ function subenv(ctx::CodeContext)
     local envnames = [n for n in names(ctx.env, all = true)
                                             if !isempty(string(n)) &&
                                                 !startswith(string(n), '#') &&
-                                                n ∉ (:eval, nameof(ctx.env), :include, :__CONTEXT__, :*) &&
+                                                n ∉ (:eval, nameof(ctx.env), :include, CTX, :*) &&
                                                 !eval(ctx, :($n isa Module))]
     local imports = :(import ...$(nameof(ctx.env)): x)
     pop!(imports.args[1].args)
@@ -190,7 +191,7 @@ function subenv(ctx::CodeContext)
     local expr = :(module $subname
                 using ....AsmTools
                 import ....Asm
-                import ....Asm: @asm_str
+                import ....Asm: @asm_str, @noasm_str
                 ctxeval(expr) = eval(expr)
                 end)
     local mod = eval(ctx, expr)
@@ -202,7 +203,7 @@ function importall(child::Module, parent::Module)
     local envnames = [n for n in names(parent, all = true)
                           if !isempty(string(n)) &&
                               !startswith(string(n), '#') &&
-                              n ∉ (:eval, nameof(parent), :include, :__CONTEXT__, :*, :ctxeval) &&
+                              n ∉ (:eval, nameof(parent), :include, CTX, :*, :ctxeval) &&
                               !invokelatest(parent.ctxeval, :($n isa Module))]
     local imports = :(import ...$(nameof(parent)): x)
     pop!(imports.args[1].args)
@@ -217,10 +218,15 @@ struct AssemblyCode
     pass2::Function
 end
 
+AssemblyCode() = AssemblyCode(()->nothing, ()->nothing)
+
 function assemble(ctx::CodeContext, code::AssemblyCode)
-    ctx.macrovalue = ctx.offset
-    code.pass1(ctx)
-    code.pass2(ctx)
+    AsmTools.withcontext(ctx) do
+        ctx.macrovalue = ctx.offset
+        code.pass1(ctx)
+        reset(ctx)
+        code.pass2(ctx)
+    end
 end
 
 Base.:(*)(code1::AssemblyCode, code2::AssemblyCode) = AssemblyCode(ctx -> begin
@@ -238,7 +244,6 @@ function tokenize(n, line)
         return Line(n, line, @view tokens[1:end-1])
     return Line(n, line, tokens)
 end
-const CTX = :__CONTEXT__
 
 numtoks(ctx::CodeContext) = length(ctx.toks)
 
@@ -283,8 +288,7 @@ isop(ctx::CodeContext) = hastoks(ctx) && lowercase(tok(ctx)) ∈ legal_ops
 
 iscall(ctx::CodeContext) =
     hastoks(ctx) &&
-    (println("CHECK CALL $(tokstr(ctx))"); true) &&
-    matches(call_pat, tokstr(ctx))
+        matches(call_pat, tokstr(ctx))
 
 is(ctx::CodeContext, str) = hastoks(ctx) && tok(ctx) == str
 
@@ -304,6 +308,10 @@ macro asm_str(str)
     esc(:($(asm)(join([$(buf...)]))))
 end
 
+macro noasm_str(str)
+    :($AssemblyCode())
+end
+
 function asmfile(file)
     local ctx = CodeContext(; pwd = dirname(file))
     local assembly = asm(read(file, String))
@@ -319,12 +327,14 @@ function asm(str)
     AssemblyCode(
         function (ctx)
             println("ASSEMBLING, OFFSET: $(ctx.offset)")
-            setvar(ctx, :__CONTEXT__, ctx)
-            # pass 1
-            #println("@@@\n@@@PASS 1\n###")
-            remaining = compile_macros_pass1(ctx, lines)
-            invokelatest() do
-                scan_asm_pass2(ctx, remaining)
+            AsmTools.withcontext(ctx) do
+                setvar(ctx, CTX, ctx)
+                # pass 1
+                #println("@@@\n@@@PASS 1\n###")
+                remaining = compile_macros_pass1(ctx, lines)
+                invokelatest() do
+                    scan_asm_pass2(ctx, remaining)
+                end
             end
             ctx
         end,
@@ -332,9 +342,10 @@ function asm(str)
             # pass 2
             #println("@@@\n@@@PASS 2\n###")
             invokelatest() do
-                reset(ctx)
-                for func in ctx.funcs
-                    func()
+                AsmTools.withcontext(ctx) do
+                    for func in ctx.funcs
+                        func()
+                    end
                 end
             end
         end,
@@ -368,7 +379,7 @@ function scan_asm_pass2(ctx::CodeContext, lines)
             ctx.label = Symbol(tok(ctx))
             eattok(ctx)
             # set the label to the current offset
-            ctx.label != :* && !iscall(ctx) && deflabel(ctx)
+            ctx.label != :* && !iscall(ctx) && !is(ctx, ".imm") && deflabel(ctx)
             !hastoks(ctx) && continue
         end
         asm_assign(ctx) && continue
@@ -376,7 +387,7 @@ function scan_asm_pass2(ctx::CodeContext, lines)
             ctx.label ∈ ctx.labels &&
             lineerror(ctx, """Attempt to reassign label $(ctx.label)""")
         !isnothing(ctx.label) && push!(ctx.labels, ctx.label)
-        for dir in [asm_op, asm_data, asm_julia, asm_include, asm_call, asm_value]
+        for dir in [asm_op, asm_data, asm_julia, asm_include, asm_call, asm_value, asm_imm]
             dir(ctx) && @goto bottom
         end
         !isdirective(ctx) && lineerror(line, """Unknown directive, $(tokstr(ctx))""")
@@ -407,15 +418,10 @@ asm_data(ctx::CodeContext) =
         expr isa Expr &&
             expr.head == :incomplete &&
             lineerror(ctx, """Incomplete expression: $(tokstr(ctx))""")
-        local func = eval(ctx, :(function ()
-            $expr
-        end))
-        local data = asbytes(invokelatest(func))
-        push!(ctx.funcs, () -> emitall(ctx, data))
-        ctx.offset += length(data)
+        local bytes = AsmTools.data(eval(ctx, expr))
+        push!(ctx.funcs, () -> emitall(ctx, bytes))
+        ctx.offset += length(bytes)
     end
-
-asbytes(str::AbstractString) = Vector{UInt8}(str)
 
 asm_include(ctx::CodeContext) =
     assembleif(ctx, ".include") do
@@ -436,6 +442,15 @@ asm_julia(ctx::CodeContext) =
         eattok(ctx)
         local expr = compile_julia(ctx)
         push!(ctx.funcs, () -> eval(ctx, expr))
+    end
+
+asm_imm(ctx::CodeContext) =
+    assembleif(ctx, ".imm") do
+        eattok(ctx)
+        local expr = compile_julia(ctx)
+        eval(ctx, expr)
+        !isnothing(ctx.label) &&
+            deflabel(ctx)
     end
 
 asm_value(ctx::CodeContext) =
@@ -516,6 +531,7 @@ asm_call(ctx::CodeContext) =
             local assembly = mac.func(args...)
             println("CALL MACRO, TMP OFFSET: $(tmpctx.offset)")
             assembly.pass1(tmpctx)
+            tmpctx.offset = ctx.offset
             !isnothing(ctx.label) && deflabel(ctx, tmpctx.macrovalue)
             println("PUSHING $macname's FUNC")
             push!(ctx.funcs, function ()
@@ -550,7 +566,7 @@ asm_assign(ctx::CodeContext) =
 function reset(ctx::CodeContext)
     ctx.offset = 0
     setdiff!(ctx.assigned, ctx.vars)
-    ctx.env.eval(quote
+    invokelatest(ctx.env.ctxeval, quote
         $((:($var = nothing) for var in ctx.vars)...)
     end)
 end
@@ -565,6 +581,7 @@ function emit(ctx::CodeContext, bytes::UInt8...)
 end
 
 function emitall(ctx::CodeContext, bytes::Vector{UInt8})
+    println("EMIT $(rhex(ctx.offset)): $(length(bytes)) byte$(length(bytes) != 1 ? "s" : "")")
     copy!(@view(ctx.memory[ctx.offset+1:length(bytes)+ctx.offset]), bytes)
     ctx.offset += length(bytes)
 end
@@ -573,6 +590,12 @@ function assemble(ctx::CodeContext, op, addr, exprs = :())
     local opcode = opcodes[(op, addr)]
     local bytes = addrmodebytes[addr]
     local args = eval(ctx, exprs)
+    push!(
+        ctx.funcs,
+        () -> println(
+            "assemble $(rhex(ctx.offset)) ($op $addr)$(isempty(args) ? "" : " " * exprs) ->  $(join([rhex(opcode), args...], " "))",
+        ),
+    )
     if bytes == 1
         push!(ctx.funcs, () -> emit(ctx, opcode))
     elseif bytes == 2
@@ -583,12 +606,6 @@ function assemble(ctx::CodeContext, op, addr, exprs = :())
         local a2 = args[2]
         push!(ctx.funcs, () -> emit(ctx, opcode, a1, a2))
     end
-    push!(
-        ctx.funcs,
-        () -> println(
-            "assemble ($op $addr)$(isempty(args) ? "" : " " * exprs) ->  $(join([rhex(opcode), args...], " "))",
-        ),
-    )
     ctx.offset += bytes
     true
 end
