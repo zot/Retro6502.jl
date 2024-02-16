@@ -93,7 +93,7 @@ fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine
 ```
 =#
 module Asm
-import ..Fake6502: K, M, G, rhex
+import ..Fake6502: K, M, G, rhex, register
 using ..Fake6502m: addrsyms, opsyms
 using ..AsmTools
 
@@ -120,7 +120,7 @@ const string_bracket_pat = r"\"|\$\("
 const brackets =
     Dict("(" => ")", "[" => "]", "{" => "}", "\"" => "\"", "'" => "'", "\$(" => ")")
 const close_brackets = ")]}"
-const dot_cmds = Set([".data", ".julia", ".include", "=", ".macro", ".value", ".imm"])
+const dot_cmds = Set([".data", ".julia", ".include", "=", ".macro", ".value", ".imm", ".fake"])
 const directives = Set([legal_ops..., dot_cmds...])
 const macro_arg_sep = r"(?<!\\),"
 const macro_ref_pat = r"\\\w+"
@@ -163,6 +163,7 @@ end
     memory::Vector{UInt8} = zeros(UInt8, 64K)         # 64K memory array
     pwd::String = pwd()
     macrovalue::UInt16 = 0
+    fakes::Dict{Symbol,Tuple{Int,Function}} = Dict{Symbol,Tuple{Int,Function}}()
 end
 
 CodeContext(ctx::CodeContext) = CodeContext(;
@@ -374,7 +375,7 @@ function scan_asm_pass2(ctx::CodeContext, lines)
             ctx.label = Symbol(tok(ctx))
             eattok(ctx)
             # set the label to the current offset
-            ctx.label != :* && !iscall(ctx) && !is(ctx, ".imm") && deflabel(ctx)
+            ctx.label != :* && !iscall(ctx) && !is(ctx, ".imm") && !is(ctx, ".fake") && deflabel(ctx)
             !hastoks(ctx) && continue
         end
         asm_assign(ctx) && continue
@@ -382,7 +383,7 @@ function scan_asm_pass2(ctx::CodeContext, lines)
             ctx.label ∈ ctx.labels &&
             lineerror(ctx, """Attempt to reassign label $(ctx.label)""")
         !isnothing(ctx.label) && push!(ctx.labels, ctx.label)
-        for dir in [asm_op, asm_data, asm_julia, asm_include, asm_call, asm_value, asm_imm]
+        for dir in [asm_op, asm_data, asm_julia, asm_include, asm_call, asm_value, asm_imm, asm_fake]
             dir(ctx) && @goto bottom
         end
         !isdirective(ctx) && lineerror(line, """Unknown directive, $(tokstr(ctx))""")
@@ -392,7 +393,7 @@ function scan_asm_pass2(ctx::CodeContext, lines)
 end
 
 function deflabel(ctx, value = ctx.offset)
-    println("@@ LABEL $(ctx.label): $value")
+    println("@@ LABEL $(ctx.label): $(rhex(value))")
     eval(ctx, :(const $(ctx.label) = $value))
 end
 
@@ -436,23 +437,38 @@ asm_include(ctx::CodeContext) =
 asm_julia(ctx::CodeContext) =
     assembleif(ctx, ".julia") do
         eattok(ctx)
-        local expr = compile_julia(ctx)
+        local expr = parse_julia(ctx)
         push!(ctx.funcs, () -> eval(ctx, expr))
     end
 
 asm_imm(ctx::CodeContext) =
     assembleif(ctx, ".imm") do
         eattok(ctx)
-        local expr = compile_julia(ctx)
+        local expr = parse_julia(ctx)
         eval(ctx, expr)
         !isnothing(ctx.label) && deflabel(ctx)
+    end
+
+asm_fake(ctx::CodeContext) =
+    assembleif(ctx, ".fake") do
+        eattok(ctx)
+        local expr = parse_julia(ctx)
+        (expr.head ∉ (:function, :->) || expr.args[1] != :(())) &&
+            lineerror(ctx, """.fake expects a zero-argument function""")
+        isnothing(ctx.label) &&
+            lineerror(ctx, """.fake with no label""")
+        local index = 0xFFFF - length(ctx.fakes)
+        local label = ctx.label
+        deflabel(ctx, index)
+        ctx.fakes[ctx.label] = (index, ()->nothing)
+        push!(ctx.funcs, ()-> ctx.fakes[label] = (index, eval(ctx, expr)))
     end
 
 asm_value(ctx::CodeContext) =
     assembleif(ctx, ".value") do
         eattok(ctx)
         !isnothing(ctx.label) && deflabel(ctx)
-        local expr = compile_julia(ctx)
+        local expr = parse_julia(ctx)
         try
             ctx.macrovalue = eval(ctx, expr)
             println("SET MACRO VALUE TO $(ctx.macrovalue)")
@@ -461,7 +477,7 @@ asm_value(ctx::CodeContext) =
         end
     end
 
-function compile_julia(ctx::CodeContext)
+function parse_julia(ctx::CodeContext)
     local firstlines = ctx.lines
     local programtext = ctx.line.line[ctx.toks[1].offset:end]
     while true
@@ -681,7 +697,7 @@ function compilemacro(ctx::CodeContext)
     label ∈ keys(ctx.macros) && lineerror(ctx, """Attempt to redefine macro $label""")
     eattok(ctx)
     eattok(ctx)
-    local expr = compile_julia(ctx)
+    local expr = parse_julia(ctx)
     expr.head != :-> &&
         lineerror(firstline, """Expected an arrow function ( (args)-> ... )""")
     println("MACRO $label: $expr")

@@ -58,22 +58,24 @@ align4  .imm align(4)
         everything in
         its string
         """
+fake_hello .fake ()-> println("FAKE HELLO WORLD")
 start   PHA
 ```
 
 ### Directives
 
-- `.include`: include a Julia file
-- `.data EXPR`: convert Julia result into bytes and add to memory
-- `.imm EXPR`: execute Julia expression on pass 1
-- `.julia EXPR`: execute Julia expression on pass 2
+- `.include`: include a Julia file.
+- `.data EXPR`: convert Julia result into bytes and add to memory.
+- `.imm EXPR`: execute Julia expression on pass 1, the `align` function should only be called within `.imm`, rather than `.julia`. This is evaluated at the top-level so you can define functions here if you like.
+- `.julia EXPR`: execute Julia expression on pass 2. This is evaluated at the top-level so you can define functions here if you like.
 - `.macro (ARGS)-> EXPR`: define an asm macro in Julia -- must return an AssemblyCode struct
 - `.value EXPR`: specify the value of a macro which gets assigned to the label on its call. This defaults to the first location the macro assembles.
+- `.fake ()-> EXPR`: define a fake routine that executes outside the emulator.
 
 ### Julia functions and macros
 
+- `align(boundarysize)`: align the current context to a byte boundary -- only call this within `.imm`.
 - `data(value)`: the `.data` directive uses this to compute a byte array from Julia data. You can add methods for your own types.
-- `align(boundarysize)`: align the current context to a byte boundary.
 - `asm"..."`: produce an AssemblyCode structure. \NAME is substituted with the current value of NAME. You can use `*` to concatenate AssemblyCode structures.
 - `noasm"..."`: project an empty AssemblyCode structure.
 

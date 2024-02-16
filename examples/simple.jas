@@ -30,4 +30,5 @@ align4  .imm align(4)
         everything in
         its string
         """
+fake_hello .fake ()-> println("FAKE HELLO")
 start   PHA
