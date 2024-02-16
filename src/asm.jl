@@ -267,7 +267,11 @@ eattok(ctx::CodeContext) = ctx.toks = @view ctx.toks[2:end]
 
 tok(ctx::CodeContext) = ctx.toks[1].match
 
-tokstr(ctx::CodeContext) = tokstr(ctx.line.line, ctx.toks[1], ctx.toks[end])
+tokstr(ctx::CodeContext) = tokstr(ctx, ctx.toks[1], ctx.toks[end])
+
+tokstr(ctx::CodeContext, toks::Vector{RegexMatch}) = tokstr(ctx.line.line, toks[1], toks[end])
+
+tokstr(ctx::CodeContext, tok1, tok2) = tokstr(ctx.line.line, tok1, tok2)
 
 tokstr(str, tok1, tok2) = @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
 
@@ -278,6 +282,8 @@ function lasttoks(ctx::CodeContext, items...)
     end
     return true
 end
+
+isincomplete(expr) = expr isa Expr && expr.head == :incomplete
 
 isdirective(ctx::CodeContext) =
     hastoks(ctx) && (ctx.toks[1].match ∈ directives || matches(call_pat, tok(ctx)))
@@ -411,8 +417,7 @@ asm_data(ctx::CodeContext) =
         eattok(ctx)
         println("DATA: $(tokstr(ctx))")
         local expr = Meta.parse(tokstr(ctx))
-        expr isa Expr &&
-            expr.head == :incomplete &&
+        isincomplete(expr) &&
             lineerror(ctx, """Incomplete expression: $(tokstr(ctx))""")
         local bytes = AsmTools.data(eval(ctx, expr))
         push!(ctx.funcs, () -> emitall(ctx, bytes))
@@ -424,9 +429,8 @@ asm_include(ctx::CodeContext) =
         eattok(ctx)
         try
             local expr = Meta.parse(tokstr(ctx))
-            if expr isa Expr && expr.head == :incomplete
+            isincomplete(expr) &&
                 error()
-            end
             local file = joinpath(ctx.pwd, eval(ctx, expr))
             eval(ctx, :(include($file)))
         catch
@@ -483,7 +487,7 @@ function parse_julia(ctx::CodeContext)
     while true
         try
             local expr = Meta.parse(programtext)
-            if expr isa Expr && expr.head == :incomplete
+            if isincomplete(expr)
                 local line = eatline(ctx)
                 isnothing(line) && error()
                 programtext *= '\n' * line.line
@@ -503,7 +507,8 @@ function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
     local progress = "compiling expression"
     try
         local expr = Meta.parse(exprstr)
-        expr isa Expr && expr.head == :incomplete && error()
+        isincomplete(expr) &&
+            error()
         push!(ctx.assigned, var)
         println("VAR: $(repr(var)) $(var == :(*)) <- $exprstr")
         local func =
@@ -599,26 +604,40 @@ function emitall(ctx::CodeContext, bytes::Vector{UInt8})
     ctx.offset += length(bytes)
 end
 
-function assemble(ctx::CodeContext, op, addr, exprs = :())
-    local opcode = opcodes[(op, addr)]
-    local bytes = addrmodebytes[addr]
-    local args = eval(ctx, exprs)
-    push!(
-        ctx.funcs,
-        () -> println(
-            "assemble $(rhex(ctx.offset)) ($op $addr)$(isempty(args) ? "" : " " * exprs) ->  $(join([rhex(opcode), args...], " "))",
-        ),
-    )
-    if bytes == 1
-        push!(ctx.funcs, () -> emit(ctx, opcode))
-    elseif bytes == 2
-        local a1 = args[1]
-        push!(ctx.funcs, () -> emit(ctx, opcode, a1))
-    elseif bytes == 3
-        local a1 = args[1]
-        local a2 = args[2]
-        push!(ctx.funcs, () -> emit(ctx, opcode, a1, a2))
+function assemble(ctx::CodeContext, op, addr, exprstr = "()")
+    local opcode = get(opcodes, (op, addr)) do
+        lineerror(ctx, """Illegal $op does not support addressing mode $addr""")
     end
+    local bytes = addrmodebytes[addr]
+    local expr = try
+        Meta.parse(exprstr)
+    catch
+        lineerror(ctx, """Could not parse argument for $op, '$exprstr'""")
+    end
+    isincomplete(expr) &&
+        lineerror(ctx, """Incomplete argument for $op, '$exprstr'""")
+    push!(ctx.funcs,
+          function()
+              local arg = eval(ctx, expr)
+              println(
+                  "assemble $(rhex(ctx.offset)) ($op $addr)$(exprstr == "()" ? "" : " $expr") ->  $(join([rhex(opcode), arg...], " "))",
+              )
+              if bytes == 1
+                  emit(ctx, opcode)
+              elseif bytes == 2
+                  local a = if addr != :rel
+                      UInt8(arg)
+                  elseif arg isa Union{UInt8, Int8}
+                      reinterpret(Int8, arg)
+                  else
+                      Int8(arg - ctx.offset)
+                  end
+                  emit(ctx, opcode, a)
+              elseif bytes == 3
+                  local a = UInt16(arg)
+                  emit(ctx, opcode, UInt8(a & 0xFF), UInt8(a >> 8))
+              end
+          end)
     ctx.offset += bytes
     true
 end
@@ -628,37 +647,40 @@ asm_op(ctx::CodeContext) =
         local op = Symbol(lowercase(tok(ctx)))
         local opname = uppercase(string(op))
         local modes = keys(opcodes)
-        local args = strip(tokstr(ctx))
+        eattok(ctx)
         if !isnothing(ctx.label)
-            ctx.label ∈ ctx.assigned && lineerror(ctx, """Redeclaring label $(ctx.label)""")
+            ctx.label ∈ ctx.assigned &&
+                lineerror(ctx, """Redeclaring label $(ctx.label)""")
             push!(ctx.labels, ctx.label)
             push!(ctx.assigned, ctx.label)
         end
-        eattok(ctx)
-        !hastoks(ctx) && (op, :imp) ∈ modes && return assemble(ctx, op, :imp)
-        !hastoks(ctx) && (op, :acc) ∈ modes && return assemble(ctx, op, :acc)
-        !hastoks(ctx) && lineerror(ctx, """No arguments for opcode $opname""")
-        op ∈ branch_ops && return assemble(ctx, op, :rel, args)
-        is(ctx, "#") && return assemble(ctx, op, :imm, args)
-        is(ctx, "(") &&
-            lasttoks(ctx, ")", ",", "y") &&
-            return assemble(ctx, op, :indy, args)
-        is(ctx, "(") &&
-            lasttoks(ctx, ",", "x", ")") &&
-            return assemble(ctx, op, :indx, args)
+        !hastoks(ctx) && (op, :imp) ∈ modes &&
+            return assemble(ctx, op, :imp)
+        !hastoks(ctx) && (op, :acc) ∈ modes &&
+            return assemble(ctx, op, :acc)
+        !hastoks(ctx) &&
+            lineerror(ctx, """No arguments for opcode $opname""")
+        op ∈ branch_ops &&
+            return assemble(ctx, op, :rel, tokstr(ctx))
+        is(ctx, "#") &&
+            return assemble(ctx, op, :imm, tokstr(ctx, ctx.toks[2:end]))
+        is(ctx, "(") && lasttoks(ctx, ")", ",", "y") &&
+            return assemble(ctx, op, :indy, tokstr(ctx, ctx.toks[2:end-3]))
+        is(ctx, "(") && lasttoks(ctx, ",", "x", ")") &&
+            return assemble(ctx, op, :indx, tokstr(ctx, ctx.toks[2:end-3]))
         #check for zpx as opposed to absx -- skip for now and assemble ,x as absolute,x
-        lasttoks(ctx, ",", "y") && return assemble(ctx, op, :absy, args)
-        lasttoks(ctx, ",", "x") && return assemble(ctx, op, :absx, args)
-        is(ctx, "(") &&
-            lasttoks(ctx, ")") &&
-            op == :jmp &&
-            return assemble(ctx, op, :ind, args)
-        is(ctx, "(") &&
-            lasttoks(ctx, ")") &&
+        lasttoks(ctx, ",", "y") &&
+            return assemble(ctx, op, :absy, tokstr(ctx, ctx.toks[2,end-2]))
+        lasttoks(ctx, ",", "x") &&
+            return assemble(ctx, op, :absx, tokstr(ctx, ctx.toks[2,end-2]))
+        is(ctx, "(") && lasttoks(ctx, ")") && op == :jmp &&
+            return assemble(ctx, op, :ind, tokstr(ctx, ctx.toks[2,end-1]))
+        is(ctx, "(") && lasttoks(ctx, ")") &&
             lineerror(ctx, """Only JMP can use indirect addressing but this is $opname""")
-        is(ctx, "(") && lineerror(ctx, """Incomplete indirect expression, $(tokstr(ctx))""")
+        is(ctx, "(") &&
+            lineerror(ctx, """Incomplete indirect expression, $(tokstr(ctx))""")
         # must be absolute
-        assemble(ctx, op, :abso, args)
+        assemble(ctx, op, :abso, tokstr(ctx))
     end
 
 """

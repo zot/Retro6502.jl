@@ -32,3 +32,5 @@ align4  .imm align(4)
         """
 fake_hello .fake ()-> println("FAKE HELLO")
 start   PHA
+        lda #2
+        
