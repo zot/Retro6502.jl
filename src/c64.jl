@@ -31,7 +31,6 @@ const SCREEN_WIDTH = 40 * 8
 const SCREEN_HEIGHT = 25 * 8
 const CHAR_OFFSETS = 1:40*25
 const CHAR_MEM = A(0x400) # to 0x7E8 -- character defs
-const AFTER_CHAR_MEM = A(0x400) # to 0x7E8 -- character defs
 const COLOR_MEM = A(0xD800) # to 0xDBE7 -- foreground colors of screen characters
 const CHAR_DEFS = A(0xD000)
 const BORDER = A(0xD020)
@@ -51,6 +50,7 @@ const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
 const VIC_MEM = A(0xD018)
 const VIC_BANK = A(0xDD00)
 const UPDATE_PERIOD = 1000000 ÷ 5
+
 revising = false
 
 color(value::Integer) = ((value >> 16, (value >> 8) & 0xFF, value & 0xff, 0xFF))
@@ -349,7 +349,7 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
     state.maxtime[] = state.rewinder.curtime
 end
 
-function init()
+function init(load::Function)
     state = C64_machine(;
         scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(
             scr_width,
@@ -371,23 +371,7 @@ function init()
     switch_banks(mach.newcpu, 0x07)
     Rewinding.init(state.rewinder, mach.newcpu, mach.temps)
     Rewinding.init_undo_session(state.rewinder, state.session)
-    labels = mach.labels
-    off, total = loadprg("$EDIR/condensed.prg", mach; labelfile = "$EDIR/condensed.labels")
-    println(
-        "Loaded ",
-        total,
-        " bytes at 0x",
-        string(off; base = 16, pad = 4),
-        ", ",
-        length(labels),
-        " labels",
-    )
-    print("labels:")
-    for name in sort([keys(labels)...])
-        @printf "\n  %04x %s" labels[name].value - 1 name
-    end
-    println()
-    println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
+    load(mach)
     labels = mach.labels
     lastlabel = Ref{Any}(nothing)
     labelcount = Ref(0)
@@ -395,7 +379,6 @@ function init()
     maxwid = max(length.(string.(keys(labels)))...)
     state.all_dirty = true
     update_screen(mach)
-    nextupdate = UPDATE_PERIOD
     mach.step = function (mach::Machine)
         global revising
 
@@ -675,14 +658,34 @@ end
 
 ticks(mach::Machine) = Fake6502m.ticks(mach.newcpu, mach.temps)
 
-function test_c64(; revise = false)
+function load_condensed(mach::Machine)
+    labels = mach.labels
+    off, total = loadprg("$EDIR/condensed.prg", mach; labelfile = "$EDIR/condensed.labels")
+    println(
+        "Loaded ",
+        total,
+        " bytes at 0x",
+        string(off; base = 16, pad = 4),
+        ", ",
+        length(labels),
+        " labels",
+    )
+    print("labels:")
+    for name in sort([keys(labels)...])
+        @printf "\n  %04x %s" labels[name].value - 1 name
+    end
+    println()
+    println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
+end
+
+function test_c64(; revise = false, load=load_condensed)
     global revising = revise
     local mach = nothing
     local state = nothing
     local task = nothing
 
     function init_c64()
-        mach = init()
+        mach = init(load)
         state = c64(mach)
         Threads.@spawn begin
             try

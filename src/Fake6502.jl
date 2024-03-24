@@ -1,3 +1,6 @@
+"""
+6502 8-bit microprocessor emulator and tools
+"""
 module Fake6502
 using Printf, StaticArrays
 using ProfileCanvas
@@ -44,8 +47,11 @@ import .Rewinding
 import .Rewinding: Rewinder
 include("fakes.jl")
 include("c64.jl")
+#include("ui.jl")
 include("asmtools.jl")
 include("asm.jl")
+include("worker.jl")
+include("repl.jl")
 
 run2(mach::Machine, temps::Temps, sym::Symbol, max_ticks::Int64) =
     run2(mach, temps, mach.labels[sym], max_ticks)

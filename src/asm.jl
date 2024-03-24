@@ -148,7 +148,6 @@ end
     env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16))))
     using ..AsmTools
     import ..Asm: @asm_str, @noasm_str
-    ctxeval(expr) = eval(expr)
     end))
     macros::Dict{Symbol,Macro} = Dict{Symbol,Macro}()
     funcs::Vector{Function} = Function[]
@@ -164,6 +163,7 @@ end
     pwd::String = pwd()
     macrovalue::UInt16 = 0
     fakes::Dict{Symbol,Tuple{Int,Function}} = Dict{Symbol,Tuple{Int,Function}}()
+    pass::Int = 0
 end
 
 CodeContext(ctx::CodeContext) = CodeContext(;
@@ -189,7 +189,6 @@ function subenv(ctx::CodeContext)
     using ....AsmTools
     import ....Asm
     import ....Asm: @asm_str, @noasm_str
-    ctxeval(expr) = eval(expr)
     end)
     local mod = eval(ctx, expr)
     importall(mod, ctx.env)
@@ -200,15 +199,15 @@ function importall(child::Module, parent::Module)
     local envnames = [
         n for n in names(parent, all = true) if !isempty(string(n)) &&
         !startswith(string(n), '#') &&
-        n ∉ (:eval, nameof(parent), :include, CTX, :*, :ctxeval) &&
-        !invokelatest(parent.ctxeval, :($n isa Module))
+        n ∉ (:eval, nameof(parent), :include, CTX, :*) &&
+        !Core.eval(parent, :($n isa Module))
     ]
     local imports = :(import ...$(nameof(parent)): x)
     pop!(imports.args[1].args)
     for n in envnames
         push!(imports.args[1].args, Expr(:., n))
     end
-    invokelatest(child.ctxeval, imports)
+    Core.eval(child, imports)
 end
 
 struct AssemblyCode
@@ -247,6 +246,8 @@ numtoks(ctx::CodeContext) = length(ctx.toks)
 
 hastoks(ctx::CodeContext) = !isempty(ctx.toks)
 
+hastoks(line::Line) = !isempty(line.tokens)
+
 function eatline(ctx::CodeContext)
     isempty(ctx.lines) && return
     setlines(ctx, ctx.lines)
@@ -267,11 +268,15 @@ eattok(ctx::CodeContext) = ctx.toks = @view ctx.toks[2:end]
 
 tok(ctx::CodeContext) = ctx.toks[1].match
 
+tok(line::Line) = line.tokens[1].match
+
 tokstr(ctx::CodeContext) = tokstr(ctx, ctx.toks[1], ctx.toks[end])
 
 tokstr(ctx::CodeContext, toks::Vector{RegexMatch}) = tokstr(ctx.line.line, toks[1], toks[end])
 
 tokstr(ctx::CodeContext, tok1, tok2) = tokstr(ctx.line.line, tok1, tok2)
+
+tokstr(line::Line) = tokstr(line.line, line.tokens[1], line.tokens[end])
 
 tokstr(str, tok1, tok2) = @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
 
@@ -281,6 +286,14 @@ function lasttoks(ctx::CodeContext, items...)
         lowercase(ctx.toks[end-i].match) != lowercase(items[end-i]) && return false
     end
     return true
+end
+
+function isincomplete(body::String)
+    try
+        body != "" && isincomplete(Meta.parse(body))
+    catch err
+        true
+    end
 end
 
 isincomplete(expr) = expr isa Expr && expr.head == :incomplete
@@ -293,6 +306,8 @@ isop(ctx::CodeContext) = hastoks(ctx) && lowercase(tok(ctx)) ∈ legal_ops
 iscall(ctx::CodeContext) = hastoks(ctx) && matches(call_pat, tokstr(ctx))
 
 is(ctx::CodeContext, str) = hastoks(ctx) && tok(ctx) == str
+
+is(line::Line, str) = hastoks(line) && tok(line) == str
 
 isident(ctx::CodeContext) = hastoks(ctx) && matches(ident_pat, tok(ctx))
 
@@ -330,10 +345,11 @@ function asm(str)
         function (ctx)
             println("ASSEMBLING, OFFSET: $(ctx.offset)")
             AsmTools.withcontext(ctx) do
+                ctx.pass = 1
                 setvar(ctx, CTX, ctx)
                 # pass 1
                 #println("@@@\n@@@PASS 1\n###")
-                remaining = compile_macros_pass1(ctx, lines)
+                local remaining = compile_macros_pass1(ctx, lines)
                 invokelatest() do
                     scan_asm_pass2(ctx, remaining)
                 end
@@ -343,6 +359,7 @@ function asm(str)
         function (ctx)
             # pass 2
             #println("@@@\n@@@PASS 2\n###")
+            ctx.pass = 2
             invokelatest() do
                 AsmTools.withcontext(ctx) do
                     for func in ctx.funcs
@@ -354,14 +371,14 @@ function asm(str)
     )
 end
 
-getvar(ctx::CodeContext, var::Symbol) = ctx.env.eval(var)
+eval(ctx::CodeContext, expr) = Core.eval(ctx.env, expr)
 
-eval(ctx::CodeContext, expr) = invokelatest(ctx.env.ctxeval, expr)
+getvar(ctx::CodeContext, var::Symbol) = eval(ctx, var)
 
 function setvar(ctx::CodeContext, var::Symbol, value)
     var == :(*) && return
     local argname = Symbol("_" * string(var))
-    invokelatest(eval(ctx, :(function ($argname)
+    invokelatest(eval(ctx, :(function ($argname,)
         global $var = $argname
     end)), value)
 end
@@ -389,7 +406,7 @@ function scan_asm_pass2(ctx::CodeContext, lines)
             ctx.label ∈ ctx.labels &&
             lineerror(ctx, """Attempt to reassign label $(ctx.label)""")
         !isnothing(ctx.label) && push!(ctx.labels, ctx.label)
-        for dir in [asm_op, asm_data, asm_julia, asm_include, asm_call, asm_value, asm_imm, asm_fake]
+        for dir in [asm_op, asm_data, asm_julia, asm_call, asm_value, asm_imm, asm_fake]
             dir(ctx) && @goto bottom
         end
         !isdirective(ctx) && lineerror(line, """Unknown directive, $(tokstr(ctx))""")
@@ -401,9 +418,11 @@ end
 function deflabel(ctx, value = ctx.offset)
     println("@@ LABEL $(ctx.label): $(rhex(value))")
     eval(ctx, :(const $(ctx.label) = $value))
+    local label = ctx.label
+    push!(ctx.funcs, ()-> println("LABEL $label: $(rhex(value))"))
 end
 
-assembleif(func::Function, ctx::CodeContext, pred::AbstractString) =
+assembleif(func::Function, ctx, pred::AbstractString) =
     assembleif(func, ctx, ctx -> is(ctx, pred))
 
 function assembleif(func, ctx, pred)
@@ -422,20 +441,6 @@ asm_data(ctx::CodeContext) =
         local bytes = AsmTools.data(eval(ctx, expr))
         push!(ctx.funcs, () -> emitall(ctx, bytes))
         ctx.offset += length(bytes)
-    end
-
-asm_include(ctx::CodeContext) =
-    assembleif(ctx, ".include") do
-        eattok(ctx)
-        try
-            local expr = Meta.parse(tokstr(ctx))
-            isincomplete(expr) &&
-                error()
-            local file = joinpath(ctx.pwd, eval(ctx, expr))
-            eval(ctx, :(include($file)))
-        catch
-            lineerror(ctx, """Error running .include directive: $(tokstr(ctx))""")
-        end
     end
 
 asm_julia(ctx::CodeContext) =
@@ -582,7 +587,7 @@ asm_assign(ctx::CodeContext) =
 function reset(ctx::CodeContext)
     ctx.offset = 0
     setdiff!(ctx.assigned, ctx.vars)
-    invokelatest(ctx.env.ctxeval, quote
+    eval(ctx, quote
         $((:($var = nothing) for var in ctx.vars)...)
     end)
 end
@@ -696,13 +701,37 @@ function compile_macros_pass1(ctx::CodeContext, lines)
             compilemacro(ctx)
             lines = ctx.lines
             l = 1
-        else
+            continue
+        elseif !asm_include(ctx, line, remain)
             push!(remain, line)
-            l += 1
         end
+        l += 1
     end
     return remain
 end
+
+"""
+include a file during pass 1
+"""
+asm_include(ctx::CodeContext, line::Line, lines::Vector{Line}) =
+    assembleif(line, ".include") do
+        try
+            local name = tokstr(line.line, line.tokens[2], line.tokens[end])
+            println("INCLUDE $name")
+            if endswith(name, ".jl")
+                local file = joinpath(ctx.pwd, name)
+                eval(ctx, :(include($file)))
+            elseif endswith(name, ".jas")
+                local file = joinpath(ctx.pwd, name)
+                for (n, line) in enumerate(readlines(open(file, "r")))
+                    push!(lines, tokenize(n, line))
+                end
+            end
+        catch err
+            @error "Error running .include directive: $(tokstr(line))" exception=(err,catch_backtrace())
+            lineerror(ctx, """Error running .include directive: $(tokstr(line))""")
+        end
+    end
 
 ismacrodecl(line::Line) = !isnothing(findfirst(m -> m.match == ".macro", line.tokens))
 

@@ -152,6 +152,7 @@ mutable struct Machine{T}
     cpu::Accessor{Context}
     emu::Accessor{Context}
     mem::Vector{UInt8}
+    #mem::AbstractVector{UInt8}
     read_mem::Function
     write_mem::Function
     step::Function
@@ -451,17 +452,15 @@ function run(mach::Machine, addr::Addr; max_ticks = 100)
     end
 end
 
-function loadprg(filename, mach::Machine; labelfile = "")
-    mem = mach.mem
+function loadprg(filename, mem::AbstractVector{T}, labels, addrs; labelfile = "") where {T <: UInt8}
     total = 1
     off = 0
     open(filename, "r") do io
         off = read(io, UInt16)
         while true
             buf = @view mem[off+total:end]
-            len = readbytes!(io, buf, length(buf))
+            len = readbytes!(io, buf)
             len <= 0 && break
-            mach.newcpu.memory[off+total:off+total+len-1] = buf[1:len]
             total += len
         end
     end
@@ -471,12 +470,18 @@ function loadprg(filename, mach::Machine; labelfile = "")
                 (_, addr, name) = split(line)
                 sym = Symbol(name[2:end])
                 addr = A(parse(Int, addr; base = 16))
-                mach.labels[sym] = addr
-                mach.addrs[addr] = sym
+                labels[sym] = addr
+                addrs[addr] = sym
             end
         end
     end
     return off, total - 1
+end
+
+function loadprg(filename, mach::Machine; labelfile = "")
+    local off, len = loadprg(filename, mach.mem, mach.labels, mach.addrs; labelfile)
+    mach.newcpu.memory[off:off+len-1] = mach.mem[off:off+len-1]
+    off, len
 end
 
 function reset(mach::Machine)

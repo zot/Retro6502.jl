@@ -1,6 +1,6 @@
 ;; semicolon is the comment character, except in .julia or .jmacro code, which uses normal Julia code
 
-        .include "simple-support.jl" ; contains the zorp function
+        .include simple-support.jl ; contains the zorp function
         .julia floop = "fred"
 *       = zorp(0x8000)
         .julia println("CURRENT PC: $(__CONTEXT__.offset)")
@@ -31,6 +31,4 @@ align4  .imm align(4)
         its string
         """
 fake_hello .fake ()-> println("FAKE HELLO")
-start   PHA
-        lda #2
-        
+        .include simple-inc.jas
