@@ -307,7 +307,7 @@ function switch_banks(cpu::Cpu{C64_machine}, value::UInt8)
 end
 
 "choose screen and character mem based on contents of VIC_BANK and "
-function update_vic_bank(mem::Vector{UInt8}, state::C64_machine)
+function update_vic_bank(mem::AbstractVector{UInt8}, state::C64_machine)
     state.all_dirty = true
     offset = A((3 - (mem[VIC_BANK] & 0xF)) << 14)
     state.screen_mem = offset + ((mem[VIC_MEM] & 0xF0) << 6)
@@ -451,7 +451,7 @@ function update_screen(mach::Machine)
     c.dirty_character_defs .= false
     c.all_dirty = false
     c.needs_update[] = false
-    println("dirty rects after update: ", c.dirty_rects)
+    @io println("dirty rects after update: ", c.dirty_rects)
 end
 
 struct Close <: Exception end
@@ -678,7 +678,7 @@ function load_condensed(mach::Machine)
     println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
 end
 
-function test_c64(; revise = false, load=load_condensed)
+function test_c64(load=load_condensed; revise = false)
     global revising = revise
     local mach = nothing
     local state = nothing

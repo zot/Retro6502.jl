@@ -171,8 +171,8 @@ const BASE_STACK = 0x100
     penaltyop::UInt8 = 0x00
     penaltyaddr::UInt8 = 0x00
     #memory::MVector{64K, UInt8} = zeros(MVector{64K, UInt8})
-    memory::Vector{UInt8} = zeros(UInt8, 64K)
-    #memory::AbstractVector{UInt8} = zeros(UInt8, 64K)
+    #memory::Vector{UInt8} = zeros(UInt8, 64K)
+    memory::AbstractVector{UInt8} = zeros(UInt8, 64K)
     user_data::T
 end
 

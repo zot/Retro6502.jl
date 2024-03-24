@@ -151,8 +151,8 @@ mutable struct Machine{T}
     ctx::Ptr{Context}
     cpu::Accessor{Context}
     emu::Accessor{Context}
-    mem::Vector{UInt8}
-    #mem::AbstractVector{UInt8}
+    #mem::Vector{UInt8}
+    mem::AbstractVector{UInt8}
     read_mem::Function
     write_mem::Function
     step::Function
@@ -452,7 +452,7 @@ function run(mach::Machine, addr::Addr; max_ticks = 100)
     end
 end
 
-function loadprg(filename, mem::AbstractVector{T}, labels, addrs; labelfile = "") where {T <: UInt8}
+function loadprg(filename, mem::AbstractVector{UInt8}, labels, addrs; labelfile = "")
     total = 1
     off = 0
     open(filename, "r") do io
@@ -507,10 +507,9 @@ function display_hex(mem::Vector{UInt8})
     end
 end
 
-display_chars(screen_mem::AbstractArray{T,1}) where {T<:UInt8} =
-    display_chars(identity, screen_mem)
+display_chars(screen_mem::AbstractArray{UInt8,1}) = display_chars(identity, screen_mem)
 
-function display_chars(cvt::Function, screen_mem::AbstractVector{T}) where {T<:UInt8}
+function display_chars(cvt::Function, screen_mem::AbstractVector{UInt8})
     println("+", join((x -> "-").(1:40), ""), "+")
     for i = 1:40:SCREEN_LEN
         println("|", String(cvt.(screen_mem[i:i+39])), "|")
