@@ -2,7 +2,7 @@
 
 julia_version = "1.10.2"
 manifest_format = "2.0"
-project_hash = "9b7cf277c9170edee31a4ef333d0741d327b7ae3"
+project_hash = "686a023df2a19af2573106ef9523a4ae4f39294f"
 
 [[deps.ATK_jll]]
 deps = ["Artifacts", "Glib_jll", "JLLWrappers", "Libdl"]
@@ -24,18 +24,6 @@ uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
-
-[[deps.BerkeleyDB_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "OpenSSL_jll", "Pkg"]
-git-tree-sha1 = "f48d60e42490ce5516a52b2963254a4732ba9942"
-uuid = "cd00e070-8fe2-570d-8212-aefc8f89bd06"
-version = "18.1.40+0"
-
-[[deps.BlueZ_jll]]
-deps = ["Artifacts", "Dbus_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libical_jll", "Pkg", "Readline_jll", "eudev_jll"]
-git-tree-sha1 = "d4c413db1759fa113135800ff2993ee01206126b"
-uuid = "471b5b61-da80-5748-8755-67d5084d21f2"
-version = "5.54.0+1"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -77,12 +65,6 @@ deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jl
 git-tree-sha1 = "4b859a208b2397a7a623a03449e4636bdb17bcf2"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
 version = "1.16.1+1"
-
-[[deps.Check_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "b5d7d180125b8d0f24bc4196f7fd53b7a0f48ea9"
-uuid = "491db154-c145-5abe-9c32-446728d60cce"
-version = "0.15.2+0"
 
 [[deps.CodeTracking]]
 deps = ["InteractiveUtils", "UUIDs"]
@@ -126,12 +108,6 @@ deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.6.0"
 
-[[deps.Elfutils_jll]]
-deps = ["Artifacts", "Bzip2_jll", "JLLWrappers", "Libdl", "XZ_jll", "Zlib_jll", "argp_standalone_jll", "fts_jll", "obstack_jll"]
-git-tree-sha1 = "ab92028799ddede63b16af075f8a053a2af04339"
-uuid = "ab5a07f8-06af-567f-a878-e8bb879eba5a"
-version = "0.189.0+1"
-
 [[deps.EpollShim_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "8e9441ee83492030ace98f9789a654a6d0b1f643"
@@ -143,24 +119,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "4558ab818dcceaab612d1bb8c19cee87eda2b83c"
 uuid = "2e619515-83b5-522b-bb60-26c02a35a201"
 version = "2.5.0+0"
-
-[[deps.FFMPEG_jll]]
-deps = ["Artifacts", "Bzip2_jll", "FreeType2_jll", "FriBidi_jll", "JLLWrappers", "LAME_jll", "Libdl", "Ogg_jll", "OpenSSL_jll", "Opus_jll", "PCRE2_jll", "Pkg", "Zlib_jll", "libaom_jll", "libass_jll", "libfdk_aac_jll", "libvorbis_jll", "x264_jll", "x265_jll"]
-git-tree-sha1 = "74faea50c1d007c85837327f6775bea60b5492dd"
-uuid = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
-version = "4.4.2+2"
-
-[[deps.FFTW_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "c6033cc3892d0ef5bb9cd29b7f2f0331ea5184ea"
-uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
-version = "3.3.10+0"
-
-[[deps.FLAC_jll]]
-deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Ogg_jll", "Pkg"]
-git-tree-sha1 = "8476481230247b3671a98f8b3072053bb001102a"
-uuid = "1d38b3a6-207b-531b-80e8-c83f48dafa73"
-version = "1.3.4+2"
 
 [[deps.FileIO]]
 deps = ["Pkg", "Requires", "UUIDs"]
@@ -207,46 +165,17 @@ git-tree-sha1 = "ff38ba61beff76b8f4acad8ab0c97ef73bb670cb"
 uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
 version = "3.3.9+0"
 
-[[deps.GMP_jll]]
-deps = ["Artifacts", "Libdl"]
-uuid = "781609d7-10c4-51f6-84f2-b8444358ff6d"
-version = "6.2.1+6"
-
-[[deps.GSL_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "56f1e2c9e083e0bb7cf9a7055c280beb08a924c0"
-uuid = "1b77fbbe-d8ee-58f0-85f9-836ddc23a7a4"
-version = "2.7.2+0"
-
-[[deps.GStreamer_jll]]
-deps = ["Artifacts", "Elfutils_jll", "GMP_jll", "GSL_jll", "Glib_jll", "JLLWrappers", "LibUnwind_jll", "Libdl", "Pkg", "libcap_jll"]
-git-tree-sha1 = "455c99eb5cd91f12943d48f54e34b26765867dc0"
-uuid = "aaaaf01e-2457-52c6-9fe8-886f7267d736"
-version = "1.20.3+0"
-
 [[deps.GTK3_jll]]
 deps = ["ATK_jll", "Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "FriBidi_jll", "Glib_jll", "HarfBuzz_jll", "JLLWrappers", "Libdl", "Libepoxy_jll", "Pango_jll", "Pkg", "Wayland_jll", "Xorg_libX11_jll", "Xorg_libXcomposite_jll", "Xorg_libXcursor_jll", "Xorg_libXdamage_jll", "Xorg_libXext_jll", "Xorg_libXfixes_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "Xorg_libXrender_jll", "at_spi2_atk_jll", "gdk_pixbuf_jll", "iso_codes_jll", "xkbcommon_jll"]
 git-tree-sha1 = "b080a592525632d287aee4637a62682576b7f5e4"
 uuid = "77ec8976-b24b-556a-a1bf-49a033a670a6"
 version = "3.24.31+0"
 
-[[deps.Gdbm_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "Readline_jll"]
-git-tree-sha1 = "64929c4ee6b015679b8fc9f2dc36f1b738f13abd"
-uuid = "54ca2031-c8dd-5cab-9ed4-295edde1660f"
-version = "1.19.0+0"
-
 [[deps.Gettext_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "XML2_jll"]
 git-tree-sha1 = "9b02998aba7bf074d14de89f9d37ca24a1a0b046"
 uuid = "78b55507-aeef-58d4-861c-77aaff3498b1"
 version = "0.21.0+0"
-
-[[deps.Giflib_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "8764bb28df7c47742f6838f7c9ed97f27232f472"
-uuid = "59f7168a-df46-5410-90c8-f2779963d0ec"
-version = "5.2.1+0"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Zlib_jll"]
@@ -283,12 +212,6 @@ deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll",
 git-tree-sha1 = "129acf094d168394e80ee1dc4bc06ec835e510a3"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "2.8.1+1"
-
-[[deps.ICU_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "6b1e49820922eca7bfc862442da6e54173a075b4"
-uuid = "a51ab1cf-af8e-5615-a023-bc2c838bba6b"
-version = "68.2.0+0"
 
 [[deps.ImGuiGLFWBackend]]
 deps = ["GLFW_jll", "LibCImGui", "Libdl"]
@@ -351,12 +274,6 @@ git-tree-sha1 = "04663b9e1eb0d0eabf76a6d0752e0dac83d53b36"
 uuid = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
 version = "0.9.28"
 
-[[deps.LAME_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "f6250b16881adf048549549fba48b1161acdac8c"
-uuid = "c1c5ebd0-6772-5130-a774-d5fcae4a789d"
-version = "3.100.1+0"
-
 [[deps.LERC_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "bf36f528eec6634efc60d7ec062008f171071434"
@@ -411,11 +328,6 @@ deps = ["Artifacts", "Libdl", "MbedTLS_jll"]
 uuid = "29816b5a-b9ab-546f-933c-edad1886dfa8"
 version = "1.11.0+1"
 
-[[deps.LibUnwind_jll]]
-deps = ["Artifacts", "Libdl"]
-uuid = "745a5e78-f969-53e9-954f-d19f2f74f4e3"
-version = "1.5.0+5"
-
 [[deps.Libdl]]
 uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 
@@ -449,12 +361,6 @@ git-tree-sha1 = "c333716e46366857753e273ce6a69ee0945a6db9"
 uuid = "7add5ba3-2f88-524e-9cd5-f83b8a55f7b8"
 version = "1.42.0+0"
 
-[[deps.Libical_jll]]
-deps = ["Artifacts", "BerkeleyDB_jll", "Glib_jll", "ICU_jll", "JLLWrappers", "Libdl", "Pkg", "XML2_jll"]
-git-tree-sha1 = "c61ffd9e8faf24c19a88f369f1966d53967824d1"
-uuid = "bce108ef-3f60-5dd0-bcd6-e13a096cb796"
-version = "3.0.9+0"
-
 [[deps.Libiconv_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "f9557a255370125b405568f9767d6d195822a175"
@@ -478,12 +384,6 @@ deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "LERC_jll", "Libdl", "Pkg",
 git-tree-sha1 = "3eb79b0ca5764d4799c06699573fd8f533259713"
 uuid = "89763e89-9b03-5906-acba-b20f662cd828"
 version = "4.4.0+0"
-
-[[deps.Libtool_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "9e203cfcfb41d49338cbc4134452c40e7f4c93f6"
-uuid = "a76c16ae-fb8f-5ff0-8826-da3b7a640f0b"
-version = "2.4.7+0"
 
 [[deps.Libuuid_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -538,12 +438,6 @@ git-tree-sha1 = "0877504529a3e5c3343c6f8b4c0381e57e4387e4"
 uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
 version = "1.0.2"
 
-[[deps.Ncurses_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "bd4eb207e17878ceec404e74130639b6dda8b63b"
-uuid = "68e3532b-a499-55ff-9963-d1c0c0748b3a"
-version = "6.4.1+0"
-
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
 version = "1.2.0"
@@ -552,12 +446,6 @@ version = "1.2.0"
 git-tree-sha1 = "7438a59546cf62428fc9d1bc94729146d37a7225"
 uuid = "510215fc-4207-5dde-b226-833fc4488ee2"
 version = "0.5.5"
-
-[[deps.Ogg_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "887579a3eb005446d514ab7aeac5d1d027658b8f"
-uuid = "e7412a2a-1a6e-54c0-be00-318e2571c051"
-version = "1.3.5+1"
 
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
@@ -569,18 +457,6 @@ deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
 version = "0.8.1+2"
 
-[[deps.OpenSSL_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "a12e56c72edee3ce6b96667745e6cbbe5498f200"
-uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
-version = "1.1.23+0"
-
-[[deps.Opus_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "51a08fb14ec28da2ec7a927c4337e4332c2a4720"
-uuid = "91d4177d-7536-5919-b921-800302f37372"
-version = "1.3.2+0"
-
 [[deps.OrderedCollections]]
 git-tree-sha1 = "dfdf5519f235516220579f949664f1bf44e741c5"
 uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
@@ -590,12 +466,6 @@ version = "1.6.3"
 deps = ["Artifacts", "Libdl"]
 uuid = "efcefdf7-47ab-520b-bdef-62a2eaa19f15"
 version = "10.42.0+1"
-
-[[deps.PCRE_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "b2a7af664e098055a7529ad1a900ded962bca488"
-uuid = "2f80f16e-611a-54ab-bc61-aa92de5b98fc"
-version = "8.44.0+0"
 
 [[deps.Pango_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "FriBidi_jll", "Glib_jll", "HarfBuzz_jll", "JLLWrappers", "Libdl"]
@@ -652,12 +522,6 @@ git-tree-sha1 = "64acb8d47eb0f7a3f9389fac00b4c7520b962e5c"
 uuid = "c46f51b8-102a-5cf2-8d2c-8597cb0e0da7"
 version = "1.7.2"
 
-[[deps.PulseAudio_jll]]
-deps = ["Artifacts", "BlueZ_jll", "Check_jll", "Dbus_jll", "FFTW_jll", "GStreamer_jll", "Gdbm_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libiconv_jll", "Libtool_jll", "OpenSSL_jll", "Pkg", "SBC_jll", "SoXResampler_jll", "SpeexDSP_jll", "alsa_jll", "eudev_jll", "libasyncns_jll", "libcap_jll", "libsndfile_jll"]
-git-tree-sha1 = "6554e7e66f37a699c2f53d9d6622969272b90408"
-uuid = "02771fc1-bdb7-5db5-8d11-300768e00fbd"
-version = "15.0.0+0"
-
 [[deps.REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "Unicode"]
 uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
@@ -665,12 +529,6 @@ uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 [[deps.Random]]
 deps = ["SHA"]
 uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-
-[[deps.Readline_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Ncurses_jll"]
-git-tree-sha1 = "9d70e0c890a6c7ca3eb1ca0eaabba4d34795b7fb"
-uuid = "05236dd9-4125-5232-aa7c-9ec0c9b2c25a"
-version = "8.2.1+0"
 
 [[deps.Reexport]]
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
@@ -700,36 +558,6 @@ git-tree-sha1 = "99acd97f396ea71a5be06ba6de5c9defe188a778"
 uuid = "d5f540fe-1c90-5db3-b776-2e2f362d9394"
 version = "1.1.0"
 
-[[deps.SBC_jll]]
-deps = ["Libdl", "Pkg", "libsndfile_jll"]
-git-tree-sha1 = "34755bff50b6b08988cdfe5fee69c1c1b24ff810"
-uuid = "da37f231-8920-5702-a09a-bdd970cb6ddc"
-version = "1.4.0+0"
-
-[[deps.SDL2_image_jll]]
-deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pkg", "SDL2_jll", "libpng_jll", "libwebp_jll"]
-git-tree-sha1 = "5fbbda81c5d2060d03f4b57348273774b6434e75"
-uuid = "41f3cfe1-fd11-58ad-8074-b9730c29438b"
-version = "2.6.2+1"
-
-[[deps.SDL2_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Pkg", "Xorg_libX11_jll", "Xorg_libXScrnSaver_jll", "Xorg_libXcursor_jll", "Xorg_libXext_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "alsa_jll", "alsa_plugins_jll"]
-git-tree-sha1 = "6639d9a9cbba6d384f51898339f2a5ffb2a14243"
-uuid = "ab825dc5-c88e-5901-9575-1e5e20358fcf"
-version = "2.24.2+1"
-
-[[deps.SDL2_mixer_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "SDL2_jll"]
-git-tree-sha1 = "e6fef90014a8b690dac99e066146a726c0a2c080"
-uuid = "7e88e5ca-120e-58e7-9660-b2187fd466c0"
-version = "2.6.2+0"
-
-[[deps.SDL2_ttf_jll]]
-deps = ["Artifacts", "Bzip2_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "PCRE_jll", "Pkg", "SDL2_jll", "libpng_jll"]
-git-tree-sha1 = "a24dbdfdb2ec29f00f05afdcd49de075c055745d"
-uuid = "ca9d4746-8a27-5104-babe-80f83b336947"
-version = "2.0.16+1"
-
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 version = "0.7.0"
@@ -747,18 +575,6 @@ uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 deps = ["Distributed", "Mmap", "Random", "Serialization"]
 uuid = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
 
-[[deps.SimpleDirectMediaLayer]]
-deps = ["CEnum", "ColorTypes", "SDL2_image_jll", "SDL2_jll", "SDL2_mixer_jll", "SDL2_ttf_jll", "alsa_plugins_jll"]
-git-tree-sha1 = "d42675612bace0108ae7a96eebc1682ab4bd9f9f"
-uuid = "98e33af6-2ee5-5afd-9e75-cbc738b767c4"
-version = "0.4.0"
-
-[[deps.SoXResampler_jll]]
-deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "a95ff1842456719a727e23fe28712eb26f7818b8"
-uuid = "fbe68eb6-6641-54c6-99e3-f7c7c4d73a57"
-version = "0.1.3+0"
-
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
 
@@ -766,12 +582,6 @@ uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
 deps = ["Libdl", "LinearAlgebra", "Random", "Serialization", "SuiteSparse_jll"]
 uuid = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 version = "1.10.0"
-
-[[deps.SpeexDSP_jll]]
-deps = ["Libdl", "Pkg"]
-git-tree-sha1 = "ecc65cb4a4e77f624deae8d881787c789af6deaf"
-uuid = "f2f9631b-9a4e-5b48-9975-88f638ec36a7"
-version = "1.2.0+0"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "PrecompileTools", "Random", "StaticArraysCore"]
@@ -847,23 +657,11 @@ git-tree-sha1 = "91844873c4085240b95e795f692c4cec4d805f8a"
 uuid = "aed1982a-8fda-507f-9586-7b0439959a61"
 version = "1.1.34+0"
 
-[[deps.XZ_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "522b8414d40c4cbbab8dee346ac3a09f9768f25d"
-uuid = "ffd25f8a-64ca-5728-b0f7-c24cf3aae800"
-version = "5.4.5+0"
-
 [[deps.Xorg_libX11_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libxcb_jll", "Xorg_xtrans_jll"]
 git-tree-sha1 = "afead5aba5aa507ad5a3bf01f58f82c8d1403495"
 uuid = "4f6342f7-b3d2-589e-9d20-edeb45f2b2bc"
 version = "1.8.6+0"
-
-[[deps.Xorg_libXScrnSaver_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "Xorg_libXext_jll"]
-git-tree-sha1 = "fb395c7e6739b27e6f3684fbccb41a2619c6b1ba"
-uuid = "41e2f9bb-6422-5ff7-a427-aa949331d861"
-version = "1.2.3+3"
 
 [[deps.Xorg_libXau_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -990,24 +788,6 @@ git-tree-sha1 = "37c9a36ccb876e02876c8a654f1b2e8c1b443a78"
 uuid = "b437f822-2cd6-5e08-a15c-8bac984d38ee"
 version = "3.33.92+5"
 
-[[deps.alsa_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "69859a01e7735ce5b49b1328827f6e3f4cdd7d19"
-uuid = "45378030-f8ea-5b20-a7c7-1a9d95efb90e"
-version = "1.2.5+0"
-
-[[deps.alsa_plugins_jll]]
-deps = ["Artifacts", "FFMPEG_jll", "JLLWrappers", "Libdl", "Pkg", "PulseAudio_jll", "alsa_jll", "libsamplerate_jll"]
-git-tree-sha1 = "a43b5bcdfadfbe06c42cd6b007572c4806f2c0f7"
-uuid = "5ac2f6bb-493e-5871-9171-112d4c21a6e7"
-version = "1.2.2+0"
-
-[[deps.argp_standalone_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "feaf9f6293003c2bf53056fd6930d677ed340b34"
-uuid = "c53206cc-00f7-50bf-ad1e-3ae1f6e49bc3"
-version = "1.3.1+0"
-
 [[deps.at_spi2_atk_jll]]
 deps = ["ATK_jll", "Artifacts", "JLLWrappers", "Libdl", "Pkg", "XML2_jll", "Xorg_libX11_jll", "at_spi2_core_jll"]
 git-tree-sha1 = "f16ae690aca4761f33d2cb338ee9899e541f5eae"
@@ -1020,29 +800,11 @@ git-tree-sha1 = "d2d540cd145f2b2933614649c029d222fe125188"
 uuid = "0fc3237b-ac94-5853-b45c-d43d59a06200"
 version = "2.34.0+4"
 
-[[deps.eudev_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "gperf_jll"]
-git-tree-sha1 = "431b678a28ebb559d224c0b6b6d01afce87c51ba"
-uuid = "35ca27e7-8b34-5b7f-bca9-bdc33f59eb06"
-version = "3.2.9+0"
-
-[[deps.fts_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "aa21810b841ae26d2fc7f780cb1596b4170a4c49"
-uuid = "d65627f6-89bd-53e8-8ab5-8b75ff535eee"
-version = "1.2.8+0"
-
 [[deps.gdk_pixbuf_jll]]
 deps = ["Artifacts", "Glib_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pkg", "Xorg_libX11_jll", "libpng_jll"]
 git-tree-sha1 = "e9190f9fb03f9c3b15b9fb0c380b0d57a3c8ea39"
 uuid = "da03df04-f53b-5353-a52f-6a8b0620ced0"
 version = "2.42.8+0"
-
-[[deps.gperf_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "3516a5630f741c9eecb3720b1ec9d8edc3ecc033"
-uuid = "1a1c6b14-54f6-533d-8383-74cd7377aa70"
-version = "3.1.1+0"
 
 [[deps.hicolor_icon_theme_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1056,40 +818,10 @@ git-tree-sha1 = "d837a5d2a19d54243dafb6cc98d0f590a603dfa1"
 uuid = "bf975903-5238-5d20-8243-bc370bc1e7e5"
 version = "4.15.1+0"
 
-[[deps.libaom_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "3a2ea60308f0996d26f1e5354e10c24e9ef905d4"
-uuid = "a4ae2306-e953-59d6-aa16-d00cac43593b"
-version = "3.4.0+0"
-
-[[deps.libass_jll]]
-deps = ["Artifacts", "Bzip2_jll", "FreeType2_jll", "FriBidi_jll", "HarfBuzz_jll", "JLLWrappers", "Libdl", "Pkg", "Zlib_jll"]
-git-tree-sha1 = "5982a94fcba20f02f42ace44b9894ee2b140fe47"
-uuid = "0ac62f75-1d6f-5e53-bd7c-93b484bb37c0"
-version = "0.15.1+0"
-
-[[deps.libasyncns_jll]]
-deps = ["Libdl", "Pkg"]
-git-tree-sha1 = "38a54b0ebad9bc225a38106ff66b7827fac5bd9e"
-uuid = "ed080073-db63-57db-a029-74e11ae80737"
-version = "0.8.0+0"
-
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
 version = "5.8.0+1"
-
-[[deps.libcap_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "500e32aac3dda306137e6dc09675a3fdbef91c41"
-uuid = "eef66a8b-8d7a-5724-a8d2-7c31ae1e29ed"
-version = "2.51.0+1"
-
-[[deps.libfdk_aac_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "daacc84a041563f965be61859a36e17c4e4fcd55"
-uuid = "f638f0a6-7fb0-5443-88ba-1cc74229b280"
-version = "2.0.2+0"
 
 [[deps.libpng_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Zlib_jll"]
@@ -1097,57 +829,15 @@ git-tree-sha1 = "93284c28274d9e75218a416c65ec49d0e0fcdf3d"
 uuid = "b53b4c65-9356-5827-b1ea-8c7a1a84506f"
 version = "1.6.40+0"
 
-[[deps.libsamplerate_jll]]
-deps = ["Libdl", "Pkg"]
-git-tree-sha1 = "45ba80d9b0a208fd5165d159d93a3725fab0d76b"
-uuid = "9427e74d-4e05-59c1-8ff3-7d74b6e52ac8"
-version = "0.1.9+0"
-
-[[deps.libsndfile_jll]]
-deps = ["Artifacts", "FLAC_jll", "JLLWrappers", "Libdl", "Ogg_jll", "Opus_jll", "Pkg", "alsa_jll", "libvorbis_jll"]
-git-tree-sha1 = "f35a5fbfb2b18ff837dec4594c7e096ac6604154"
-uuid = "5bf562c0-5a39-5b4f-b979-f64ac885830c"
-version = "1.1.0+0"
-
-[[deps.libvorbis_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Ogg_jll", "Pkg"]
-git-tree-sha1 = "b910cb81ef3fe6e78bf6acee440bda86fd6ae00c"
-uuid = "f27f6e37-5d2b-51aa-960f-b287f2bc3b7a"
-version = "1.3.7+1"
-
-[[deps.libwebp_jll]]
-deps = ["Artifacts", "Giflib_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libglvnd_jll", "Libtiff_jll", "libpng_jll"]
-git-tree-sha1 = "5ccac27b0046c38e66d435b89a440527c1ab8418"
-uuid = "c5f90fcd-3b7e-5836-afba-fc50a0988cb2"
-version = "1.3.2+0"
-
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850ede-7688-5339-a07c-302acd2aaf8d"
 version = "1.52.0+1"
 
-[[deps.obstack_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "5353d2b8d19b8ed8d972a4bed38fff85d27f7f73"
-uuid = "c88a4935-d25e-5644-aacc-5db6f1b8ef79"
-version = "1.2.3+0"
-
 [[deps.p7zip_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 version = "17.4.0+2"
-
-[[deps.x264_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "4fea590b89e6ec504593146bf8b988b2c00922b2"
-uuid = "1270edf5-f2f9-52d2-97e9-ab00b5d0237a"
-version = "2021.5.5+0"
-
-[[deps.x265_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "ee567a171cce03570d77ad3a43e90218e38937a9"
-uuid = "dfaa095f-4041-5dcd-9319-2fabd8486b76"
-version = "3.5.0+0"
 
 [[deps.xkbcommon_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "Wayland_jll", "Wayland_protocols_jll", "Xorg_libxcb_jll", "Xorg_xkeyboard_config_jll"]

@@ -10,8 +10,8 @@
         end
 mac     .macro (a)-> asm"""
         .julia println("Hello \a")
-        .data "hello"
-blub    .value blub
+        .data "hello \a"
+blub    .value blub # value is next address after the macro
         """
 joe
 fred    #mac maluba

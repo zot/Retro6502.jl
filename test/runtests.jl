@@ -55,8 +55,8 @@ using JSON3
 using Test
 using Printf
 using Fake6502
-using Fake6502: rhex, Fake6502m, NewMachine, Machine
-import .Fake6502m: Cpu, step6502, read6502, write6502, addrsyms, opsyms, FLAG_DECIMAL, Temps, status
+using Fake6502: rhex, Fake6502m, NewMachine, Machine, status
+import Fake6502.Fake6502m: Cpu, step6502, read6502, write6502, addrsyms, opsyms, FLAG_DECIMAL, Temps
 
 const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp, :s, :s), (:status, :p, :flags))
 
@@ -280,8 +280,14 @@ function runtests(dir; mode=:data)
     end
 end
 
+function test_asm()
+    # asm simple.jas, compare to simple.prg
+end
+
+test_asm()
+#runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"))
+
 #runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"); mode=:fake)
-runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"))
 #runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"), 0x10)
 
 #@testset "test instructions" begin

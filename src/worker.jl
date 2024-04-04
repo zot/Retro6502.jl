@@ -11,9 +11,11 @@ module Workers
 using Distributed, SharedArrays
 using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM
 using ..C64: C64, @io, @printf, BASIC_ROM
+using ..Asm: Asm, CodeContext
 
 # the current worker
 worker = nothing
+ctx = Ref{Union{CodeContext,Nothing}}(nothing)
 
 @kwdef mutable struct Worker
     id::Int
@@ -40,7 +42,17 @@ function loadprg(filename, labelfile)
     labels, addrs, off, len
 end
 
-# TESTING
+function asmfile(filename)
+    global ctx = Asm.asmfile(filename)
+    worker.memory[ctx.min:ctx.max] = ctx.memory[ctx.min:ctx.max]
+    nothing
+end
+
+# EXTERNAL API
+
+function asmfile(w::Worker, filename)
+    fetch(@spawnat w.id asmfile(filename))
+end
 
 function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
     w.memory .= mach.newcpu.memory
@@ -50,6 +62,8 @@ function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
     merge!(mach.addrs, addrs)
     off, total
 end
+
+# TESTING
 
 load_condensed(w::Worker) = (mach::Machine)-> begin
     off, total = loadprg(w, mach, "$EDIR/condensed.prg"; labelfile = "$EDIR/condensed.labels")

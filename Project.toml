@@ -14,7 +14,6 @@ REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 ReplMaker = "b873ce64-0db9-51f5-a568-4457d8e49576"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 SharedArrays = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
-SimpleDirectMediaLayer = "98e33af6-2ee5-5afd-9e75-cbc738b767c4"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 

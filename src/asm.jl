@@ -93,7 +93,8 @@ fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine
 ```
 =#
 module Asm
-import ..Fake6502: K, M, G, rhex, register
+using Printf
+import ..Fake6502: K, M, G, hex, rhex, register
 using ..Fake6502m: addrsyms, opsyms
 using ..AsmTools
 
@@ -125,6 +126,7 @@ const directives = Set([legal_ops..., dot_cmds...])
 const macro_arg_sep = r"(?<!\\),"
 const macro_ref_pat = r"\\\w+"
 const CTX = :__CONTEXT__
+const OptSym = Union{Symbol,Nothing}
 
 matches(r, s) = !isnothing(match(r, s))
 
@@ -144,6 +146,15 @@ struct Macro
     func::Function
 end
 
+struct ListingLine
+    type::Symbol
+    addr::UInt16
+    label::OptSym
+    bytes::Int
+    line::Line
+    extra_lines::Vector{Line}
+end
+
 @kwdef mutable struct CodeContext
     env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16))))
     using ..AsmTools
@@ -156,14 +167,18 @@ end
     lines::AbstractVector{Line} = Line[]
     line::Line = Line(0, "", RegexMatch[])
     toks::Vector{RegexMatch} = RegexMatch[]
-    label::Union{Symbol,Nothing} = nothing
+    label::OptSym = nothing
     assigned::Set{Symbol} = Set{Symbol}() # variables which have been assigned
     offset::UInt16 = 0 # next address to emit into
     memory::Vector{UInt8} = zeros(UInt8, 64K)         # 64K memory array
     pwd::String = pwd()
     macrovalue::UInt16 = 0
+    macrolabel::OptSym = nothing
     fakes::Dict{Symbol,Tuple{Int,Function}} = Dict{Symbol,Tuple{Int,Function}}()
     pass::Int = 0
+    min::Int = 64K
+    max::Int = 0
+    listing::Vector{ListingLine} = ListingLine[]
 end
 
 CodeContext(ctx::CodeContext) = CodeContext(;
@@ -175,6 +190,9 @@ CodeContext(ctx::CodeContext) = CodeContext(;
     ctx.memory,
     ctx.pwd,
     macrovalue = ctx.offset,
+    ctx.listing,
+    ctx.label,
+    ctx.line,
 )
 
 function subenv(ctx::CodeContext)
@@ -216,6 +234,14 @@ struct AssemblyCode
 end
 
 AssemblyCode() = AssemblyCode(() -> nothing, () -> nothing)
+
+incoffset(ctx::CodeContext, off) = setoffset(ctx, ctx.offset + off)
+
+function setoffset(ctx::CodeContext, off)
+    ctx.min = min(ctx.min, off)
+    ctx.max = max(ctx.max, off)
+    ctx.offset = off
+end
 
 function assemble(ctx::CodeContext, code::AssemblyCode)
     AsmTools.withcontext(ctx) do
@@ -270,15 +296,19 @@ tok(ctx::CodeContext) = ctx.toks[1].match
 
 tok(line::Line) = line.tokens[1].match
 
-tokstr(ctx::CodeContext) = tokstr(ctx, ctx.toks[1], ctx.toks[end])
+tokstr(ctx::CodeContext) = tokstr(ctx, ctx.toks)
 
-tokstr(ctx::CodeContext, toks::Vector{RegexMatch}) = tokstr(ctx.line.line, toks[1], toks[end])
+tokstr(ctx::CodeContext, toks::RegexMatch...) = tokstr(ctx.line.line, toks...)
 
-tokstr(ctx::CodeContext, tok1, tok2) = tokstr(ctx.line.line, tok1, tok2)
+tokstr(line::Line) = tokstr(line.line, line.tokens)
 
-tokstr(line::Line) = tokstr(line.line, line.tokens[1], line.tokens[end])
+tokstr(line::Line, toks::RegexMatch...) = tokstr(line.line, toks...)
 
-tokstr(str, tok1, tok2) = @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
+tokstr(line::ListingLine, toks::RegexMatch...) = tokstr(line.line.line, toks...)
+
+tokstr(thing, toks::Vector{RegexMatch}) = tokstr(thing, toks[1], toks[end])
+
+tokstr(str::AbstractString, tok1, tok2) = @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
 
 function lasttoks(ctx::CodeContext, items...)
     length(ctx.toks) < length(items) && return false
@@ -333,6 +363,7 @@ function asmfile(file)
     local ctx = CodeContext(; pwd = dirname(file))
     local assembly = asm(read(file, String))
     assemble(ctx, assembly)
+    listings(ctx, file)
     return ctx
 end
 
@@ -399,7 +430,12 @@ function scan_asm_pass2(ctx::CodeContext, lines)
             eattok(ctx)
             # set the label to the current offset
             ctx.label != :* && !iscall(ctx) && !is(ctx, ".imm") && !is(ctx, ".fake") && deflabel(ctx)
-            !hastoks(ctx) && continue
+            if !hastoks(ctx)
+                if ctx.label != :*
+                    add_listing(ctx, :def)
+                end
+                continue
+            end
         end
         asm_assign(ctx) && continue
         !isnothing(ctx.label) &&
@@ -437,23 +473,33 @@ asm_data(ctx::CodeContext) =
         println("DATA: $(tokstr(ctx))")
         local expr = Meta.parse(tokstr(ctx))
         isincomplete(expr) &&
-            lineerror(ctx, """Incomplete expression: $(tokstr(ctx))""")
+            lineerror(ctx, """Incomplete expression: $(tokstr(ctx))\n  EXPR: '$expr'""")
         local bytes = AsmTools.data(eval(ctx, expr))
-        push!(ctx.funcs, () -> emitall(ctx, bytes))
-        ctx.offset += length(bytes)
+        local tmpctx = CodeContext(ctx)
+        push!(ctx.funcs, () -> begin
+            add_listing(tmpctx, :data, length(bytes))
+            println("EMIT BYTES: $bytes, LINE: $(tmpctx.line.line)")
+            emitall(ctx, bytes)
+        end)
+        incoffset(ctx, length(bytes))
     end
 
 asm_julia(ctx::CodeContext) =
     assembleif(ctx, ".julia") do
         eattok(ctx)
-        local expr = parse_julia(ctx)
-        push!(ctx.funcs, () -> eval(ctx, expr))
+        local expr, extra = parse_julia(ctx)
+        local tmpctx = CodeContext(ctx)
+        add_listing(tmpctx, :julia, extra)
+        push!(ctx.funcs, () -> begin
+            eval(ctx, expr)
+        end)
     end
 
 asm_imm(ctx::CodeContext) =
     assembleif(ctx, ".imm") do
         eattok(ctx)
-        local expr = parse_julia(ctx)
+        local expr, extra = parse_julia(ctx)
+        add_listing(ctx, :imm, extra)
         eval(ctx, expr)
         !isnothing(ctx.label) && deflabel(ctx)
     end
@@ -461,7 +507,7 @@ asm_imm(ctx::CodeContext) =
 asm_fake(ctx::CodeContext) =
     assembleif(ctx, ".fake") do
         eattok(ctx)
-        local expr = parse_julia(ctx)
+        local expr, extra = parse_julia(ctx)
         (expr.head ∉ (:function, :->) || expr.args[1] != :(())) &&
             lineerror(ctx, """.fake expects a zero-argument function""")
         isnothing(ctx.label) &&
@@ -469,6 +515,7 @@ asm_fake(ctx::CodeContext) =
         local index = 0xFFFF - length(ctx.fakes)
         local label = ctx.label
         deflabel(ctx, index)
+        add_listing(ctx, :fake, extra)
         ctx.fakes[ctx.label] = (index, ()->nothing)
         push!(ctx.funcs, ()-> ctx.fakes[label] = (index, eval(ctx, expr)))
     end
@@ -476,10 +523,16 @@ asm_fake(ctx::CodeContext) =
 asm_value(ctx::CodeContext) =
     assembleif(ctx, ".value") do
         eattok(ctx)
+        local tmpctx = CodeContext(ctx)
         !isnothing(ctx.label) && deflabel(ctx)
-        local expr = parse_julia(ctx)
+        local expr, extra = parse_julia(ctx)
+        isnothing(ctx.macrolabel) &&
+            return
         try
             ctx.macrovalue = eval(ctx, expr)
+            if !isnothing(ctx.macrolabel)
+                add_listing(ctx, :value, ctx.macrovalue, ctx.macrolabel, 0, ctx.line)
+            end
             println("SET MACRO VALUE TO $(ctx.macrovalue)")
         catch
             lineerror(ctx, """Error calculating macro value""")
@@ -488,17 +541,19 @@ asm_value(ctx::CodeContext) =
 
 function parse_julia(ctx::CodeContext)
     local firstlines = ctx.lines
+    local extra = Line[]
     local programtext = ctx.line.line[ctx.toks[1].offset:end]
     while true
         try
             local expr = Meta.parse(programtext)
             if isincomplete(expr)
                 local line = eatline(ctx)
+                push!(extra, line)
                 isnothing(line) && error()
                 programtext *= '\n' * line.line
                 continue
             end
-            return expr
+            return expr, extra
         catch
             setlines(ctx, firstlines)
             lineerror(ctx, """Error parsing Julia code:\n$programtext""")
@@ -510,6 +565,7 @@ end
 function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
     local var = ctx.label
     local progress = "compiling expression"
+    local line = ctx.line
     try
         local expr = Meta.parse(exprstr)
         isincomplete(expr) &&
@@ -518,11 +574,14 @@ function assign_var(ctx::CodeContext, exprstr, wrapper = identity)
         println("VAR: $(repr(var)) $(var == :(*)) <- $exprstr")
         local func =
             var == :* ? wrapper(() -> begin
-                ctx.offset = ctx.env.eval(expr)
+                setoffset(ctx, ctx.env.eval(expr))
                 println("SET OFFSET TO $(rhex(ctx.offset))")
-            end) : wrapper(() -> invokelatest(ctx.env.eval(:(function ()
-                global $var = $expr
-            end))))
+            end) : wrapper(() -> begin
+                add_listing(ctx, :assign, var, 0, line)
+                invokelatest(ctx.env.eval(:(function ()
+                    global $var = $expr
+                end)))
+            end)       
         # push the func for pass 3
         push!(ctx.funcs, func)
         # execute the func for the rest of this pass
@@ -548,19 +607,27 @@ asm_call(ctx::CodeContext) =
         )
         try
             println("ASSEMBLING $macname CALL")
+            local oldctx = CodeContext(ctx)
             local tmpctx = CodeContext(ctx)
             local assembly = mac.func(args...)
+            tmpctx.macrolabel = ctx.label
             println("CALL MACRO, TMP OFFSET: $(tmpctx.offset)")
             assembly.pass1(tmpctx)
+            setoffset(ctx, tmpctx.offset)
             tmpctx.offset = ctx.offset
             !isnothing(ctx.label) && deflabel(ctx, tmpctx.macrovalue)
             println("PUSHING $macname's FUNC")
             push!(ctx.funcs, function ()
+                if tmpctx.macrovalue != 0
+                    add_listing(oldctx, :call; remove_label=true)
+                else
+                    add_listing(oldctx, :call)
+                end
                 #local tmpctx = CodeContext(ctx)
                 importall(tmpctx.env, ctx.env)
                 println("CALLING $macname's FUNC")
                 assembly.pass2(tmpctx)
-                ctx.offset = tmpctx.offset
+                setoffset(ctx, tmpctx.offset)
             end)
         catch err
             @error "$err" exception = (err, catch_backtrace())
@@ -586,6 +653,8 @@ asm_assign(ctx::CodeContext) =
 
 function reset(ctx::CodeContext)
     ctx.offset = 0
+    ctx.min = 64K
+    ctx.max = 0
     setdiff!(ctx.assigned, ctx.vars)
     eval(ctx, quote
         $((:($var = nothing) for var in ctx.vars)...)
@@ -596,7 +665,7 @@ function emit(ctx::CodeContext, bytes::UInt8...)
     local start = ctx.offset
     for byte in bytes
         ctx.memory[ctx.offset+1] = byte
-        ctx.offset += 1
+        incoffset(ctx, 1)
     end
     println("$(rhex(start)): $(join([rhex(byte) for byte in bytes], " "))")
 end
@@ -605,8 +674,8 @@ function emitall(ctx::CodeContext, bytes::Vector{UInt8})
     println(
         "EMIT $(rhex(ctx.offset)): $(length(bytes)) byte$(length(bytes) != 1 ? "s" : "")",
     )
-    copy!(@view(ctx.memory[ctx.offset+1:length(bytes)+ctx.offset]), bytes)
-    ctx.offset += length(bytes)
+    @view(ctx.memory[ctx.offset+1:ctx.offset+length(bytes)]) .= bytes
+    incoffset(ctx, length(bytes))
 end
 
 function assemble(ctx::CodeContext, op, addr, exprstr = "()")
@@ -621,12 +690,14 @@ function assemble(ctx::CodeContext, op, addr, exprstr = "()")
     end
     isincomplete(expr) &&
         lineerror(ctx, """Incomplete argument for $op, '$exprstr'""")
+    local tmpctx = CodeContext(ctx)
     push!(ctx.funcs,
           function()
               local arg = eval(ctx, expr)
               println(
-                  "assemble $(rhex(ctx.offset)) ($op $addr)$(exprstr == "()" ? "" : " $expr") ->  $(join([rhex(opcode), arg...], " "))",
+                  "assemble $(rhex(ctx.offset)) ($op $addr)$(exprstr == "()" ? "" : " $expr") ->  $(join([rhex(opcode), arg...], " ")), line: $(tmpctx.line)",
               )
+              add_listing(tmpctx, :opcode, bytes)
               if bytes == 1
                   emit(ctx, opcode)
               elseif bytes == 2
@@ -643,7 +714,7 @@ function assemble(ctx::CodeContext, op, addr, exprstr = "()")
                   emit(ctx, opcode, UInt8(a & 0xFF), UInt8(a >> 8))
               end
           end)
-    ctx.offset += bytes
+    incoffset(ctx, bytes)
     true
 end
 
@@ -716,6 +787,7 @@ include a file during pass 1
 asm_include(ctx::CodeContext, line::Line, lines::Vector{Line}) =
     assembleif(line, ".include") do
         try
+            add_listing(ctx, :include)
             local name = tokstr(line.line, line.tokens[2], line.tokens[end])
             println("INCLUDE $name")
             if endswith(name, ".jl")
@@ -748,13 +820,88 @@ function compilemacro(ctx::CodeContext)
     label ∈ keys(ctx.macros) && lineerror(ctx, """Attempt to redefine macro $label""")
     eattok(ctx)
     eattok(ctx)
-    local expr = parse_julia(ctx)
+    local expr, extra = parse_julia(ctx)
     expr.head != :-> &&
         lineerror(firstline, """Expected an arrow function ( (args)-> ... )""")
     println("MACRO $label: $expr")
+    add_listing(ctx, :macro, extra)
     local macargs = expr.args[1]
     ctx.macros[label] =
         Macro(macargs isa Symbol ? [macargs] : [expr.args[1].args...], eval(ctx, expr))
+end
+
+add_listing(ctx::CodeContext, type::Symbol, extra::Vector{Line}; remove_label=false) =
+    add_listing(ctx, type, ctx.offset, ctx.label, 0, ctx.line, extra; remove_label)
+
+add_listing(ctx::CodeContext, type::Symbol, bytes = 0; remove_label=false) =
+    add_listing(ctx, type, ctx.offset, ctx.label, bytes, ctx.line; remove_label)
+
+add_listing(ctx::CodeContext, type::Symbol, label::OptSym, bytes, line::Line; remove_label=false) =
+    add_listing(ctx, type, ctx.offset, label, bytes, line; remove_label)
+
+function add_listing(ctx::CodeContext, type::Symbol, addr::UInt16, label::OptSym, bytes, line::Line, extra = ListingLine[]; remove_label=false)
+    if remove_label && !isnothing(label)
+        label = nothing
+        line = isempty(line.tokens) ? Line(line.number, "", RegexMatch[]) :
+            tokenize(line.number, tokstr(line, line.tokens[2], line.tokens[end]))
+    end
+    #if type == :def && !isnothing(ctx.label) && ctx.macrovalue != 0
+    #    addr = ctx.macrovalue
+    #end
+    listing = ListingLine(type, addr, label, bytes, line, extra)
+    push!(ctx.listing, listing)
+    if type == :opcode
+        println("ADD OPCODE LISTING $listing")
+        for line in extra
+            println("           LISTING $line")
+        end
+    end
+end
+
+function listings(ctx::CodeContext, file)
+    println("LISTINGS FOR $file[$(hex(ctx.min)):$(hex(ctx.max))]")
+    for line in sort(ctx.listing, by=l->l.addr)
+        local label = string(something(line.label, ""))
+        local toks = line.line.tokens
+        toks = toks[(isempty(label) ? 1 : 2):end]
+        local text = isempty(toks) ? line.line.line : tokstr(line, toks)
+        local bytes = @view(ctx.memory[line.addr + 1:line.addr + line.bytes])
+        local hexbytes = join(rhex.(bytes), " ")
+        #local type = rpad(line.type, 8)
+        local type = ""
+
+        if line.type == :def
+            @printf("=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, "")
+        elseif line.type == :data
+            @printf(">%s%04x  %-32s%-12s%s\n", type, line.addr, hexbytes, label, text)
+        elseif line.type == :julia
+            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        elseif line.type == :macro
+            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        elseif line.type == :imm
+            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        elseif line.type == :fake
+            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        elseif line.type == :value
+            @printf("=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        elseif line.type == :assign
+            @printf("=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        elseif line.type == :call
+            @printf("#%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        elseif line.type == :opcode
+            local op = line.line.tokens[isempty(label) ? 1 : 2].match
+
+            #println("OP\n  LINE: $line\n  BYTES: $hexbytes")
+            if length(bytes) == 2
+                op *= " $(bytes[2])"
+            elseif length(bytes) == 3
+                op *= " $(bytes[2] | (UInt16(bytes[3]) << 8))"
+            end
+            @printf(".%s%04x  %-15s%-17s%-12s%s\n", type, line.addr, hexbytes, op, label, text)
+        elseif line.type == :include
+            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+        end
+    end
 end
 
 test() = asmfile(joinpath(dirname(dirname(@__FILE__)), "examples", "simple.jas"))

@@ -34,10 +34,10 @@ mprintln(::Any, args...) = println(args...)
 
 dbyte(byte::UInt8) = "$(rhex(byte)) '$(screen2ascii(byte))'"
 
-status(s, mask = 0xFF) = join([
+status(s, mask = 0xFF) = join((
     s & (1 << (8 - i)) != 0 ? n : lowercase(n) for
     (i, n) in enumerate("NVXBDIZC") if (1 << (8 - i)) & mask != 0
-])
+))
 
 include("emu.jl")
 import .Fake6502m: Cpu, Temps, setticks, ticks, pc, incpc, setpc, base_inner_step6502, ticks

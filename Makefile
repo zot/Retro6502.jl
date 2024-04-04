@@ -44,6 +44,9 @@ c64-revise: default $(PRGS) FRC
 worker: default $(PRGS) FRC
 	julia -t 6 --project=. -e 'using Fake6502; Fake6502.Workers.test_worker()'
 
+asm: default $(PRGS) FRC
+	julia -t 6 --project=. -e 'using Fake6502; Fake6502.Asm.test()'
+
 resources:
 	mkdir -p resources
 

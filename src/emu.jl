@@ -1154,7 +1154,7 @@ end
 
 function jam(cpu, temps)
     #cpu.pc -= 0x1
-    temps = incpc(cpu, temps, -1)
+    temps = incpc(cpu, temps, Int16(-1))
     return addticks(cpu, temps, 1)
 end
 
