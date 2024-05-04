@@ -1,3 +1,4 @@
+using Base: fileurl
 #=
 Example test data:
 
@@ -56,7 +57,9 @@ using Test
 using Printf
 using Fake6502
 using Fake6502: rhex, Fake6502m, NewMachine, Machine, status
-import Fake6502.Fake6502m: Cpu, step6502, read6502, write6502, addrsyms, opsyms, FLAG_DECIMAL, Temps
+import Fake6502.Fake6502m: Cpu, step6502, read6502, write6502, addrsyms
+import Fake6502.Fake6502m: opsyms, FLAG_DECIMAL, Temps
+import Fake6502.Asm: asmfile
 
 const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp, :s, :s), (:status, :p, :flags))
 
@@ -280,11 +283,26 @@ function runtests(dir; mode=:data)
     end
 end
 
-function test_asm()
-    # asm simple.jas, compare to simple.prg
+function test_asm(dir::AbstractString)
+    for filename in ["simple"]
+        local tassfile = joinpath(dir, "$filename.tass")
+        local jasfile = joinpath(dir, "$filename.jas")
+
+        # asm simple.jas, compare to simple.prg
+        dir = mktempdir(; cleanup=false)
+        path = joinpath(dir, filename)
+        println("@@@\n@@@  PATH:$(path)\n@@@")
+        run(`64tass --cbm-prg -o $path-tass.prg -L $path-tass.list -l $path-tass.labels $tassfile`)
+        asmfile(jasfile; output = "$path-jas", list = true)
+        expectedbytes = read("$path-tass.prg")
+        actualbytes = read("$path-jas.prg")
+        @test expectedbytes == actualbytes
+        rm(dir; recursive=true)
+    end
 end
 
-test_asm()
+@testset "test assembly" test_asm(joinpath(dirname(realpath(@__FILE__)), "test-asm-files"))
+
 #runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"))
 
 #runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"); mode=:fake)

@@ -53,6 +53,9 @@ include("asm.jl")
 include("worker.jl")
 include("repl.jl")
 
+using .AsmRepl: repl
+export repl
+
 run2(mach::Machine, temps::Temps, sym::Symbol, max_ticks::Int64) =
     run2(mach, temps, mach.labels[sym], max_ticks)
 run2(mach::Machine, temps::Temps, addr::Addr, max_ticks::Int64) =

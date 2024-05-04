@@ -13,7 +13,7 @@ using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM
 using ..C64: C64, @io, @printf, BASIC_ROM
 using ..Asm: Asm, CodeContext
 
-# the current worker
+# this worker
 worker = nothing
 ctx = Ref{Union{CodeContext,Nothing}}(nothing)
 

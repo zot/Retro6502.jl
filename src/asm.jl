@@ -93,7 +93,7 @@ fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine
 ```
 =#
 module Asm
-using Printf
+using Printf, Dates
 import ..Fake6502: K, M, G, hex, rhex, register
 using ..Fake6502m: addrsyms, opsyms
 using ..AsmTools
@@ -238,8 +238,6 @@ AssemblyCode() = AssemblyCode(() -> nothing, () -> nothing)
 incoffset(ctx::CodeContext, off) = setoffset(ctx, ctx.offset + off)
 
 function setoffset(ctx::CodeContext, off)
-    ctx.min = min(ctx.min, off)
-    ctx.max = max(ctx.max, off)
     ctx.offset = off
 end
 
@@ -359,12 +357,26 @@ macro noasm_str(str)
     :($AssemblyCode())
 end
 
-function asmfile(file)
+function asmfile(file; list::Bool = false, output = replace(file, r".jas$" => ""))
     local ctx = CodeContext(; pwd = dirname(file))
     local assembly = asm(read(file, String))
+
     assemble(ctx, assembly)
-    listings(ctx, file)
+    list && listings(ctx, "$output.list")
+    if !isnothing(output)
+        write("$output.prg", prgbytes(ctx))
+    end
     return ctx
+end
+
+function prgbytes(ctx::CodeContext)
+    local len = ctx.max - ctx.min
+    local bytes = zeros(UInt8, len + 2)
+
+    bytes[1] = UInt8(ctx.min & 0xFF)
+    bytes[2] = UInt8(ctx.min >> 8 & 0xFF)
+    bytes[3:end] .= @views ctx.memory[ctx.min + 1:ctx.max]
+    bytes
 end
 
 """
@@ -663,10 +675,14 @@ end
 
 function emit(ctx::CodeContext, bytes::UInt8...)
     local start = ctx.offset
+
+    isempty(bytes) && return
+    ctx.min = min(ctx.min, ctx.offset)
     for byte in bytes
         ctx.memory[ctx.offset+1] = byte
         incoffset(ctx, 1)
     end
+    ctx.max = max(ctx.max, ctx.offset)
     println("$(rhex(start)): $(join([rhex(byte) for byte in bytes], " "))")
 end
 
@@ -674,8 +690,10 @@ function emitall(ctx::CodeContext, bytes::Vector{UInt8})
     println(
         "EMIT $(rhex(ctx.offset)): $(length(bytes)) byte$(length(bytes) != 1 ? "s" : "")",
     )
+    ctx.min = min(ctx.min, ctx.offset)
     @view(ctx.memory[ctx.offset+1:ctx.offset+length(bytes)]) .= bytes
     incoffset(ctx, length(bytes))
+    ctx.max = max(ctx.max, ctx.offset)
 end
 
 function assemble(ctx::CodeContext, op, addr, exprstr = "()")
@@ -691,6 +709,7 @@ function assemble(ctx::CodeContext, op, addr, exprstr = "()")
     isincomplete(expr) &&
         lineerror(ctx, """Incomplete argument for $op, '$exprstr'""")
     local tmpctx = CodeContext(ctx)
+    println("ASSEMBLE $op ($addr) $exprstr $bytes bytes")
     push!(ctx.funcs,
           function()
               local arg = eval(ctx, expr)
@@ -858,48 +877,57 @@ function add_listing(ctx::CodeContext, type::Symbol, addr::UInt16, label::OptSym
     end
 end
 
+trimlines(str) = join((strip(line) for line in split(str, "\n")), "\n")
+
 function listings(ctx::CodeContext, file)
     println("LISTINGS FOR $file[$(hex(ctx.min)):$(hex(ctx.max))]")
-    for line in sort(ctx.listing, by=l->l.addr)
-        local label = string(something(line.label, ""))
-        local toks = line.line.tokens
-        toks = toks[(isempty(label) ? 1 : 2):end]
-        local text = isempty(toks) ? line.line.line : tokstr(line, toks)
-        local bytes = @view(ctx.memory[line.addr + 1:line.addr + line.bytes])
-        local hexbytes = join(rhex.(bytes), " ")
-        #local type = rpad(line.type, 8)
-        local type = ""
+    open(file, "w") do io
+        println(io, trimlines("""
+            ; JAS Julia-based 6502 Assembler
+            ; jas $(join(ARGS, " "))
+            ; $(now())
+        """))
+        for line in sort(ctx.listing, by=l->l.addr)
+            local label = string(something(line.label, ""))
+            local toks = line.line.tokens
+            toks = toks[(isempty(label) ? 1 : 2):end]
+            local text = isempty(toks) ? line.line.line : tokstr(line, toks)
+            local bytes = @view(ctx.memory[line.addr + 1:line.addr + line.bytes])
+            local hexbytes = join(rhex.(bytes), " ")
+            #local type = rpad(line.type, 8)
+            local type = ""
 
-        if line.type == :def
-            @printf("=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, "")
-        elseif line.type == :data
-            @printf(">%s%04x  %-32s%-12s%s\n", type, line.addr, hexbytes, label, text)
-        elseif line.type == :julia
-            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
-        elseif line.type == :macro
-            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
-        elseif line.type == :imm
-            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
-        elseif line.type == :fake
-            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
-        elseif line.type == :value
-            @printf("=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
-        elseif line.type == :assign
-            @printf("=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
-        elseif line.type == :call
-            @printf("#%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
-        elseif line.type == :opcode
-            local op = line.line.tokens[isempty(label) ? 1 : 2].match
-
-            #println("OP\n  LINE: $line\n  BYTES: $hexbytes")
-            if length(bytes) == 2
-                op *= " $(bytes[2])"
-            elseif length(bytes) == 3
-                op *= " $(bytes[2] | (UInt16(bytes[3]) << 8))"
+            if line.type == :def
+                @printf(io, "=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, "")
+            elseif line.type == :data
+                @printf(io, ">%s%04x  %-32s%-12s%s\n", type, line.addr, hexbytes, label, text)
+            elseif line.type == :julia
+                @printf(io, "@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+            elseif line.type == :macro
+                @printf(io, "@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+            elseif line.type == :imm
+                @printf(io, "@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+            elseif line.type == :fake
+                @printf(io, "@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+            elseif line.type == :value
+                @printf(io, "=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+            elseif line.type == :assign
+                @printf(io, "=%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+            elseif line.type == :call
+                @printf(io, "#%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
+            elseif line.type == :opcode
+                local op = line.line.tokens[isempty(label) ? 1 : 2].match
+                
+                #println("OP\n  LINE: $line\n  BYTES: $hexbytes")
+                if length(bytes) == 2
+                    op *= " $(bytes[2])"
+                elseif length(bytes) == 3
+                    op *= " $(bytes[2] | (UInt16(bytes[3]) << 8))"
+                end
+                @printf(io, ".%s%04x  %-15s%-17s%-12s%s\n", type, line.addr, hexbytes, op, label, text)
+            elseif line.type == :include
+                @printf(io, "@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
             end
-            @printf(".%s%04x  %-15s%-17s%-12s%s\n", type, line.addr, hexbytes, op, label, text)
-        elseif line.type == :include
-            @printf("@%s%04x  %-32s%-12s%s\n", type, line.addr, "", label, text)
         end
     end
 end

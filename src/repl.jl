@@ -10,7 +10,6 @@ There are additional directives:
 .save FILE           save local program to FILE (see .edit and .load)
 .list                list the current program
 .edit                run ENV["EDITOR"] on local program and reload afterwards (see .load and .save)
-.clear               delete current program
 .status              print the current machine status
 .diag                show status and list all break and watch points
 .run [LOCATION]      assemble local program and continue (optionally from LOCATION)
@@ -30,6 +29,7 @@ The REPL manages its own UI along with workers for assembly and execution.
 """
 module AsmRepl
 
+using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
 using ..Fake6502m: opsyms
@@ -38,7 +38,7 @@ using REPL: LineEdit, CompletionProvider
 using ReplMaker
 
 const COMMENT_PAT = r"^\s*;.*"
-const DIRECTIVE_PAT = r"^\s*(?:([a-z0-9_]+)\s+)?(\.?[a-z]+)\b"si
+const DIRECTIVE_PAT = r"^\s*(?:([a-z0-9_]+)\s+)?(\.?[a-z]+)\b|^\s*(\.)\s*$"si
 const LOAD_PAT = r"^\s*(\+w\s+)?(\S.*)?$"
 const SAVE_PAT = r"^\s*(\-f\s+)?(\S.*)?$"
 
@@ -62,24 +62,27 @@ function cmd_status() end
 function cmd_step() end
 function cmd_watch() end
 const ASM_CMDS = Set(string.(opsyms))
-const REPL_CMDS = Dict(
-    ".break" => cmd_break,
-    ".clear" => cmd_clear,
-    ".del" => cmd_del,
-    ".diag" => cmd_diag,
-    ".edit" => cmd_edit,
-    ".help" => cmd_help,
-    ".list" => cmd_list,
-    ".load" => cmd_load,
-    ".next" => cmd_next,
-    ".run" => cmd_run,
-    ".reset" => cmd_reset,
-    ".save" => cmd_save,
-    ".show" => cmd_show,
-    ".status" => cmd_status,
-    ".step" => cmd_step,
-    ".watch" => cmd_watch,
-)
+const DEFS = [
+    ".break" => (cmd_break, "RANGE [EXPR]", "break when execution enters RANGE if optional EXPR is true", ".b"),
+    ".clear" => (cmd_clear, "", "erase memory and local program"),
+    ".del" => (cmd_del, "", "delete break and watch points at RANGE", ".d"),
+    ".diag" => (cmd_diag, "", "show status and list all break and watch points"),
+    ".edit" => (cmd_edit, "", "run ENV[\"EDITOR\"] on local program and reload afterwards (see .load and .save)", ".e"),
+    ".help" => (cmd_help, "", "show documentation on REPL directives", "."),
+    ".list" => (cmd_list, "", "list the current program", ".l"),
+    ".load" => (cmd_load, "FILE", "load FILE as local program (see .edit and .save)"),
+    ".next" => (cmd_next, "[LOCATION]", "perform one step (optiaonlly from LOCATION) -- if it's a JSR, break upon return", ".n"),
+    ".run" => (cmd_run, "[LOCATION]", "assemble local program and continue (optionally from LOCATION)", ".r"),
+    ".reset" => (cmd_reset, "", "clear machine state so that the next .run will start fresh"),
+    ".save" => (cmd_save, "FILE", "save local program to FILE (see .edit and .load)"),
+    ".show" => (cmd_show, "", "show the UI"),
+    ".status" => (cmd_status, "", "print the current machine status"),
+    ".step" => (cmd_step, "[LOCATION]", "perform one step (optionally from LOCATION)", ".s"),
+    ".watch" => (cmd_watch, "RANGE [EXPR]", "break whenever RANGE changes if optional EXPR is true", ".w"),
+]
+const REPL_CMDS = Dict(Iterators.flatten(
+    (length(d) == 3 ? [k=>(k, d...)] : [k=>(k, d...), last(d)=>(k, d...)])
+    for (k,d) in DEFS))
 const DIRECTIVES = sort([keys(REPL_CMDS)..., dot_cmds...])
 const ALL_CMDS = sort!([
     ASM_CMDS...,
@@ -113,6 +116,7 @@ function repl(specialization::Type = Nothing)
         mode_name="ASM_mode",
         completion_provider=ctx,
     )
+    ctx
 end
 
 function LineEdit.complete_line(::ReplContext, state)
@@ -142,7 +146,8 @@ function handle_command(ctx::ReplContext, line)
     local body = line[length(prefix) + 1:end]
     if haskey(REPL_CMDS, cmd)
         println("REPL CMD: $cmd")
-        REPL_CMDS[cmd](ctx, cmd, strip(body))
+        local (cmd, func) = REPL_CMDS[cmd]
+        func(ctx, cmd, strip(body))
     else
         cmd_asm(ctx, label, cmd, prefix, body, line)
     end
@@ -183,7 +188,15 @@ function cmd_edit(ctx::ReplContext, cmd, args)
 end
 
 function cmd_help(ctx::ReplContext, cmd, args)
-    println("HELP $args")
+    local lines = [
+        "COMMAND               ALIAS  DESCRIPTION"
+    ]
+
+    for (cmd,def) in DEFS
+        push!(lines, @sprintf "%-23s%-5s%s" cmd * " " * def[2] (length(def) == 3 ? "" : def[4]) def[3])
+    end
+    push!(lines, "CTRL-C                      pause current execution")
+    print(join(lines, "\n"))
 end
 
 function cmd_list(ctx::ReplContext, _, _)

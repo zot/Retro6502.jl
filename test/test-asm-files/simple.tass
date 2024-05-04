@@ -1,0 +1,3 @@
+;; semicolon is the comment character, except in .julia or .jmacro code, which uses normal Julia code
+start   PHA
+        lda #2
