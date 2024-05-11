@@ -1,0 +1,6 @@
+*       = 0x0801
+burp    .data words(rel"+", 10)  ;pointer, line number
+blah    .null 0x9e, @sprintf("%d", start) ;will be sys 2061
++       .data word(0)        ;basic line end
+
+start   lda #0x2f

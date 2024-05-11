@@ -283,25 +283,27 @@ function runtests(dir; mode=:data)
     end
 end
 
-function test_asm(dir::AbstractString)
-    for filename in ["simple"]
+function test_asm(dir::AbstractString; cleanup=true)
+    tmpdir = mktempdir(; cleanup)
+    for filename in ["simple", "labeled"]
         local tassfile = joinpath(dir, "$filename.tass")
         local jasfile = joinpath(dir, "$filename.jas")
 
         # asm simple.jas, compare to simple.prg
-        dir = mktempdir(; cleanup=false)
-        path = joinpath(dir, filename)
-        println("@@@\n@@@  PATH:$(path)\n@@@")
+        path = joinpath(tmpdir, filename)
+        !cleanup && println("@@@\n@@@  PATH:$(path)\n@@@")
         run(`64tass --cbm-prg -o $path-tass.prg -L $path-tass.list -l $path-tass.labels $tassfile`)
-        asmfile(jasfile; output = "$path-jas", list = true)
+        local ctx = asmfile(jasfile; output = "$path-jas", list = true, verbose = true)
         expectedbytes = read("$path-tass.prg")
         actualbytes = read("$path-jas.prg")
-        @test expectedbytes == actualbytes
-        rm(dir; recursive=true)
+        println("Expected $(length(expectedbytes)) bytes, got $(length(actualbytes))")
+        println("min: $(ctx.min), max: $(ctx.max)")
+        println("LISTING\n", read("$tmpdir/$filename-jas.list", String))
+        @test rhex(expectedbytes) == rhex(actualbytes)
     end
 end
 
-@testset "test assembly" test_asm(joinpath(dirname(realpath(@__FILE__)), "test-asm-files"))
+@testset "test assembly" test_asm(joinpath(dirname(realpath(@__FILE__)), "test-asm-files"); cleanup=false)
 
 #runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"))
 

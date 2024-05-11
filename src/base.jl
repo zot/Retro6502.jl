@@ -238,9 +238,11 @@ end
 hex(num::Union{UInt8,Int8}) = hex(num, 2)
 hex(num::Union{UInt16,Int16}) = hex(num, 4)
 hex(num::Integer, pad = num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base = 16), pad, "0")
+hex(vec::AbstractVector) = "0x" * join(rhex.(vec))
 rhex(num::Union{UInt8,Int8}) = rhex(num, 2)
 rhex(num::Union{UInt16,Int16}) = rhex(num, 4)
 rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(string(num; base = 16), pad, "0")
+rhex(vec::AbstractVector) = join(rhex.(vec))
 
 function call_step(mach::Machine)
     #mprintln(mach, "CALLING STEP")
@@ -518,3 +520,11 @@ function display_chars(cvt::Function, screen_mem::AbstractVector{UInt8})
 end
 
 const CONDENSE_START = 2850
+
+function asmerr(ctx, msg)
+    error("Assembly error on line $(ctx.line.number) [$(ctx.line.line)]: $msg")
+end
+
+function asmwarn(ctx, msg)
+    println(stderr, "Warning: for line $(ctx.line.number) [$(ctx.line.line)]: $msg")
+end
