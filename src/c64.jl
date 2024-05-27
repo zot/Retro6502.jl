@@ -4,9 +4,9 @@ using ..Fake6502
 using ..Fake6502:
     Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502:
-    ROM, init_rom, Addr, AddrRange, intRange, hex, call_step, SCREEN_CODES, screen2ascii
+    ROM, init_rom, Addr, AddrRange, intRange, hex, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
-using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte
+using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte, call_fake
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
 using ..Fake6502.Fake6502m: Cpu
 import ..Fake6502.Fake6502m: read6502, write6502
@@ -112,6 +112,9 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     session::RewindSession = RewindSession()
     maxtime::Atomic{UInt64} = Atomic{UInt64}(0)
     curtime::Atomic{UInt64} = Atomic{UInt64}(0)
+    #anything higher than this address is a fake routine
+    fake_base::UInt16 = 0xFFFF
+    fake_routines::Dict{Addr,Function}
 end
 
 function pause(f::Function, c::C64_machine)
@@ -225,6 +228,16 @@ c64_set_mem(cpu::Cpu{C64_machine}, addr::Addr, byte::UInt8) =
     c64_set_mem(cpu, UInt16(addr.value - 0x01), byte)
 c64_set_mem(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
     Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
+
+function Fake6502m.jsr(cpu::Cpu{C64_machine}, temps)
+    mach = c64(cpu)
+    Fake6502m.pc(cpu, temps) <= mach.fake_base &&
+        return Fake6502m.base_jsr(cpu, temps)
+    # jumping to fake routine
+    temps = Fake6502m.incpc(cpu, temps, 0x3)
+    mprintln(mach, "FAKE ROUTINE")
+    return mach.fake_routines[A(Fake6502m.pc(cpu, temps))](cpu, temps)::Fake6502m.Temps
+end
 
 function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
     state = c64(cpu)

@@ -1,41 +1,6 @@
 using Printf
 export reset, step
 
-struct Addr
-    value::UInt32
-    Addr(a::Integer) = new(a + 1)
-end
-
-struct AddrRange
-    first::Addr
-    last::Addr
-end
-
-# 1-based addresses
-A(x::Integer) = Addr(UInt32(x))
-A(v::AbstractRange) = Addr(first(v)):Addr(last(v))
-A(v::AbstractVector) = Addr.(v)
-
-intRange(r::AddrRange) = r.first.value:r.last.value
-Base.in(addr::Addr, r::AddrRange) = addr.value ∈ r.first.value:r.last.value
-Base.:(:)(a::Addr, b::Addr) = AddrRange(a, b)
-Base.first(r::AddrRange) = r.first
-Base.last(r::AddrRange) = r.last
-Base.length(r::AddrRange) = r.last.value - r.first.value + 1
-Base.hash(r::AddrRange, h::UInt64) = Base.hash(intRange(r), h)
-
-Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
-Base.show(io::IO, addr::Addr) =
-    print(io, "Addr(0x", lpad(string(UInt16(addr.value) - 1; base = 16), 4, "0"), ")")
-Base.:(>>)(a::Addr, i::UInt64) = Addr((a.value - 1) >> i)
-Base.:(<<)(a::Addr, i::UInt64) = Addr((a.value - 1) << i)
-Base.:(<)(a::Addr, b::Addr) = a.value < b.value
-Base.:(-)(a::Addr, b::Addr) = a.value - 1 - b.value
-Base.:(-)(a::Addr, i::Integer) = Addr(a.value - 1 - i)
-Base.:(-)(i::Integer, a::Addr) = Addr(a.value - 1 - i)
-Base.:(+)(a::Addr, i::Integer) = Addr(a.value - 1 + i)
-Base.:(+)(i::Integer, a::Addr) = Addr(a.value - 1 + i)
-
 const JSR = 0x20
 const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.so"))
 #const fake6502_init = Base.Libc.Libdl.dlsym(lib, :fake6502_init)
@@ -244,9 +209,7 @@ rhex(num::Union{UInt16,Int16}) = rhex(num, 4)
 rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(string(num; base = 16), pad, "0")
 rhex(vec::AbstractVector) = join(rhex.(vec))
 
-function call_step(mach::Machine)
-    #mprintln(mach, "CALLING STEP")
-    #diag(mach)
+function call_fake(mach::Machine)
     if mach[pc(mach)] === JSR
         # check for fake routine
         addr = A(mach[pc(mach)+1] + (UInt16(mach[pc(mach)+2]) << 8))
@@ -256,9 +219,17 @@ function call_step(mach::Machine)
             mprintln(mach, "FAKE ROUTINE")
             mach.fake_routines[addr](mach)
             incpc(mach, 3)
-            return
+            return true
         end
     end
+    return false
+end
+
+function call_step(mach::Machine)
+    #mprintln(mach, "CALLING STEP")
+    #diag(mach)
+    call_fake(mach) &&
+        return
     #mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
     mach.step(mach)
     mach.verbose && diag(mach)

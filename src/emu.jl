@@ -170,12 +170,14 @@ const BASE_STACK = 0x100
     # making these booleans is slower than using UInt8
     penaltyop::UInt8 = 0x00
     penaltyaddr::UInt8 = 0x00
-    #memory::MVector{64K, UInt8} = zeros(MVector{64K, UInt8})
-    #memory::Vector{UInt8} = zeros(UInt8, 64K)
     memory::AbstractVector{UInt8} = zeros(UInt8, 64K)
     user_data::T
 end
 
+"""
+Passing an immutable Temps structure instead of changing certain fields
+in the mutable Cpu struct improves performance
+"""
 @kwdef struct Temps
     # registers
     pc::UInt16 = 0x0000
@@ -1165,7 +1167,9 @@ function jmp(cpu, temps)
     #temps
 end
 
-function jsr(cpu, temps)
+jsr(cpu, temps) = base_jsr(cpu, temps)
+
+function base_jsr(cpu, temps)
     local oldsp = cpu.sp
     #TEST_COMPAT && (cpu.pc - 0x0001) != 0x0100 | oldsp && # not in page zero
     TEST_COMPAT &&

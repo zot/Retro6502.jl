@@ -94,7 +94,7 @@ fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine
 =#
 module Asm
 using Printf, Dates
-using ...Fake6502: K, M, G, hex, rhex, register, asmerr, asmwarn
+using ...Fake6502: K, M, G, hex, rhex, register, asmerr, asmwarn, matches
 using ..Fake6502m: addrsyms, opsyms
 using ..AsmTools
 
@@ -127,8 +127,6 @@ const macro_arg_sep = r"(?<!\\),"
 const macro_ref_pat = r"\\\w+"
 const CTX = :__CONTEXT__
 const OptSym = Union{Symbol,Nothing}
-
-matches(r, s) = !isnothing(match(r, s))
 
 struct CodeChunk
     label_offsets::Dict{String,Int} # offsets for any labels this code defines
@@ -719,6 +717,7 @@ asm_fake(ctx::CodeContext) =
         ctx.fakes[ctx.label] = (index, ()->nothing)
         pushfunc!(ctx, 4) do
             ctx.fakes[label] = (index, eval(ctx, expr))
+            ctx.min = min(ctx.min, index)
         end
     end
 
@@ -1028,8 +1027,6 @@ asm_include(ctx::CodeContext, line::Line, lines::Vector{Line}) =
     end
 
 ismacrodecl(line::Line) = !isnothing(findfirst(m -> m.match == ".macro", line.tokens))
-
-isfakedecl(line::Line) = !isnothing(findfirst(m -> m.match == ".fake", line.tokens))
 
 lineerror(ctx::Union{ListingContext,CodeContext}, msg) = lineerror(ctx.line, msg)
 

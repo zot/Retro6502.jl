@@ -33,6 +33,7 @@ using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
 using ..Fake6502m: opsyms
+using ...Fake6502: matches
 using REPL
 using REPL: LineEdit, CompletionProvider
 using ReplMaker
@@ -125,7 +126,7 @@ function LineEdit.complete_line(::ReplContext, state)
 end
 
 function handle_command(ctx::ReplContext, line)
-    if !isnothing(match(COMMENT_PAT, line))
+    if matches(COMMENT_PAT, line)
         push!(ctx.lines, line)
         return nothing
     end

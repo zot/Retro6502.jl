@@ -39,6 +39,43 @@ status(s, mask = 0xFF) = join((
     (i, n) in enumerate("NVXBDIZC") if (1 << (8 - i)) & mask != 0
 ))
 
+struct Addr
+    value::UInt32
+    Addr(a::Integer) = new(a + 1)
+end
+
+struct AddrRange
+    first::Addr
+    last::Addr
+end
+
+# 1-based addresses
+A(x::Integer) = Addr(UInt32(x))
+A(v::AbstractRange) = Addr(first(v)):Addr(last(v))
+A(v::AbstractVector) = Addr.(v)
+
+intRange(r::AddrRange) = r.first.value:r.last.value
+Base.in(addr::Addr, r::AddrRange) = addr.value ∈ r.first.value:r.last.value
+Base.:(:)(a::Addr, b::Addr) = AddrRange(a, b)
+Base.first(r::AddrRange) = r.first
+Base.last(r::AddrRange) = r.last
+Base.length(r::AddrRange) = r.last.value - r.first.value + 1
+Base.hash(r::AddrRange, h::UInt64) = Base.hash(intRange(r), h)
+
+Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
+Base.show(io::IO, addr::Addr) =
+    print(io, "Addr(0x", lpad(string(UInt16(addr.value) - 1; base = 16), 4, "0"), ")")
+Base.:(>>)(a::Addr, i::UInt64) = Addr((a.value - 1) >> i)
+Base.:(<<)(a::Addr, i::UInt64) = Addr((a.value - 1) << i)
+Base.:(<)(a::Addr, b::Addr) = a.value < b.value
+Base.:(-)(a::Addr, b::Addr) = a.value - 1 - b.value
+Base.:(-)(a::Addr, i::Integer) = Addr(a.value - 1 - i)
+Base.:(-)(i::Integer, a::Addr) = Addr(a.value - 1 - i)
+Base.:(+)(a::Addr, i::Integer) = Addr(a.value - 1 + i)
+Base.:(+)(i::Integer, a::Addr) = Addr(a.value - 1 + i)
+
+matches(r, s) = !isnothing(match(r, s))
+
 include("emu.jl")
 import .Fake6502m: Cpu, Temps, setticks, ticks, pc, incpc, setpc, base_inner_step6502, ticks
 include("base.jl")
