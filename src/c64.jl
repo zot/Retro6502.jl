@@ -50,6 +50,112 @@ const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
 const VIC_MEM = A(0xD018)
 const VIC_BANK = A(0xDD00)
 const UPDATE_PERIOD = 1000000 ÷ 5
+const KEYS = Dict(
+    "A" => ImGuiKey_A,
+    "B" => ImGuiKey_B,
+    "C" => ImGuiKey_C,
+    "D" => ImGuiKey_D,
+    "E" => ImGuiKey_E,
+    "F" => ImGuiKey_F,
+    "G" => ImGuiKey_G,
+    "H" => ImGuiKey_H,
+    "I" => ImGuiKey_I,
+    "J" => ImGuiKey_J,
+    "K" => ImGuiKey_K,
+    "L" => ImGuiKey_L,
+    "M" => ImGuiKey_M,
+    "N" => ImGuiKey_N,
+    "O" => ImGuiKey_O,
+    "P" => ImGuiKey_P,
+    "Q" => ImGuiKey_Q,
+    "R" => ImGuiKey_R,
+    "S" => ImGuiKey_S,
+    "T" => ImGuiKey_T,
+    "U" => ImGuiKey_U,
+    "V" => ImGuiKey_V,
+    "W" => ImGuiKey_W,
+    "X" => ImGuiKey_X,
+    "Y" => ImGuiKey_Y,
+    "Z" => ImGuiKey_Z,
+    "0" => ImGuiKey_0,
+    "1" => ImGuiKey_1,
+    "2" => ImGuiKey_2,
+    "3" => ImGuiKey_3,
+    "4" => ImGuiKey_4,
+    "5" => ImGuiKey_5,
+    "6" => ImGuiKey_6,
+    "7" => ImGuiKey_7,
+    "8" => ImGuiKey_8,
+    "9" => ImGuiKey_9,
+    "0" => ImGuiKey_0,
+    "STOP" => ImGuiKey_Escape,
+    "COMMODORE" => ImGuiKey_LeftAlt,
+    " " => ImGuiKey_Space,
+    "CTRL" => ImGuiKey_LeftCtrl,
+    "LSHIFT" => ImGuiKey_LeftShift,
+    "RSHIFT" => ImGuiKey_RightShift,
+    "HOME" => ImGuiKey_Home,
+    "CRSR DN" => ImGuiKey_DownArrow,
+    "CRSR RT" => ImGuiKey_LeftArrow,
+    "HOME" => ImGuiKey_Home,
+    "RETURN" => ImGuiKey_Enter,
+    "DELETE" => ImGuiKey_Delete,
+    "F1" => ImGuiKey_F1,
+    "F3" => ImGuiKey_F3,
+    "F5" => ImGuiKey_F5,
+    "F7" => ImGuiKey_F7,
+    "BACK" => ImGuiKey_Backspace,
+    "/" => ImGuiKey_Slash,
+    "^" => (:shift, ImGuiKey_6),
+    "=" => ImGuiKey_Equal,
+    ";" => ImGuiKey_Semicolon,
+    "*" => (:shift, ImGuiKey_8),
+    "\$" => (:shift, ImGuiKey_4),
+    "," => ImGuiKey_Comma,
+    "@" => ImGuiKey_2,
+    ":" => (:shift, ImGuiKey_Semicolon),
+    "." => ImGuiKey_Period,
+    "-" => ImGuiKey_Minus,
+    "+" => (:shift, ImGuiKey_Equal),
+)
+const SHIFT_KEYS = Dict(
+    ImGuiKey_UpArrow => "CRSR DN",
+    ImGuiKey_LeftArrow => "CRSR RT",
+    ImGuiKey_F2 => "F1",
+    ImGuiKey_F4 => "F3",
+    ImGuiKey_F6 => "F5",
+    ImGuiKey_F8 => "F7",
+)
+const K_COMMODORE = ImGuiKey_LeftAlt
+const K_SPACE = ImGuiKey_Space
+const K_CTRL = ImGuiKey_LeftCtrl
+const K_SLASH = ImGuiKey_Slash
+const K_SEMICOLON = ImGuiKey_Semicolon
+const K_EQUAL = ImGuiKey_Equal
+const K_RSHIFT = ImGuiKey_RightShift
+const K_HOME = ImGuiKey_Home
+const K_COMMA = ImGuiKey_Comma
+const KEYBOARD_INPUTS = [
+    "STOP"      "Q"        "COMMODORE" " "        "2"         "CTRL"      "BACK"      "1"
+    "/"         "^"        "="         "RSHIFT"   "HOME"      ";"         "*"         "\$"
+    ","         "@"        ":"         "."        "-"         "L"         "P"         "+"
+    "N"         "O"        "K"         "M"        "0"         "J"         "I"         "9"
+    "V"         "U"        "H"         "B"        "8"         "G"         "Y"         "7"
+    "X"         "T"        "F"         "C"        "6"         "D"         "R"         "5"
+    "LSHIFT"    "E"        "S"         "Z"        "4"         "A"         "W"         "3"
+    "CRSR DN"   "F5"       "F3"        "F1"       "F7"        "CRSR RT"   "RETURN"    "DELETE"
+]
+const KEYBOARD_COORDS = Dict(key => (row - 1, col - 1)
+                        for (col,colkeys) in enumerate(reverse(eachcol(KEYBOARD_INPUTS)))
+                            for (row, key) in enumerate(colkeys))
+const SHIFT_COORDS = KEYBOARD_COORDS["LSHIFT"]
+im_key(k::LibCImGui.ImGuiKey) = (k,)
+function im_key((s,k)::Tuple{Symbol,LibCImGui.ImGuiKey})
+    s != :shift &&
+        error("Bad modifier: $s")
+    (ImGuiKey_LeftShift, k)
+end
+const IM_INPUTS = Dict{Any,Any}(im_key(imkeys) => (c64key,) for (c64key, imkeys) in KEYS)
 
 revising = false
 
@@ -112,9 +218,8 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     session::RewindSession = RewindSession()
     maxtime::Atomic{UInt64} = Atomic{UInt64}(0)
     curtime::Atomic{UInt64} = Atomic{UInt64}(0)
-    #anything higher than this address is a fake routine
-    fake_base::UInt16 = 0xFFFF
-    fake_routines::Dict{Addr,Function}
+    fake_routines::Dict{Addr,Function} = Dict{Addr,Function}()
+    pressed_keys::Set{String} = Set{String}()
 end
 
 function pause(f::Function, c::C64_machine)
@@ -231,12 +336,13 @@ c64_set_mem(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
 
 function Fake6502m.jsr(cpu::Cpu{C64_machine}, temps)
     mach = c64(cpu)
-    Fake6502m.pc(cpu, temps) <= mach.fake_base &&
+    curpc = Fake6502m.pc(cpu, temps)
+    curpc >= length(mach.fake_routines) &&
         return Fake6502m.base_jsr(cpu, temps)
     # jumping to fake routine
     temps = Fake6502m.incpc(cpu, temps, 0x3)
     mprintln(mach, "FAKE ROUTINE")
-    return mach.fake_routines[A(Fake6502m.pc(cpu, temps))](cpu, temps)::Fake6502m.Temps
+    return mach.fake_routines[curpc + 1](cpu, temps)::Fake6502m.Temps
 end
 
 function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
@@ -280,6 +386,32 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
         return
     end
     c64_set_mem(cpu, addr, byte)
+end
+
+"""
+C64 IO routine
+"""
+function c64_io(cpu::Cpu{C64_machine})
+    #local dira = cpu.mem[DDRA1.value] != 0
+    #local dirb = cpu.mem[DDRB1.value] != 0
+    #local valuea = 0
+    #local valueb = 0
+    local c = c64(cpu)
+
+    #if dira != 0 || dirb != 0
+        unsafe_load(CImGui.GetIO().WantCaptureKeyboard) &&
+            return
+        empty!(c.pressed_keys)
+        # read a keyboard value and write it to memory
+        for (imkeys, c64keys) in IM_INPUTS
+            if all(CImGui.IsKeyPressed, imkeys)
+                push!(c.pressed_keys, c64keys...)
+                println("PRESSED: $c64keys")
+            end
+        end
+    #    cpu.mem[PRA1] = valuea
+    #    cpu.mem[PRB1] = valueb
+    #end
 end
 
 function c64_read_mem(mach::Machine, addr::UInt16)
@@ -506,6 +638,7 @@ function draw_screen(mach::Machine)
             empty!(state.dirty_rects)
             state.has_dirty_rects[] = false
         end
+        c64_io(mach.newcpu)
     end
 end
 
@@ -739,6 +872,12 @@ function test_c64(load=load_condensed; revise = false)
     with_imgui(init_c64) do w, h
         process_io()
         draw_ui(mach, w, h)
+    end
+end
+
+function __init__()
+    for (imkey, c64key) in SHIFT_KEYS
+        IM_INPUTS[im_key(imkey)] = ("LSHIFT", c64key)
     end
 end
 
