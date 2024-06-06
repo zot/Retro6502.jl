@@ -13,7 +13,7 @@ import ..Fake6502.Fake6502m: read6502, write6502
 using ..Fake6502.Rewinding
 using ..Fake6502.Rewinding: Rewinder, RewindSession
 using Printf
-using CImGui: GetTextLineHeight, GetTextLineHeightWithSpacing, GetStyle
+using CImGui: GetTextLineHeight, GetTextLineHeightWithSpacing, GetStyle, SetNextWindowFocus, SetKeyboardFocusHere, SetItemDefaultFocus
 using CImGui
 using CImGui.LibCImGui
 using CImGui.ImGuiGLFWBackend
@@ -24,7 +24,7 @@ using CImGui.ImGuiOpenGLBackend.ModernGL
 # using CImGui.ImGuiGLFWBackend.GLFW
 using CImGui.CSyntax
 using CImGui.CSyntax.CStatic
-using ProfileCanvas
+#using ProfileCanvas
 using Base.Threads
 
 const SCREEN_WIDTH = 40 * 8
@@ -392,26 +392,32 @@ end
 C64 IO routine
 """
 function c64_io(cpu::Cpu{C64_machine})
-    #local dira = cpu.mem[DDRA1.value] != 0
-    #local dirb = cpu.mem[DDRB1.value] != 0
-    #local valuea = 0
-    #local valueb = 0
+    unsafe_load(CImGui.GetIO().WantCaptureKeyboard) &&
+        return
     local c = c64(cpu)
-
-    #if dira != 0 || dirb != 0
-        unsafe_load(CImGui.GetIO().WantCaptureKeyboard) &&
-            return
-        empty!(c.pressed_keys)
-        # read a keyboard value and write it to memory
-        for (imkeys, c64keys) in IM_INPUTS
-            if all(CImGui.IsKeyPressed, imkeys)
-                push!(c.pressed_keys, c64keys...)
-                println("PRESSED: $c64keys")
-            end
+    empty!(c.pressed_keys)
+    # read a keyboard value and write it to memory
+    for (imkeys, c64keys) in IM_INPUTS
+        if all(CImGui.IsKeyPressed, imkeys)
+            push!(c.pressed_keys, c64keys...)
+            println("PRESSED: $c64keys")
         end
-    #    cpu.mem[PRA1] = valuea
-    #    cpu.mem[PRB1] = valueb
-    #end
+    end
+    for k in ImGuiKey.(ImGuiKey_NamedKey_BEGIN:ImGuiKey_NamedKey_END - 1)
+        #local d = unsafe_load(CImGui.GetKeyData(k))
+
+        #d.DownDuration < 0 &&
+        #    continue
+        #if CImGui.IsKeyPressed(k, false)
+        !CImGui.IsKeyDown(k) &&
+            continue
+        println("KEY DOWN: $k")
+        #println("KEY DOWN: $k, Data: $d")
+        #println(d.Down)
+        #elseif d.Down
+        #    println("ELSE KEY DOWN: $k, Data: $d")
+        #end
+    end
 end
 
 function c64_read_mem(mach::Machine, addr::UInt16)
@@ -638,7 +644,6 @@ function draw_screen(mach::Machine)
             empty!(state.dirty_rects)
             state.has_dirty_rects[] = false
         end
-        c64_io(mach.newcpu)
     end
 end
 
@@ -714,6 +719,7 @@ function draw_ui(mach::Machine, width, height)
         end
     end
     CImGui.End()
+    c64_io(mach.newcpu)
 end
 
 function antialias(enable)
@@ -824,7 +830,7 @@ function load_condensed(mach::Machine)
     println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
 end
 
-function test_c64(load=load_condensed; revise = false)
+function test_c64(load=load_condensed; revise = false, verbose=false)
     global revising = revise
     local mach = nothing
     local state = nothing

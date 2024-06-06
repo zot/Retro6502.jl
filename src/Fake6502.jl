@@ -3,7 +3,7 @@
 """
 module Fake6502
 using Printf, StaticArrays
-using ProfileCanvas
+#using ProfileCanvas
 
 export reset, step
 
@@ -130,35 +130,35 @@ function init_speed()
 end
 
 function speed_test(; profile = :none)
-    global mach = init_speed()
-    local ticks
-    local temps = Temps(mach.newcpu)
-    println("warm up")
-    run2(mach, temps, :endless, 10000)
-    run2(mach, temps, :endless, 10000)
-    run2(mach, temps, :endless, 10000)
-    println("running benchmark")
-    if profile == :alloc
-        #error("No profiler installed")
-        @profview_allocs run2(mach, temps, :endless, 10000000)
-    elseif profile == :cpu
-        #error("No profiler installed")
-        @profview run2(mach, temps, :endless, 100000)
-    else
-        for i = 1:15
-            start = time()
-            temps, ticks = run2(mach, temps, :endless, 1000000)
-            finish = time()
-            @printf "%2d: %d clock cycles took %lf milliseconds\n" i ticks (
-                finish - start
-            ) * 1000
-            local trail = mach.newcpu.user_data
-            println(
-                "Trail len: ",
-                (length(trail.trails) - 1) * Rewinding.SNAPLEN + trail.nextfree - 1,
-            )
-        end
-    end
+    #global mach = init_speed()
+    #local ticks
+    #local temps = Temps(mach.newcpu)
+    #println("warm up")
+    #run2(mach, temps, :endless, 10000)
+    #run2(mach, temps, :endless, 10000)
+    #run2(mach, temps, :endless, 10000)
+    #println("running benchmark")
+    #if profile == :alloc
+    #    #error("No profiler installed")
+    #    @profview_allocs run2(mach, temps, :endless, 10000000)
+    #elseif profile == :cpu
+    #    #error("No profiler installed")
+    #    @profview run2(mach, temps, :endless, 100000)
+    #else
+    #    for i = 1:15
+    #        start = time()
+    #        temps, ticks = run2(mach, temps, :endless, 1000000)
+    #        finish = time()
+    #        @printf "%2d: %d clock cycles took %lf milliseconds\n" i ticks (
+    #            finish - start
+    #        ) * 1000
+    #        local trail = mach.newcpu.user_data
+    #        println(
+    #            "Trail len: ",
+    #            (length(trail.trails) - 1) * Rewinding.SNAPLEN + trail.nextfree - 1,
+    #        )
+    #    end
+    #end
 end
 
 function test()

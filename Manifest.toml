@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.10.2"
+julia_version = "1.10.4"
 manifest_format = "2.0"
 project_hash = "c1b1f36c15d8865441010619b839bc501ee9d41b"
 
@@ -38,9 +38,9 @@ version = "0.4.2"
 
 [[deps.CImGui]]
 deps = ["CEnum", "CSyntax", "ImGuiGLFWBackend", "ImGuiOpenGL2Backend", "ImGuiOpenGLBackend", "LibCImGui", "Preferences"]
-git-tree-sha1 = "4b3a4f04f1f635722c5b417a5d3f0b87e6d402de"
+git-tree-sha1 = "27d5ade194c649dfcc11e34e95c9b2ab218fab82"
 uuid = "5d785b6c-b76f-510e-a07c-3070796c7e87"
-version = "1.89.0"
+version = "1.89.1"
 
 [[deps.CImGuiPack_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -87,7 +87,7 @@ version = "0.12.10"
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
-version = "1.1.0+0"
+version = "1.1.1+0"
 
 [[deps.Dates]]
 deps = ["Printf"]

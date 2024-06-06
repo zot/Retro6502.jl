@@ -56,11 +56,14 @@ using JSON3
 using Test
 using Printf
 using Fake6502
-using Fake6502: rhex, Fake6502m, NewMachine, Machine, status
+using Fake6502: hex, rhex, Fake6502m, NewMachine, Machine, status, ROM
 import Fake6502.Fake6502m: Cpu, step6502, read6502, write6502, addrsyms
 import Fake6502.Fake6502m: opsyms, FLAG_DECIMAL, Temps
 import Fake6502.Asm: asmfile
+import Fake6502.C64: C64, @io, BASIC_ROM
+import Fake6502.Workers: Workers, Worker, add_worker
 
+const EDIR = joinpath(dirname(dirname(@__FILE__)), "examples")
 const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp, :s, :s), (:status, :p, :flags))
 
 const CYCLES = []
@@ -303,7 +306,34 @@ function test_asm(dir::AbstractString; cleanup=true)
     end
 end
 
+load_condensed(w::Worker) = (mach::Machine)-> begin
+    off, total = Workers.loadprg(w, mach, "$EDIR/condensed.prg"; labelfile = "$EDIR/condensed.labels")
+    @io println(
+        "Loaded ",
+        total,
+        " bytes at 0x",
+        string(off; base = 16, pad = 4),
+        ", ",
+        length(mach.labels),
+        " labels",
+    )
+    @io print("labels:")
+    for name in sort([keys(mach.labels)...])
+        @printf "\n  %04x %s" mach.labels[name].value - 1 name
+    end
+    @io println()
+    @io println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
+end
+
+function test_worker()
+    w = add_worker()
+    C64.test_c64(load_condensed(w); verbose = true)
+end
+
+
 @testset "test assembly" test_asm(joinpath(dirname(realpath(@__FILE__)), "test-asm-files"); cleanup=false)
+
+#@testset "test worker" test_worker()
 
 #runtests(joinpath(dirname(realpath(@__FILE__)), "test-files"))
 

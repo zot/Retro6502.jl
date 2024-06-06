@@ -371,7 +371,8 @@ sort2(a1, v1, a2, v2) = a1 < a2 ? (v1, v2) : (v2, v1)
 function sort3(a1, v1, a2, v2, a3, v3)
     amin = min(a1, a2, a3)
     return amin == a1 ? (v1, sort2(a2, v2, a3, v3)...) :
-           amin = a2 ? (v2, sort2(a1, v1, a3, v3)...) : (v3, sort2(a1, v1, a2, v2)...)
+        amin == a2 ? (v2, sort2(a1, v1, a3, v3)...) :
+        (v3, sort2(a1, v1, a2, v2)...)
 end
 
 """
@@ -402,7 +403,7 @@ function inner_step6502(trails::Rewinder, cpu, temps::Temps)
         v3 = 0x00
     else
         addr = min(trails.a1, trails.a2, trails.a3)
-        v1, v2, v3 = sort2(trails.a1, trails.v1, trails.a2, trails.v2, trails.a3, trails.v3)
+        v1, v2, v3 = sort3(trails.a1, trails.v1, trails.a2, trails.v2, trails.a3, trails.v3)
     end
     if trails.nextfree > SNAPLEN
         local ent = TrailEntry()

@@ -63,30 +63,4 @@ function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
     off, total
 end
 
-# TESTING
-
-load_condensed(w::Worker) = (mach::Machine)-> begin
-    off, total = loadprg(w, mach, "$EDIR/condensed.prg"; labelfile = "$EDIR/condensed.labels")
-    @io println(
-        "Loaded ",
-        total,
-        " bytes at 0x",
-        string(off; base = 16, pad = 4),
-        ", ",
-        length(mach.labels),
-        " labels",
-    )
-    @io print("labels:")
-    for name in sort([keys(mach.labels)...])
-        @printf "\n  %04x %s" mach.labels[name].value - 1 name
-    end
-    @io println()
-    @io println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
-end
-
-function test_worker()
-    w = add_worker()
-    C64.test_c64(load_condensed(w))
-end
-
 end
