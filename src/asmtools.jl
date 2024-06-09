@@ -4,13 +4,27 @@ Tools automatically imported by jas files
 module AsmTools
 
 using Printf: @printf, @sprintf
-using ..Fake6502: hex, rhex, asmerr
+using ..Fake6502: hex, rhex, asmerr, matches, ascii2screen
 
-export align, data, word, words, @rel_str, @printf, @sprintf
+export align, data, word, words, @rel_str, @label_str, @printf, @sprintf
 
 context = nothing
 
+macro label_str(str)
+    global context
+    context.pass < 3 && return 0x0000
+    str == "*" &&
+        return :($AsmTools.context.offset)
+    matches(r"^[-+]+$", str) &&
+        return rel(str)
+    :($(esc(Symbol(str))))
+end
+
 macro rel_str(str)
+    rel(str)
+end
+
+function rel(str)
     global context
     context.pass < 3 && return 0x0000
     local delta = sum((c-> c == '-' ? -1 : c == '+' ? 1 : 0).(collect(str)))
@@ -50,6 +64,14 @@ Align the current context's output to a byte width
 function align(amount::Int)
     global context
     context.offset += amount - context.offset % amount
+end
+
+# like data but screen-encode it
+function screen(args...)
+    local bytes = data(args...)
+    for (i, b) in enumerate(bytes)
+        bytes[i] = ascii2screen(b)
+    end
 end
 
 word(value) = UInt16(value & 0xFFFF)

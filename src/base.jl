@@ -139,7 +139,7 @@ mem(mach::Machine) = mach.newcpu.memory
 
 ### begin system hooks
 
-Base.getindex(mach::Machine, r::AddrRange) = mem(mach)[intRange(r)]
+Base.getindex(mach::Machine, r::AddrRange) = mem(mach)[intrange(r)]
 Base.getindex(mach::Machine, sym::Symbol) = mach[mach.labels[sym]]
 Base.getindex(mach::Machine, addr::Integer) = mach[Addr(addr)]
 Base.getindex(mach::Machine, addr::Addr) = mem(mach)[addr.value]
@@ -216,7 +216,7 @@ function call_fake(mach::Machine)
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
         #mprintln(mach,"JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
-            mprintln(mach, "FAKE ROUTINE")
+            mprintln(mach, "@@@ FAKE ROUTINE $(Base.get(mach.addrs, addr, Symbol(string(addr))))")
             mach.fake_routines[addr](mach)
             incpc(mach, 3)
             return true
@@ -386,9 +386,13 @@ function NewMachine(;
     machine
 end
 
-register(func::Function, mach::Machine, sym::Symbol) =
+function register(func::Function, mach::Machine, sym::Symbol)
+    println("REGISTERING FUNCTION LABELED $sym")
     register(func, mach, mach.labels[sym])
+end
+
 function register(func::Function, mach::Machine, addr::Addr)
+    println("REGISTERING FUNCTION AT $(addr.value)")
     mach.fake_routines[addr] = func
 end
 

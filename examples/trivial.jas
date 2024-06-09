@@ -1,0 +1,2 @@
+main    lda #0
+        rts

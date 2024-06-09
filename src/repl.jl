@@ -32,8 +32,10 @@ module AsmRepl
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
+using ...Fake6502: matches, display_chars, intrange, screen
 using ..Fake6502m: opsyms
-using ...Fake6502: matches
+using ..C64
+using ..Workers: Workers, Worker, add_worker
 using REPL
 using REPL: LineEdit, CompletionProvider
 using ReplMaker
@@ -42,10 +44,14 @@ const COMMENT_PAT = r"^\s*;.*"
 const DIRECTIVE_PAT = r"^\s*(?:([a-z0-9_]+)\s+)?(\.?[a-z]+)\b|^\s*(\.)\s*$"si
 const LOAD_PAT = r"^\s*(\+w\s+)?(\S.*)?$"
 const SAVE_PAT = r"^\s*(\-f\s+)?(\S.*)?$"
+const DEFAULT_SETTINGS = (;
+    maxticks = 150,
+)
 
 last_load = ""
 last_save = ""
 
+function cmd_asm() end
 function cmd_break() end
 function cmd_clear() end
 function cmd_del() end
@@ -58,12 +64,15 @@ function cmd_next() end
 function cmd_run() end
 function cmd_reset() end
 function cmd_save() end
+function cmd_screen() end
+function cmd_set() end
 function cmd_show() end
 function cmd_status() end
 function cmd_step() end
 function cmd_watch() end
 const ASM_CMDS = Set(string.(opsyms))
 const DEFS = [
+    ".asm" => (cmd_asm, "", "Assemble the current program", ".a"),
     ".break" => (cmd_break, "RANGE [EXPR]", "break when execution enters RANGE if optional EXPR is true", ".b"),
     ".clear" => (cmd_clear, "", "erase memory and local program"),
     ".del" => (cmd_del, "", "delete break and watch points at RANGE", ".d"),
@@ -76,6 +85,8 @@ const DEFS = [
     ".run" => (cmd_run, "[LOCATION]", "assemble local program and continue (optionally from LOCATION)", ".r"),
     ".reset" => (cmd_reset, "", "clear machine state so that the next .run will start fresh"),
     ".save" => (cmd_save, "FILE", "save local program to FILE (see .edit and .load)"),
+    ".screen" => (cmd_screen, "", "show the screen"),
+    ".set" => (cmd_set, "SETTING [VALUE]", "view SETTING or set it to VALUE"),
     ".show" => (cmd_show, "", "show the UI"),
     ".status" => (cmd_status, "", "print the current machine status"),
     ".step" => (cmd_step, "[LOCATION]", "perform one step (optionally from LOCATION)", ".s"),
@@ -98,6 +109,10 @@ mutable struct ReplContext{Specialization} <: CompletionProvider
     mode::REPL.LineEdit.Prompt
     input_file::Union{String,Nothing}
     input_file_channel::Union{Channel{Nothing},Nothing}
+    worker::Worker
+    labels::Set{Symbol}
+    settings::Dict{Symbol}
+    dirty::Bool
     ReplContext{T}() where T = new{T}()
 end
 
@@ -117,6 +132,8 @@ function repl(specialization::Type = Nothing)
         mode_name="ASM_mode",
         completion_provider=ctx,
     )
+    ctx.settings = Dict(pairs(DEFAULT_SETTINGS)...)
+    ctx.dirty = false
     ctx
 end
 
@@ -135,7 +152,7 @@ function handle_command(ctx::ReplContext, line)
     local label, cmd = if length(toks) == 2
         toks
     else
-        nothing, toks[1]
+        nothing, isempty(toks) ? nothing : toks[1]
     end
     if isnothing(cmd) || string(cmd) ∉ ALL_CMDS
         isnothing(m) && println("NOT A COMMAND")
@@ -150,7 +167,7 @@ function handle_command(ctx::ReplContext, line)
         local (cmd, func) = REPL_CMDS[cmd]
         func(ctx, cmd, strip(body))
     else
-        cmd_asm(ctx, label, cmd, prefix, body, line)
+        cmd_assemble(ctx, label, cmd, prefix, body, line)
     end
     nothing
 end
@@ -160,6 +177,7 @@ function handle_asm_chunk(ctx::ReplContext, line)
     if !isincomplete(ctx.pending_asm_expr)
         println("$(ctx.pending_asm_expr) is complete")
         push!(ctx.lines, string.(split(ctx.pending_asm_prefix * ctx.pending_asm_expr, "\n"))...)
+        ctx.dirty = true
         ctx.pending_asm_expr = ""
         ctx.pending_asm_prefix = ""
         ctx.cmd_handler = handle_command
@@ -168,12 +186,34 @@ function handle_asm_chunk(ctx::ReplContext, line)
     nothing
 end
 
+function cmd_asm(ctx::ReplContext, cmd, args)
+    !ctx.dirty &&
+        return
+    if !isdefined(ctx, :worker)
+        println("ADDING 6502 WORKER...")
+        ctx.worker = add_worker()
+        println("DONE")
+    else
+        Workers.clear(ctx.worker)
+    end
+    mktemp() do path, io
+        for line in ctx.lines
+            println(io, line)
+        end
+        close(io)
+        ctx.labels = Workers.asmfile(ctx.worker, path)
+    end
+    ctx.dirty = false
+end
+
 function cmd_break(ctx::ReplContext, cmd, args)
     println("BREAK $args")
 end
 
 function cmd_clear(ctx::ReplContext, cmd, args)
-    println("CLEAR $args")
+    empty!(ctx.lines)
+    ctx.dirty = true
+    println("cleared program")
 end
 
 function cmd_del(ctx::ReplContext, cmd, args)
@@ -221,6 +261,7 @@ function cmd_load(ctx::ReplContext, cmd, args)
         return cmderror("No file $path")
     try
         ctx.lines = readlines(path)
+        ctx.dirty = true
         if !isempty(ctx.input_file) && ctx.input_file != path
             stop_watching(ctx)
         end
@@ -280,16 +321,32 @@ function cmd_save(ctx::ReplContext, cmd, args)
     println("Wrote program to $path")
 end
 
+function cmd_set(ctx::ReplContext, cmd, args)
+    println("SET $args")
+end
+
 function cmd_next(ctx::ReplContext, cmd, args)
     println("NEXT $args")
 end
 
 function cmd_run(ctx::ReplContext, cmd, args)
-    println("RUN $args")
+    cmd_asm(ctx, cmd, args)
+    Workers.exec(ctx.worker, :main; tickcount = ctx.settings[:maxticks])
 end
 
 function cmd_reset(ctx::ReplContext, cmd, args)
     println("RESET $args")
+    #ctx.
+end
+
+function cmd_screen(ctx::ReplContext, cmd, args)
+    if !isdefined(ctx, :worker)
+        println("No program running")
+        return
+    end
+    display_chars(@view ctx.worker.memory[intrange(screen)]) do c
+        C64.SCREEN_CODES[c+1]
+    end
 end
 
 function cmd_show(ctx::ReplContext, cmd, args)
@@ -308,7 +365,7 @@ function cmd_watch(ctx::ReplContext, cmd, args)
     println("WATCH $args")
 end
 
-function cmd_asm(ctx::ReplContext, label, cmd, prefix, expr, line)
+function cmd_assemble(ctx::ReplContext, label, cmd, prefix, expr, line)
     println("ASM CMD: [$label] [$cmd] / [$prefix] [$expr]")
     if isincomplete(expr)
         ctx.pending_asm_prefix = prefix
@@ -317,10 +374,8 @@ function cmd_asm(ctx::ReplContext, label, cmd, prefix, expr, line)
         ctx.mode.prompt = "6502...> "
     else
         push!(ctx.lines, line)
+        ctx.dirty = true
     end
-end
-
-function create_machine()
 end
 
 end

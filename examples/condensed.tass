@@ -116,7 +116,7 @@ startquick
 nextquick   := startquick       ; next available quickdef entry
 *           = $cfff             ; highest data stack element (bottom of stack)
 bos
-nextfake    := bos
+nextfake    := 0
 *           = startquick + $100 ; code starts after quickdef table
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;

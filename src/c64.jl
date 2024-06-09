@@ -4,7 +4,7 @@ using ..Fake6502
 using ..Fake6502:
     Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
 using ..Fake6502:
-    ROM, init_rom, Addr, AddrRange, intRange, hex, SCREEN_CODES, screen2ascii
+    ROM, init_rom, Addr, AddrRange, intrange, hex, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
 using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte, call_fake
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
@@ -341,7 +341,7 @@ function Fake6502m.jsr(cpu::Cpu{C64_machine}, temps)
         return Fake6502m.base_jsr(cpu, temps)
     # jumping to fake routine
     temps = Fake6502m.incpc(cpu, temps, 0x3)
-    mprintln(mach, "FAKE ROUTINE")
+    mprintln(mach, "@@@ JSR FAKE ROUTINE $(mach.addrs[Addr(curpc)])")
     return mach.fake_routines[curpc + 1](cpu, temps)::Fake6502m.Temps
 end
 
@@ -508,7 +508,7 @@ function init(load::Function)
         ),
     )
     mach = NewMachine(; user_data = state)
-    mem(mach)[intRange(screen)] .= ' '
+    mem(mach)[intrange(screen)] .= ' '
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
     mach[BG1] = 0x1

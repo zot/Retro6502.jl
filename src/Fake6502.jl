@@ -24,7 +24,9 @@ const SCREEN_CODES = Vector{Char}(
     String('A':'Z') *
     BLANKS(255 - 219 + 1),
 )
+const ASCII_TO_SCREEN = Dict(v=>k - 1 for (k,v) in reverse([enumerate(SCREEN_CODES)...]))
 screen2ascii(char) = SCREEN_CODES[UInt8(char)+1]
+ascii2screen(char) = ASCII_TO_SCREEN[char]
 const CDIR = joinpath(dirname(@__FILE__), "..", "C")
 const EDIR = joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR = joinpath(dirname(@__FILE__), "..", "resources")
@@ -54,13 +56,13 @@ A(x::Integer) = Addr(UInt32(x))
 A(v::AbstractRange) = Addr(first(v)):Addr(last(v))
 A(v::AbstractVector) = Addr.(v)
 
-intRange(r::AddrRange) = r.first.value:r.last.value
+intrange(r::AddrRange) = r.first.value:r.last.value
 Base.in(addr::Addr, r::AddrRange) = addr.value ∈ r.first.value:r.last.value
 Base.:(:)(a::Addr, b::Addr) = AddrRange(a, b)
 Base.first(r::AddrRange) = r.first
 Base.last(r::AddrRange) = r.last
 Base.length(r::AddrRange) = r.last.value - r.first.value + 1
-Base.hash(r::AddrRange, h::UInt64) = Base.hash(intRange(r), h)
+Base.hash(r::AddrRange, h::UInt64) = Base.hash(intrange(r), h)
 
 Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
 Base.show(io::IO, addr::Addr) =
@@ -124,7 +126,7 @@ function init_speed()
     rew = Rewinder()
     mach = NewMachine(; user_data = rew)
     Rewinding.init(rew, mach.newcpu, mach.temps)
-    mach.mem[intRange(screen)] .= ' '
+    mach.mem[intrange(screen)] .= ' '
     loadprg("$EDIR/speed.prg", mach; labelfile = "$EDIR/speed.labels")
     mach
 end
@@ -163,8 +165,8 @@ end
 
 function test()
     global mach = NewMachine(; user_data = nothing)
-    mach.mem[intRange(screen)] .= ' '
-    mach.newcpu.memory[intRange(screen)] .= ' '
+    mach.mem[intrange(screen)] .= ' '
+    mach.newcpu.memory[intrange(screen)] .= ' '
     labels = mach.labels
     off, total = loadprg("$EDIR/condensed.prg", mach; labelfile = "$EDIR/condensed.labels")
     println(
@@ -215,7 +217,7 @@ function test()
     run(mach, labels[:main]; max_ticks = 10000)
     diag(mach)
     #display_hex(mach.mem)
-    display_chars(@view mach.newcpu.memory[intRange(screen)]) do c
+    display_chars(@view mach.newcpu.memory[intrange(screen)]) do c
         C64.SCREEN_CODES[c+1]
     end
     println("done testing, ", mach.emu.clockticks, " clock ticks")

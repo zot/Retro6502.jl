@@ -23,6 +23,7 @@ PROGRAM: { DEF "\n" }
 DEF: (LABEL | "*" | "+" | "-") [INSTRUCTION]
  | INSTRUCTION
  | ".include" JULIA_FILE
+ | LABEL ".data" JULIA_EXPR
  | LABEL ".julia" JULIA_EXPR
  | LABEL ".macro" ["(" ARGLIST ")" "->" JULIA_EXPR]
  | LABEL ".value" JULIA_EXPR
@@ -49,6 +50,7 @@ OPARG: EXPR
  | "(" EXPR ")" "," "y"
 
 JULIA_EXPR: <Julia expression>
+-- can include rel"+++---" and label"LABEL"
 ```
 
 ## How assembly works
@@ -121,7 +123,7 @@ const string_bracket_pat = r"\"|\$\("
 const brackets =
     Dict("(" => ")", "[" => "]", "{" => "}", "\"" => "\"", "'" => "'", "\$(" => ")")
 const close_brackets = ")]}"
-const dot_cmds = Set([".data", ".null", ".julia", ".include", "=", ".macro", ".value", ".imm", ".fake"])
+const dot_cmds = Set([".data", ".julia", ".include", "=", ".macro", ".value", ".imm", ".fake"])
 const directives = Set([legal_ops..., dot_cmds...])
 const macro_arg_sep = r"(?<!\\),"
 const macro_ref_pat = r"\\\w+"
@@ -650,8 +652,7 @@ assembleif(func::Function, ctx, pred) = pred(ctx) && (func(); true)
 function asm_data(ctx::CodeContext)
     local lctx = ListingContext(ctx)
 
-    isnull = is(ctx, ".null")
-    assembleif(ctx, is(ctx, ".data") || isnull) do
+    assembleif(ctx, is(ctx, ".data")) do
         eattok(ctx)
         println("DATA: $(tokstr(ctx))")
         local expr = Meta.parse(tokstr(ctx))
@@ -660,7 +661,7 @@ function asm_data(ctx::CodeContext)
         # fake_bytes is just to calculate size for label offsets
         local data_len = 0
         pushfunc!(ctx, 2, 4) do
-            data_len = length(AsmTools.data(eval(ctx, expr))) + (isnull ? 1 : 0)
+            data_len = length(AsmTools.data(eval(ctx, expr)))
             incoffset(ctx, data_len; track = true)
         end
         pushfunc!(ctx, 3, :stability) do
@@ -669,7 +670,6 @@ function asm_data(ctx::CodeContext)
             local value = eval(ctx, expr)
             local bytes = AsmTools.data(value)
             println("@@@\n@@@ DATA VALUE PASS $(ctx.stability == 0 ? 3 : ctx.stability == 1 ? "3 STABILITY PASS 1" : "3 STABILITY PASS 2"): $value\n@@@")
-            isnull && push!(bytes, 0x00)
             add_listing(lctx, :data, length(bytes))
             if ctx.stability == 1
                 # update data_len on stability pass #1
@@ -967,11 +967,11 @@ asm_op(ctx::CodeContext) =
             return assemble(ctx, op, :indx, tokstr(ctx, ctx.toks[2:end-3]))
         #check for zpx as opposed to absx -- skip for now and assemble ,x as absolute,x
         lasttoks(ctx, ",", "y") &&
-            return assemble(ctx, op, :absy, tokstr(ctx, ctx.toks[2,end-2]))
+            return assemble(ctx, op, :absy, tokstr(ctx, ctx.toks[1:end-2]))
         lasttoks(ctx, ",", "x") &&
-            return assemble(ctx, op, :absx, tokstr(ctx, ctx.toks[2,end-2]))
+            return assemble(ctx, op, :absx, tokstr(ctx, ctx.toks[1:end-2]))
         is(ctx, "(") && lasttoks(ctx, ")") && op == :jmp &&
-            return assemble(ctx, op, :ind, tokstr(ctx, ctx.toks[2,end-1]))
+            return assemble(ctx, op, :ind, tokstr(ctx, ctx.toks[2:end-1]))
         is(ctx, "(") && lasttoks(ctx, ")") &&
             lineerror(ctx, """Only JMP can use indirect addressing but this is $opname""")
         is(ctx, "(") &&
