@@ -20,6 +20,7 @@ private = nothing
 
 @kwdef mutable struct Worker
     id::Int
+    run_channel::RemoteChannel{Channel{Any}} = RemoteChannel() do; Channel{Any}(10); end
     memory::SharedVector{UInt8} = SharedVector{UInt8}((64K,); pids=procs())
 end
 
@@ -122,16 +123,16 @@ updatememory(w::Worker) = remotecall_wait(w.id) do
     end
 end
 
-exec(w::Worker, label::Symbol; tickcount = Base.max_values(Int)) =
-    remotecall_fetch(w.id, label, tickcount) do label, tickcount
+function exec(w::Worker, runid::String, label::Symbol; tickcount = Base.max_values(Int))
+    remotecall(w.id, label, tickcount) do label, tickcount
         global private
-        local finished = Channel{Nothing}()
+        local worker = private.worker
         lock(private.lock) do
             isnothing(private.ctx) &&
                 error("No program")
             private.running &&
                 error("Program is already running")
-            private.cpu = Cpu(; memory = [private.worker.memory...], user_data = private.worker)
+            private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
             private.running = true
             @spawn try
                 local temps = reset6502(private.cpu, private.temps)
@@ -148,11 +149,15 @@ exec(w::Worker, label::Symbol; tickcount = Base.max_values(Int)) =
                 lock(private.lock) do
                     private.running = false
                 end
-                put!(finished, nothing)
+                try
+                    put!(worker.run_channel, (; runid, status = Fake6502m.state(private.cpu, private.temps)))
+                catch err
+                    @error "Error getting state" exception=(err,catch_backtrace())
+                end
             end
         end
-        return finished
     end
+end
 
 state(w::Worker) = remotecall_fetch(w.id) do
     global private

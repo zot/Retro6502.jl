@@ -32,7 +32,7 @@ module AsmRepl
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
-using ...Fake6502: matches, display_chars, intrange, screen
+using ...Fake6502: Fake6502, matches, display_chars, intrange, screen
 using ..Fake6502m: opsyms
 using ..C64
 using ..Workers: Workers, Worker, add_worker
@@ -109,10 +109,12 @@ mutable struct ReplContext{Specialization} <: CompletionProvider
     mode::REPL.LineEdit.Prompt
     input_file::Union{String,Nothing}
     input_file_channel::Union{Channel{Nothing},Nothing}
+    input_file_changed::Bool
     worker::Worker
     labels::Set{Symbol}
     settings::Dict{Symbol}
     dirty::Bool
+    runid::Int
     ReplContext{T}() where T = new{T}()
 end
 
@@ -124,6 +126,7 @@ function repl(specialization::Type = Nothing)
     ctx.pending_asm_expr = ""
     ctx.input_file = ""
     ctx.input_file_channel = nothing
+    ctx.input_file_changed = false
     ctx.mode = initrepl(
         s-> Base.invokelatest(ctx.cmd_handler, ctx, s);
         prompt_text="6502> ",
@@ -134,7 +137,25 @@ function repl(specialization::Type = Nothing)
     )
     ctx.settings = Dict(pairs(DEFAULT_SETTINGS)...)
     ctx.dirty = false
+    ctx.runid = 1
+    monitor_worker(ctx)
     ctx
+end
+
+function monitor_worker(ctx::ReplContext)
+    @async while true
+        try
+            if !isdefined(ctx, :worker)
+                sleep(1)
+                continue
+            end
+            local (runid, status) = take!(ctx.worker.run_channel)
+            local s = status
+            @printf "done: %04X %s a: %02X x: %02X y: %02X sp: %02X [%s]" s.pc Fake6502.status(s.status) s.a s.x s.y s.sp runid
+        catch err
+            @error err exception=(err,catch_backtrace())
+        end
+    end
 end
 
 function LineEdit.complete_line(::ReplContext, state)
@@ -252,13 +273,13 @@ function cmd_load(ctx::ReplContext, cmd, args)
     println("nowatch: $(!isempty(something(nowatch, ""))), file: $file")
     isempty(something(file, "")) && isempty(last_load) &&
         return cmderror("No file to load")
-    local path = try
-        realpath(file)
-    catch
-        nothing
-    end
+    load_file(ctx, file)
+end
+
+function load_file(ctx::ReplContext, path)
     !isnothing(path) && !isfile(path) &&
         return cmderror("No file $path")
+    path = realpath(path)
     try
         ctx.lines = readlines(path)
         ctx.dirty = true
@@ -269,7 +290,7 @@ function cmd_load(ctx::ReplContext, cmd, args)
             start_watching(ctx, path)
         end
     catch
-        cmderror("Could not read file $file")
+        cmderror("Could not read file $path")
     end
 end
 
@@ -284,7 +305,6 @@ function start_watching(ctx::ReplContext, file::AbstractString)
                 close(ctx.input_file_channel)
                 ctx.input_file_channel = nothing
                 ctx.input_file = nothing
-                println("NO LONGER WATCHING $(ctx.input_file) FOR CHANGES")
                 break
             end
             local change = watch_file(ctx.input_file, 1)
@@ -296,7 +316,10 @@ function start_watching(ctx::ReplContext, file::AbstractString)
 end
 
 function input_file_changed(ctx::ReplContext, change)
-    cmderror("INPUT FILE CHANGED BUT THERE IS NO HANDLER FOR THAT")
+    !change.changed &&
+        return
+    println("$(ctx.input_file) changed, reloading...")
+    load_file(ctx, ctx.input_file)
 end
 
 function stop_watching(ctx::ReplContext)
@@ -331,7 +354,8 @@ end
 
 function cmd_run(ctx::ReplContext, cmd, args)
     cmd_asm(ctx, cmd, args)
-    Workers.exec(ctx.worker, :main; tickcount = ctx.settings[:maxticks])
+    Workers.exec(ctx.worker, "run-$(ctx.runid)", :main; tickcount = ctx.settings[:maxticks])
+    ctx.runid += 1
 end
 
 function cmd_reset(ctx::ReplContext, cmd, args)
