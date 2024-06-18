@@ -371,8 +371,7 @@ sort2(a1, v1, a2, v2) = a1 < a2 ? (v1, v2) : (v2, v1)
 function sort3(a1, v1, a2, v2, a3, v3)
     amin = min(a1, a2, a3)
     return amin == a1 ? (v1, sort2(a2, v2, a3, v3)...) :
-        amin == a2 ? (v2, sort2(a1, v1, a3, v3)...) :
-        (v3, sort2(a1, v1, a2, v2)...)
+           amin == a2 ? (v2, sort2(a1, v1, a3, v3)...) : (v3, sort2(a1, v1, a2, v2)...)
 end
 
 """

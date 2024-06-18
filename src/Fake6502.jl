@@ -24,7 +24,7 @@ const SCREEN_CODES = Vector{Char}(
     String('A':'Z') *
     BLANKS(255 - 219 + 1),
 )
-const ASCII_TO_SCREEN = Dict(v=>k - 1 for (k,v) in reverse([enumerate(SCREEN_CODES)...]))
+const ASCII_TO_SCREEN = Dict(v => k - 1 for (k, v) in reverse([enumerate(SCREEN_CODES)...]))
 screen2ascii(char) = SCREEN_CODES[UInt8(char)+1]
 ascii2screen(char) = ASCII_TO_SCREEN[char]
 const CDIR = joinpath(dirname(@__FILE__), "..", "C")
@@ -86,7 +86,7 @@ import .Rewinding
 import .Rewinding: Rewinder
 include("fakes.jl")
 include("c64.jl")
-#include("ui.jl")
+include("ui.jl")
 include("asmtools.jl")
 include("asm.jl")
 include("worker.jl")

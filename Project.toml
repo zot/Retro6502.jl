@@ -5,18 +5,23 @@ version = "0.1.0"
 
 [deps]
 CImGui = "5d785b6c-b76f-510e-a07c-3070796c7e87"
+Crossterm = "89a1a94d-67fa-4c27-8677-ab6d33b1ad6c"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 FileWatching = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
+Preconditions = "059f9e2d-edd5-4920-8ad6-95789b106d09"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 ProfileCanvas = "efd6af41-a80b-495e-886c-e51b0c7d77a3"
 ProfileView = "c46f51b8-102a-5cf2-8d2c-8597cb0e0da7"
 REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
+ReadmeDocs = "c63066b3-de92-487d-9da7-7c375a07912b"
 ReplMaker = "b873ce64-0db9-51f5-a568-4457d8e49576"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 SharedArrays = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+TerminalUserInterfaces = "408767e4-586b-40c7-9657-f9758988469a"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+Unicode = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 
 [extras]
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"

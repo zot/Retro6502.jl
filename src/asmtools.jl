@@ -13,10 +13,8 @@ context = nothing
 macro label_str(str)
     global context
     context.pass < 3 && return 0x0000
-    str == "*" &&
-        return :($AsmTools.context.offset)
-    matches(r"^[-+]+$", str) &&
-        return rel(str)
+    str == "*" && return :($AsmTools.context.offset)
+    matches(r"^[-+]+$", str) && return rel(str)
     :($(esc(Symbol(str))))
 end
 
@@ -27,7 +25,7 @@ end
 function rel(str)
     global context
     context.pass < 3 && return 0x0000
-    local delta = sum((c-> c == '-' ? -1 : c == '+' ? 1 : 0).(collect(str)))
+    local delta = sum((c -> c == '-' ? -1 : c == '+' ? 1 : 0).(collect(str)))
     local forward = delta > 0
     delta -= sign(delta)
     quote
@@ -36,13 +34,29 @@ function rel(str)
             ctx.offset
         else
             local off = ctx.offset
-            local pos = $delta + $(forward ?
-                :(searchsortedfirst(context.relative_labels, off + 1)) :
-                :(searchsortedlast(context.relative_labels, off - 1)))
-            println("OFFSET: " * hex(off) * " LABELS: " * join(hex.(ctx.relative_labels), " ") * " POS: " * string(pos) * ", DELTA: " * $(string(delta)))
+            local pos =
+                $delta + $(
+                    forward ? :(searchsortedfirst(context.relative_labels, off + 1)) :
+                    :(searchsortedlast(context.relative_labels, off - 1))
+                )
+            println(
+                "OFFSET: " *
+                hex(off) *
+                " LABELS: " *
+                join(hex.(ctx.relative_labels), " ") *
+                " POS: " *
+                string(pos) *
+                ", DELTA: " *
+                $(string(delta)),
+            )
             if pos < 1 || pos > length(ctx.relative_labels)
-                asmerr(ctx, "No matching relative label " * $(forward ? "after" : "before") *
-                    " 0x" * string(off))
+                asmerr(
+                    ctx,
+                    "No matching relative label " *
+                    $(forward ? "after" : "before") *
+                    " 0x" *
+                    string(off),
+                )
             end
             ctx.relative_labels[pos]
         end
@@ -127,7 +141,7 @@ store(bytes::AbstractVector{UInt8}, offset, value::UInt8) =
     store(bytes, offset, UInt8[value])
 
 store(bytes::AbstractVector{UInt8}, offset, value::UInt16) =
-    store(bytes, offset, UInt8[(value >> 8) & 0xFF, value & 0xFF])
+    store(bytes, offset, UInt8[(value>>8)&0xFF, value&0xFF])
 
 store(bytes::AbstractVector{UInt8}, offset, value::Int8) =
     store(bytes, offset, value & 0xFF)

@@ -36,10 +36,10 @@ $(FAKE6502):
 	rm -rf FAKE6502
 
 c64: default $(PRGS) FRC
-	julia -t 6 --project=. -e 'using Fake6502; Fake6502.C64.test_c64()'
+	julia -t 6 --project=. -e 'using Fake6502; Fake6502.UI.test_c64()'
 
 c64-revise: default $(PRGS) FRC
-	julia -t 6 --project=. -e 'using Revise; using Fake6502; Fake6502.C64.test_c64(; revise = true)'
+	julia -t 6 --project=. -e 'using Revise; using Fake6502; Fake6502.UI.test_c64(; revise = true)'
 
 worker: default $(PRGS) FRC
 	julia -t 6 --project=. -e 'using Fake6502; Fake6502.Workers.test_worker()'

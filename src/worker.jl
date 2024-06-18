@@ -13,23 +13,26 @@ using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM
 using ..C64: C64, @io, @printf, BASIC_ROM
 using ..Asm: Asm, CodeContext, getvar
 using ..Fake6502m: Fake6502m, Cpu, Temps, setpc
-import ..Fake6502m: inner_step6502, base_inner_step6502, exec6502, reset6502, ticks, setticks
+import ..Fake6502m:
+    inner_step6502, base_inner_step6502, exec6502, reset6502, ticks, setticks
 
 # this worker
 private = nothing
 
 @kwdef mutable struct Worker
     id::Int
-    run_channel::RemoteChannel{Channel{Any}} = RemoteChannel() do; Channel{Any}(10); end
-    memory::SharedVector{UInt8} = SharedVector{UInt8}((64K,); pids=procs())
+    run_channel::RemoteChannel{Channel{Any}} = RemoteChannel() do
+        Channel{Any}(10)
+    end
+    memory::SharedVector{UInt8} = SharedVector{UInt8}((64K,); pids = procs())
 end
 
 @kwdef mutable struct WorkerPrivate
     worker::Worker
     lock::ReentrantLock = ReentrantLock()
     cmds::Channel{Function} = Channel{Function}(10)
-    ctx::Union{CodeContext, Nothing} = nothing
-    cpu::Union{Cpu{Worker}, Nothing} = nothing
+    ctx::Union{CodeContext,Nothing} = nothing
+    cpu::Union{Cpu{Worker},Nothing} = nothing
     running::Bool = false
     temps::Temps = Temps()
 end
@@ -44,7 +47,7 @@ function add_worker()
 end
 
 function init()
-    global private = WorkerPrivate(; worker = Worker(; id=myid()))
+    global private = WorkerPrivate(; worker = Worker(; id = myid()))
     return private.worker
 end
 
@@ -66,8 +69,7 @@ end
 "Asynchronously execute a function during emulator execution"
 function async(func::Function)
     global private
-    !private.running &&
-        error("Program is not running")
+    !private.running && error("Program is not running")
     put!(private.cmds, func)
 end
 
@@ -79,13 +81,12 @@ function sync(func::Function)
         try
             put!(result_chan, func())
         catch err
-            thrown = err 
+            thrown = err
             put!(result_chan, nothing)
         end
     end
     local res = take!(result_chan)
-    !isnothing(thrown) &&
-        throw(thrown)
+    !isnothing(thrown) && throw(thrown)
     return res
 end
 
@@ -100,7 +101,7 @@ function worker_step(cpu::Cpu{Worker}, temps::Temps, instructions)
             private.cpu.instructions = instructions
             take!(private.cmds)()
         catch err
-            @error "Error in worker command: $err" exception=(err,catch_backtrace())
+            @error "Error in worker command: $err" exception = (err, catch_backtrace())
         end
     end
     return base_inner_step6502(cpu, temps)
@@ -110,28 +111,28 @@ end
 
 asmfile(w::Worker, filename) = remotecall_fetch(asmfile, w.id, filename)
 
-clear(w::Worker) = remotecall_wait(w.id) do
-    global private
-    private.ctx = nothing
-    private.cpu = nothing
-end
-
-updatememory(w::Worker) = remotecall_wait(w.id) do
-    sync() do
+clear(w::Worker) =
+    remotecall_wait(w.id) do
         global private
-        private.worker.memory .= private.cpu.memory
+        private.ctx = nothing
+        private.cpu = nothing
     end
-end
+
+updatememory(w::Worker) =
+    remotecall_wait(w.id) do
+        sync() do
+            global private
+            private.worker.memory .= private.cpu.memory
+        end
+    end
 
 function exec(w::Worker, runid::String, label::Symbol; tickcount = Base.max_values(Int))
     remotecall(w.id, label, tickcount) do label, tickcount
         global private
         local worker = private.worker
         lock(private.lock) do
-            isnothing(private.ctx) &&
-                error("No program")
-            private.running &&
-                error("Program is already running")
+            isnothing(private.ctx) && error("No program")
+            private.running && error("Program is already running")
             private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
             private.running = true
             @spawn try
@@ -150,21 +151,25 @@ function exec(w::Worker, runid::String, label::Symbol; tickcount = Base.max_valu
                     private.running = false
                 end
                 try
-                    put!(worker.run_channel, (; runid, status = Fake6502m.state(private.cpu, private.temps)))
+                    put!(
+                        worker.run_channel,
+                        (; runid, status = Fake6502m.state(private.cpu, private.temps)),
+                    )
                 catch err
-                    @error "Error getting state" exception=(err,catch_backtrace())
+                    @error "Error getting state" exception = (err, catch_backtrace())
                 end
             end
         end
     end
 end
 
-state(w::Worker) = remotecall_fetch(w.id) do
-    global private
-    sync() do
-        Fake6502m.state(private.cpu, private.temps)
+state(w::Worker) =
+    remotecall_fetch(w.id) do
+        global private
+        sync() do
+            Fake6502m.state(private.cpu, private.temps)
+        end
     end
-end
 
 function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
     w.memory .= mach.newcpu.memory

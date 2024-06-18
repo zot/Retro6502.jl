@@ -123,7 +123,8 @@ const string_bracket_pat = r"\"|\$\("
 const brackets =
     Dict("(" => ")", "[" => "]", "{" => "}", "\"" => "\"", "'" => "'", "\$(" => ")")
 const close_brackets = ")]}"
-const dot_cmds = Set([".data", ".julia", ".include", "=", ".macro", ".value", ".imm", ".fake"])
+const dot_cmds =
+    Set([".data", ".julia", ".include", "=", ".macro", ".value", ".imm", ".fake"])
 const directives = Set([legal_ops..., dot_cmds...])
 const macro_arg_sep = r"(?<!\\),"
 const macro_ref_pat = r"\\\w+"
@@ -199,14 +200,7 @@ end
 end
 
 ListingContext(ctx::CodeContext) =
-    ListingContext(;
-                   ctx,
-                   ctx.lines,
-                   ctx.line,
-                   ctx.toks,
-                   ctx.label,
-                   ctx.listing,
-                   )
+    ListingContext(; ctx, ctx.lines, ctx.line, ctx.toks, ctx.label, ctx.listing)
 
 subcontext(ctx::CodeContext) = CodeContext(;
     env = subenv(ctx),
@@ -269,22 +263,23 @@ struct AssemblyCode
     pass4::Function
 end
 
-AssemblyCode() = AssemblyCode(() -> nothing, () -> nothing, ()-> nothing, ()-> nothing)
+AssemblyCode() = AssemblyCode(() -> nothing, () -> nothing, () -> nothing, () -> nothing)
 
 function pushfunc!(func, ctx, passes...)
     for pass in passes
         local line = ctx.line
         local lines = ctx.lines
         local toks = ctx.toks
-        local pass_funcs = pass == :stability ? ctx.pass3_stability_funcs :
-            [ctx.pass2_funcs, ctx.pass3_funcs, ctx.pass4_funcs][pass - 1]
+        local pass_funcs =
+            pass == :stability ? ctx.pass3_stability_funcs :
+            [ctx.pass2_funcs, ctx.pass3_funcs, ctx.pass4_funcs][pass-1]
 
-        push!(pass_funcs, ()-> begin
-                  ctx.line = line
-                  ctx.lines = lines
-                  ctx.toks = toks
-                  func()
-              end)
+        push!(pass_funcs, () -> begin
+            ctx.line = line
+            ctx.lines = lines
+            ctx.toks = toks
+            func()
+        end)
     end
 end
 
@@ -299,9 +294,12 @@ function incoffset(ctx::CodeContext, off; track = false)
         ctx.max = max(ctx.max, ctx.offset - 1)
     end
     if ctx.verbose && (oldmin != ctx.min || oldmax != ctx.max)
-        asmwarn(ctx, "Range length: $(ctx.max - ctx.min + 1), changed"*
-            (oldmin != ctx.min ? " min $(rhex(oldmin)) -> $(rhex(ctx.min))" : "")*
-            (oldmax != ctx.max ? " max $(rhex(oldmax)) -> $(rhex(ctx.max))" : ""))
+        asmwarn(
+            ctx,
+            "Range length: $(ctx.max - ctx.min + 1), changed" *
+            (oldmin != ctx.min ? " min $(rhex(oldmin)) -> $(rhex(ctx.min))" : "") *
+            (oldmax != ctx.max ? " max $(rhex(oldmax)) -> $(rhex(ctx.max))" : ""),
+        )
     end
 end
 
@@ -334,7 +332,7 @@ function assemble(ctx::CodeContext, code::AssemblyCode)
             println("\n  $(join((sprint(io->print_listing(io, ctx, line))
                                      for line in ctx.unstable), "\n  "))")
             # execute stability pass twice, once to update counts, once to generate code
-            for stability in 1:2
+            for stability = 1:2
                 stability == 1 && empty!(ctx.relative_labels)
                 println("\n@@@\n@@@PASS 3 STABILITY PASS $stability: POPULATE DATA\n@@@")
                 # restore listing and clear out unstable
@@ -357,22 +355,28 @@ function assemble(ctx::CodeContext, code::AssemblyCode)
     end
 end
 
-Base.:(*)(code1::AssemblyCode, code2::AssemblyCode) = AssemblyCode(ctx -> begin
-    code1.pass1(ctx)
-    code2.pass1(ctx)
-end, ctx -> begin
-    code1.pass2(ctx)
-    code2.pass2(ctx)
-end, ctx -> begin
-    code1.pass3(ctx)
-    code2.pass3(ctx)
-end, ctx -> begin
-    code1.pass3_stability(ctx)
-    code2.pass3_stability(ctx)
-end, ctx -> begin
-    code1.pass4(ctx)
-    code2.pass4(ctx)
-end)
+Base.:(*)(code1::AssemblyCode, code2::AssemblyCode) = AssemblyCode(
+    ctx -> begin
+        code1.pass1(ctx)
+        code2.pass1(ctx)
+    end,
+    ctx -> begin
+        code1.pass2(ctx)
+        code2.pass2(ctx)
+    end,
+    ctx -> begin
+        code1.pass3(ctx)
+        code2.pass3(ctx)
+    end,
+    ctx -> begin
+        code1.pass3_stability(ctx)
+        code2.pass3_stability(ctx)
+    end,
+    ctx -> begin
+        code1.pass4(ctx)
+        code2.pass4(ctx)
+    end,
+)
 
 function tokenize(n, line)
     tokens = [eachmatch(tok_pat, line)...]
@@ -422,7 +426,8 @@ tokstr(line::ListingLine, toks::RegexMatch...) = tokstr(line.line.line, toks...)
 
 tokstr(thing, toks::Vector{RegexMatch}) = tokstr(thing, toks[1], toks[end])
 
-tokstr(str::AbstractString, tok1, tok2) = @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
+tokstr(str::AbstractString, tok1, tok2) =
+    @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
 
 function lasttoks(ctx::CodeContext, items...)
     length(ctx.toks) < length(items) && return false
@@ -442,13 +447,13 @@ end
 
 isincomplete(expr) = expr isa Expr && expr.head == :incomplete
 
-const Toks = Union{CodeContext, Line}
+const Toks = Union{CodeContext,Line}
 
 isdirective(toks::Toks) = is(toks, ∈(directives), call_pat)
 
-tok_is(thing) = (toks)-> is(toks, thing)
+tok_is(thing) = (toks) -> is(toks, thing)
 
-is(toks::Toks) = (thing)-> is(toks, thing)
+is(toks::Toks) = (thing) -> is(toks, thing)
 
 is(toks::Toks, things...) = any(is(toks).(things))
 
@@ -474,7 +479,12 @@ macro noasm_str(str)
     :($AssemblyCode())
 end
 
-function asmfile(file; list::Bool = false, output = replace(file, r".jas$" => ""), verbose = false)
+function asmfile(
+    file;
+    list::Bool = false,
+    output = replace(file, r".jas$" => ""),
+    verbose = false,
+)
     local ctx = CodeContext(; pwd = dirname(file), verbose)
     local assembly = asm(read(file, String))
 
@@ -492,7 +502,7 @@ function prgbytes(ctx::CodeContext)
 
     bytes[1] = UInt8(ctx.min & 0xFF)
     bytes[2] = UInt8(ctx.min >> 8 & 0xFF)
-    bytes[3:end] .= @views ctx.memory[ctx.min + 1:ctx.max + 1]
+    bytes[3:end] .= @views ctx.memory[ctx.min+1:ctx.max+1]
     bytes
 end
 
@@ -591,8 +601,7 @@ function scan_asm(ctx::CodeContext, lines)
             eattok(ctx)
             println("@@@ GOT LABEL $(ctx.label)")
             # set the label to the current offset for operations except .imm and .fake
-            !(ctx.label == :* || is(ctx, ".imm", ".fake", call_pat)) &&
-                deflabel(ctx)
+            !(ctx.label == :* || is(ctx, ".imm", ".fake", call_pat)) && deflabel(ctx)
             if !hastoks(ctx)
                 if ctx.label != :*
                     add_listing(ctx, :def)
@@ -646,7 +655,7 @@ assembleif(func::Function, ctx, pred::AbstractString) =
     assembleif(func, ctx, ctx -> is(ctx, pred))
 
 assembleif(func::Function, ctx, pred::Bool) = pred && (func(); true)
-    
+
 assembleif(func::Function, ctx, pred) = pred(ctx) && (func(); true)
 
 function asm_data(ctx::CodeContext)
@@ -669,7 +678,9 @@ function asm_data(ctx::CodeContext)
             println("@@@ DATA EXPR: $expr")
             local value = eval(ctx, expr)
             local bytes = AsmTools.data(value)
-            println("@@@\n@@@ DATA VALUE PASS $(ctx.stability == 0 ? 3 : ctx.stability == 1 ? "3 STABILITY PASS 1" : "3 STABILITY PASS 2"): $value\n@@@")
+            println(
+                "@@@\n@@@ DATA VALUE PASS $(ctx.stability == 0 ? 3 : ctx.stability == 1 ? "3 STABILITY PASS 1" : "3 STABILITY PASS 2"): $value\n@@@",
+            )
             add_listing(lctx, :data, length(bytes))
             if ctx.stability == 1
                 # update data_len on stability pass #1
@@ -708,13 +719,12 @@ asm_fake(ctx::CodeContext) =
         local expr, extra = parse_julia(ctx)
         (expr.head ∉ (:function, :->) || expr.args[1] != :(())) &&
             lineerror(ctx, """.fake expects a zero-argument function""")
-        isnothing(ctx.label) &&
-            lineerror(ctx, """.fake with no label""")
+        isnothing(ctx.label) && lineerror(ctx, """.fake with no label""")
         local index = 0xFFFF - length(ctx.fakes)
         local label = ctx.label
         deflabel(ctx, index)
         add_listing(ctx, :fake, extra)
-        ctx.fakes[ctx.label] = (index, ()->nothing)
+        ctx.fakes[ctx.label] = (index, () -> nothing)
         pushfunc!(ctx, 4) do
             ctx.fakes[label] = (index, eval(ctx, expr))
             ctx.min = min(ctx.min, index)
@@ -726,8 +736,7 @@ asm_value(ctx::CodeContext) =
         eattok(ctx)
         deflabel(ctx)
         local expr, extra = parse_julia(ctx)
-        isnothing(ctx.macrolabel) &&
-            return
+        isnothing(ctx.macrolabel) && return
         try
             ctx.macrovalue = eval(ctx, expr)
             if !isnothing(ctx.macrolabel)
@@ -735,7 +744,7 @@ asm_value(ctx::CodeContext) =
             end
             println("SET MACRO VALUE TO $(ctx.macrovalue)")
         catch err
-            @error "Error assembling .value" exception=(err,catch_backtrace())
+            @error "Error assembling .value" exception = (err, catch_backtrace())
             lineerror(ctx, """Error calculating macro value""")
         end
     end
@@ -756,7 +765,7 @@ function parse_julia(ctx::CodeContext)
             end
             return expr, extra
         catch err
-            @error "Error parsing julia" exception=(err,catch_backtrace())
+            @error "Error parsing julia" exception = (err, catch_backtrace())
             setlines(ctx, firstlines)
             lineerror(ctx, """Error parsing Julia code:\n$programtext""")
             rethrow()
@@ -770,8 +779,7 @@ function assign_var(lctx::ListingContext, exprstr)
     local line = lctx.line
     try
         local expr = Meta.parse(exprstr)
-        isincomplete(expr) &&
-            error()
+        isincomplete(expr) && error()
         push!(lctx.ctx.assigned, var)
         println("VAR: $(repr(var)) $(var ∈ [:*, :-, :+]) <- $exprstr")
         if var == :*
@@ -780,11 +788,11 @@ function assign_var(lctx::ListingContext, exprstr)
         else
             lctx.ctx.pass == 4 && add_listing(lctx, :assign, var, 0, line)
             invokelatest(lctx.ctx.env.eval(:(function ()
-                                            global $var = $expr
-                                        end)))
+                global $var = $expr
+            end)))
         end
     catch err
-        @error "ERROR ASSIGNING VARIABLE" exception=(err,catch_backtrace())
+        @error "ERROR ASSIGNING VARIABLE" exception = (err, catch_backtrace())
         lineerror(lctx, """Error $progress, $exprstr""")
     end
 end
@@ -825,7 +833,7 @@ asm_call(ctx::CodeContext) =
             end
             pushfunc!(ctx, 3, :stability) do
                 if tmpctx.macrovalue != 0
-                    add_listing(lctx, :call; remove_label=true)
+                    add_listing(lctx, :call; remove_label = true)
                 else
                     add_listing(lctx, :call)
                 end
@@ -905,11 +913,10 @@ function assemble(ctx::CodeContext, op, addr, exprstr = "()")
     local expr = try
         Meta.parse(exprstr)
     catch err
-        @error "Error assembling opcode" exception=(err,catch_backtrace())
+        @error "Error assembling opcode" exception = (err, catch_backtrace())
         lineerror(ctx, """Could not parse argument for $op, '$exprstr'""")
     end
-    isincomplete(expr) &&
-        lineerror(ctx, """Incomplete argument for $op, '$exprstr'""")
+    isincomplete(expr) && lineerror(ctx, """Incomplete argument for $op, '$exprstr'""")
     pushfunc!(ctx, 2, 3, :stability) do
         incoffset(ctx, bytes; track = true)
     end
@@ -924,7 +931,7 @@ function assemble(ctx::CodeContext, op, addr, exprstr = "()")
         elseif bytes == 2
             local a = if addr != :rel
                 UInt8(arg)
-            elseif arg isa Union{UInt8, Int8}
+            elseif arg isa Union{UInt8,Int8}
                 reinterpret(Int8, arg)
             else
                 Int8(arg - ctx.offset)
@@ -946,36 +953,34 @@ asm_op(ctx::CodeContext) =
         local modes = keys(opcodes)
         eattok(ctx)
         if !isnothing(ctx.label)
-            ctx.label ∈ ctx.assigned &&
-                lineerror(ctx, """Redeclaring label $(ctx.label)""")
+            ctx.label ∈ ctx.assigned && lineerror(ctx, """Redeclaring label $(ctx.label)""")
             push!(ctx.labels, ctx.label)
             push!(ctx.assigned, ctx.label)
         end
-        !hastoks(ctx) && (op, :imp) ∈ modes &&
-            return assemble(ctx, op, :imp)
-        !hastoks(ctx) && (op, :acc) ∈ modes &&
-            return assemble(ctx, op, :acc)
-        !hastoks(ctx) &&
-            lineerror(ctx, """No arguments for opcode $opname""")
-        op ∈ branch_ops &&
-            return assemble(ctx, op, :rel, tokstr(ctx))
-        is(ctx, "#") &&
-            return assemble(ctx, op, :imm, tokstr(ctx, ctx.toks[2:end]))
-        is(ctx, "(") && lasttoks(ctx, ")", ",", "y") &&
+        !hastoks(ctx) && (op, :imp) ∈ modes && return assemble(ctx, op, :imp)
+        !hastoks(ctx) && (op, :acc) ∈ modes && return assemble(ctx, op, :acc)
+        !hastoks(ctx) && lineerror(ctx, """No arguments for opcode $opname""")
+        op ∈ branch_ops && return assemble(ctx, op, :rel, tokstr(ctx))
+        is(ctx, "#") && return assemble(ctx, op, :imm, tokstr(ctx, ctx.toks[2:end]))
+        is(ctx, "(") &&
+            lasttoks(ctx, ")", ",", "y") &&
             return assemble(ctx, op, :indy, tokstr(ctx, ctx.toks[2:end-3]))
-        is(ctx, "(") && lasttoks(ctx, ",", "x", ")") &&
+        is(ctx, "(") &&
+            lasttoks(ctx, ",", "x", ")") &&
             return assemble(ctx, op, :indx, tokstr(ctx, ctx.toks[2:end-3]))
         #check for zpx as opposed to absx -- skip for now and assemble ,x as absolute,x
         lasttoks(ctx, ",", "y") &&
             return assemble(ctx, op, :absy, tokstr(ctx, ctx.toks[1:end-2]))
         lasttoks(ctx, ",", "x") &&
             return assemble(ctx, op, :absx, tokstr(ctx, ctx.toks[1:end-2]))
-        is(ctx, "(") && lasttoks(ctx, ")") && op == :jmp &&
-            return assemble(ctx, op, :ind, tokstr(ctx, ctx.toks[2:end-1]))
-        is(ctx, "(") && lasttoks(ctx, ")") &&
-            lineerror(ctx, """Only JMP can use indirect addressing but this is $opname""")
         is(ctx, "(") &&
-            lineerror(ctx, """Incomplete indirect expression, $(tokstr(ctx))""")
+            lasttoks(ctx, ")") &&
+            op == :jmp &&
+            return assemble(ctx, op, :ind, tokstr(ctx, ctx.toks[2:end-1]))
+        is(ctx, "(") &&
+            lasttoks(ctx, ")") &&
+            lineerror(ctx, """Only JMP can use indirect addressing but this is $opname""")
+        is(ctx, "(") && lineerror(ctx, """Incomplete indirect expression, $(tokstr(ctx))""")
         # must be absolute
         assemble(ctx, op, :abso, tokstr(ctx))
     end
@@ -1021,7 +1026,8 @@ asm_include(ctx::CodeContext, line::Line, lines::Vector{Line}) =
                 end
             end
         catch err
-            @error "Error running .include directive: $(tokstr(line))" exception=(err,catch_backtrace())
+            @error "Error running .include directive: $(tokstr(line))" exception =
+                (err, catch_backtrace())
             lineerror(ctx, """Error running .include directive: $(tokstr(line))""")
         end
     end
@@ -1049,18 +1055,28 @@ function compilemacro(ctx::CodeContext)
         Macro(macargs isa Symbol ? [macargs] : [expr.args[1].args...], eval(ctx, expr))
 end
 
-add_listing(ctx::CodeContext, args...; kw...) = add_listing(ListingContext(ctx), args...; kw...)
+add_listing(ctx::CodeContext, args...; kw...) =
+    add_listing(ListingContext(ctx), args...; kw...)
 
-add_listing(lctx::ListingContext, type::Symbol, bytes = 0; remove_label=false) =
+add_listing(lctx::ListingContext, type::Symbol, bytes = 0; remove_label = false) =
     add_listing(lctx, type, lctx.label, bytes, lctx.line; remove_label)
 
-add_listing(lctx::ListingContext, type::Symbol, extra::Vector{Line}; remove_label=false) =
+add_listing(lctx::ListingContext, type::Symbol, extra::Vector{Line}; remove_label = false) =
     add_listing(lctx, type, lctx.label, 0, lctx.line, extra; remove_label)
 
-function add_listing(lctx::ListingContext, type::Symbol, label::OptSym, bytes, line::Line, extra = ListingLine[]; remove_label=false)
+function add_listing(
+    lctx::ListingContext,
+    type::Symbol,
+    label::OptSym,
+    bytes,
+    line::Line,
+    extra = ListingLine[];
+    remove_label = false,
+)
     if remove_label && !isnothing(label)
         label = nothing
-        line = isempty(line.tokens) ? Line(line.number, "", RegexMatch[]) :
+        line =
+            isempty(line.tokens) ? Line(line.number, "", RegexMatch[]) :
             tokenize(line.number, tokstr(line, line.tokens[2], line.tokens[end]))
     end
     #if type == :def && !isnothing(ctx.label) && ctx.macrovalue != 0
@@ -1084,12 +1100,12 @@ function print_listing(io, ctx::CodeContext, line::ListingLine)
     toks = toks[(isempty(label) ? 1 : 2):end]
     #local text = isempty(toks) ? line.line.line : tokstr(line, toks)
     local text = line.line.line
-    local bytes = @view(ctx.memory[line.addr + 1:line.addr + line.bytes])
+    local bytes = @view(ctx.memory[line.addr+1:line.addr+line.bytes])
     local hexbytes = join(rhex.(bytes), " ")
 
     if !isempty(label)
         local lab = match(tok_pat, text)
-        text = strip(@view text[lab.offset + length(lab.match):end])
+        text = strip(@view text[lab.offset+length(lab.match):end])
     end
     local type, first = if line.type == :def
         text = ""
@@ -1114,7 +1130,7 @@ function print_listing(io, ctx::CodeContext, line::ListingLine)
         #local op = line.line.tokens[isempty(label) ? 1 : 2].match * " "
         local op = "$(opsyms[bytes[1] + 1]) "
 
-        if addrsyms[bytes[1] + 1] == :imm
+        if addrsyms[bytes[1]+1] == :imm
             op *= "#"
         end
         #println("OP\n  LINE: $line\n  BYTES: $hexbytes")
@@ -1138,7 +1154,7 @@ function listings(ctx::CodeContext, file)
             ; jas $(join(ARGS, " "))
             ; $(now())
         """))
-        for line in sort(ctx.listing, by=l->l.addr)
+        for line in sort(ctx.listing, by = l -> l.addr)
             print_listing(io, ctx, line)
         end
     end

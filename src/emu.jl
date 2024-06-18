@@ -228,17 +228,16 @@ Temps(t::Temps; ea = nothing, pc = t.pc) = Temps(; pc)
 #Temps(cpu::Cpu) = Temps(; memory = cpu.memory)
 Temps(::Cpu) = Temps()
 
-state(cpu::Cpu, temps::Temps) =
-    (;
-     temps.pc,
-     cpu.a,
-     cpu.x,
-     cpu.y,
-     cpu.sp,
-     cpu.status,
-     cpu.instructions,
-     cpu.clockticks6502,
-     )
+state(cpu::Cpu, temps::Temps) = (;
+    temps.pc,
+    cpu.a,
+    cpu.x,
+    cpu.y,
+    cpu.sp,
+    cpu.status,
+    cpu.instructions,
+    cpu.clockticks6502,
+)
 
 function copy(src::Cpu{T}) where {T}
     new = Cpu{T}(; src.user_data)
@@ -271,6 +270,7 @@ read6502(cpu, addr::UInt16) = cpu.memory[addr+1]
 write6502(cpu, addr::UInt16, value::UInt8) = cpu.memory[addr+1] = value
 hookexternal() = nothing
 
+#! format: off
 const ticktable = SVector(
     #      0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E | F | 
     #=0=#  7,  6,  2,  8,  3,  3,  5,  5,  3,  2,  2,  2,  4,  4,  6,  6,  #=0=#
@@ -290,6 +290,7 @@ const ticktable = SVector(
     #=E=#  2,  6,  2,  8,  3,  3,  5,  5,  2,  2,  2,  2,  4,  4,  6,  6,  #=E=#
     #=F=#  2,  5,  2,  8,  4,  4,  6,  6,  2,  4,  2,  7,  4,  4,  7,  7,  #=F=#
 )
+#! format: on
 
 saveaccum(cpu, n) = cpu.a = UInt8(n & 0xFF)
 

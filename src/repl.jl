@@ -29,6 +29,10 @@ The REPL manages its own UI along with workers for assembly and execution.
 """
 module AsmRepl
 
+using TerminalUserInterfaces:
+    TerminalUserInterfaces, CrosstermTerminal, tui, move_cursor, TERMINAL, show_cursor
+const TUI = TerminalUserInterfaces
+import TerminalUserInterfaces: render, set, view, update!, init!, should_quit
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
@@ -38,15 +42,41 @@ using ..C64
 using ..Workers: Workers, Worker, add_worker
 using REPL
 using REPL: LineEdit, CompletionProvider
-using ReplMaker
+using Crossterm
+
+function color(rgb::UInt32...)
+    extract(rgb) = rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF
+    color(round.(Ref(UInt8), Base.Iterators.flatten(extract.(rgb)))...)
+end
+
+color(args...) = color(round.(Ref(UInt8), args)...)
+
+function color(r::UInt8, g::UInt8, b::UInt8, args...)
+    isempty(args) && return (; r, g, b)
+    local all =
+        vcat([r g b], ([r1 g1 b1] for (r1, g1, b1) in Iterators.partition(args, 3))...)
+    avg(items) = sum(items) / length(items)
+    color(avg.(eachcol(all))...)
+end
+
+color2int(rgb::@NamedTuple{r::UInt8, g::UInt8, b::UInt8}) = (rgb...,)
+
+#const BORDER = color(0x9f87ef, 0x8978cd, 0x8877cb)
+const BORDER = color(0x9a83e8)
+#const BG = color(0x6347c2, 0x543ea3, 0x614bb4)
+const BG = color(0x55409f)
+#const FG = color(0x9884e3, 0x8673ce, 0x8472c8)
+const FG = color(0x9983ea, 0xFFFFFF)
+
+include("screen.jl")
+include("private_replmaker.jl")
+using .PrivateReplMaker
 
 const COMMENT_PAT = r"^\s*;.*"
 const DIRECTIVE_PAT = r"^\s*(?:([a-z0-9_]+)\s+)?(\.?[a-z]+)\b|^\s*(\.)\s*$"si
 const LOAD_PAT = r"^\s*(\+w\s+)?(\S.*)?$"
 const SAVE_PAT = r"^\s*(\-f\s+)?(\S.*)?$"
-const DEFAULT_SETTINGS = (;
-    maxticks = 150,
-)
+const DEFAULT_SETTINGS = (; maxticks = 150,)
 
 last_load = ""
 last_save = ""
@@ -73,33 +103,60 @@ function cmd_watch() end
 const ASM_CMDS = Set(string.(opsyms))
 const DEFS = [
     ".asm" => (cmd_asm, "", "Assemble the current program", ".a"),
-    ".break" => (cmd_break, "RANGE [EXPR]", "break when execution enters RANGE if optional EXPR is true", ".b"),
+    ".break" => (
+        cmd_break,
+        "RANGE [EXPR]",
+        "break when execution enters RANGE if optional EXPR is true",
+        ".b",
+    ),
     ".clear" => (cmd_clear, "", "erase memory and local program"),
     ".del" => (cmd_del, "", "delete break and watch points at RANGE", ".d"),
     ".diag" => (cmd_diag, "", "show status and list all break and watch points"),
-    ".edit" => (cmd_edit, "", "run ENV[\"EDITOR\"] on local program and reload afterwards (see .load and .save)", ".e"),
+    ".edit" => (
+        cmd_edit,
+        "",
+        "run ENV[\"EDITOR\"] on local program and reload afterwards (see .load and .save)",
+        ".e",
+    ),
     ".help" => (cmd_help, "", "show documentation on REPL directives", "."),
     ".list" => (cmd_list, "", "list the current program", ".l"),
     ".load" => (cmd_load, "FILE", "load FILE as local program (see .edit and .save)"),
-    ".next" => (cmd_next, "[LOCATION]", "perform one step (optiaonlly from LOCATION) -- if it's a JSR, break upon return", ".n"),
-    ".run" => (cmd_run, "[LOCATION]", "assemble local program and continue (optionally from LOCATION)", ".r"),
-    ".reset" => (cmd_reset, "", "clear machine state so that the next .run will start fresh"),
+    ".next" => (
+        cmd_next,
+        "[LOCATION]",
+        "perform one step (optiaonlly from LOCATION) -- if it's a JSR, break upon return",
+        ".n",
+    ),
+    ".run" => (
+        cmd_run,
+        "[LOCATION]",
+        "assemble local program and continue (optionally from LOCATION)",
+        ".r",
+    ),
+    ".reset" =>
+        (cmd_reset, "", "clear machine state so that the next .run will start fresh"),
     ".save" => (cmd_save, "FILE", "save local program to FILE (see .edit and .load)"),
     ".screen" => (cmd_screen, "", "show the screen"),
     ".set" => (cmd_set, "SETTING [VALUE]", "view SETTING or set it to VALUE"),
     ".show" => (cmd_show, "", "show the UI"),
     ".status" => (cmd_status, "", "print the current machine status"),
-    ".step" => (cmd_step, "[LOCATION]", "perform one step (optionally from LOCATION)", ".s"),
-    ".watch" => (cmd_watch, "RANGE [EXPR]", "break whenever RANGE changes if optional EXPR is true", ".w"),
+    ".step" =>
+        (cmd_step, "[LOCATION]", "perform one step (optionally from LOCATION)", ".s"),
+    ".watch" => (
+        cmd_watch,
+        "RANGE [EXPR]",
+        "break whenever RANGE changes if optional EXPR is true",
+        ".w",
+    ),
 ]
-const REPL_CMDS = Dict(Iterators.flatten(
-    (length(d) == 3 ? [k=>(k, d...)] : [k=>(k, d...), last(d)=>(k, d...)])
-    for (k,d) in DEFS))
+const REPL_CMDS = Dict(
+    Iterators.flatten(
+        (length(d) == 3 ? [k => (k, d...)] : [k => (k, d...), last(d) => (k, d...)]) for
+        (k, d) in DEFS
+    ),
+)
 const DIRECTIVES = sort([keys(REPL_CMDS)..., dot_cmds...])
-const ALL_CMDS = sort!([
-    ASM_CMDS...,
-    DIRECTIVES...,
-])
+const ALL_CMDS = sort!([ASM_CMDS..., DIRECTIVES...])
 
 mutable struct ReplContext{Specialization} <: CompletionProvider
     lines::Vector{String}
@@ -115,7 +172,7 @@ mutable struct ReplContext{Specialization} <: CompletionProvider
     settings::Dict{Symbol}
     dirty::Bool
     runid::Int
-    ReplContext{T}() where T = new{T}()
+    ReplContext{T}() where {T} = new{T}()
 end
 
 function repl(specialization::Type = Nothing)
@@ -127,19 +184,38 @@ function repl(specialization::Type = Nothing)
     ctx.input_file = ""
     ctx.input_file_channel = nothing
     ctx.input_file_changed = false
+    local mistate = nothing
+    local mode = nothing
+    local screen = Screen()
     ctx.mode = initrepl(
-        s-> Base.invokelatest(ctx.cmd_handler, ctx, s);
-        prompt_text="6502> ",
-        prompt_color=:light_yellow,
-        start_key='}',
-        mode_name="ASM_mode",
-        completion_provider=ctx,
+        s -> Base.invokelatest(ctx.cmd_handler, ctx, s);
+        prompt_text = "6502> ",
+        #prompt_text = "",
+        prompt_color = :light_yellow,
+        start_key = '}',
+        enter = function (s)
+            mistate = Base.active_repl.mistate
+            mode = LineEdit.mode(mistate)
+            println("6502...")
+        end,
+        entered = s -> begin
+            TUI.app(screen)
+            REPL.LineEdit.transition(() -> nothing, mistate, mode)
+        end,
+        mode_name = "ASM_mode",
+        completion_provider = ctx,
     )
+    #ctx.mode.on_done = (_...)->(println("DONE"); nothing)
     ctx.settings = Dict(pairs(DEFAULT_SETTINGS)...)
     ctx.dirty = false
     ctx.runid = 1
     monitor_worker(ctx)
     ctx
+end
+
+function takeover_repl(mistate, mode, screen, s::LineEdit.MIState)
+    TUI.app(screen)
+    REPL.LineEdit.transition(() -> nothing, mistate, mode)
 end
 
 function monitor_worker(ctx::ReplContext)
@@ -151,9 +227,11 @@ function monitor_worker(ctx::ReplContext)
             end
             local (runid, status) = take!(ctx.worker.run_channel)
             local s = status
-            @printf "done: %04X %s a: %02X x: %02X y: %02X sp: %02X [%s]" s.pc Fake6502.status(s.status) s.a s.x s.y s.sp runid
+            @printf "done: %04X %s a: %02X x: %02X y: %02X sp: %02X [%s]" s.pc Fake6502.status(
+                s.status,
+            ) s.a s.x s.y s.sp runid
         catch err
-            @error err exception=(err,catch_backtrace())
+            @error err exception = (err, catch_backtrace())
         end
     end
 end
@@ -178,11 +256,13 @@ function handle_command(ctx::ReplContext, line)
     if isnothing(cmd) || string(cmd) ∉ ALL_CMDS
         isnothing(m) && println("NOT A COMMAND")
         !isnothing(m) && println("UNRECOGNIZED COMMAND $line")
-        println("ASM REPL expected an assembly instruction or a directive: $(join([DIRECTIVES..., dot_cmds...], ", "))")
+        println(
+            "ASM REPL expected an assembly instruction or a directive: $(join([DIRECTIVES..., dot_cmds...], ", "))",
+        )
         return nothing
     end
-    local prefix = line[1:cmd.offset + length(cmd)]
-    local body = line[length(prefix) + 1:end]
+    local prefix = line[1:cmd.offset+length(cmd)]
+    local body = line[length(prefix)+1:end]
     if haskey(REPL_CMDS, cmd)
         println("REPL CMD: $cmd")
         local (cmd, func) = REPL_CMDS[cmd]
@@ -197,7 +277,10 @@ function handle_asm_chunk(ctx::ReplContext, line)
     ctx.pending_asm_expr *= line * '\n'
     if !isincomplete(ctx.pending_asm_expr)
         println("$(ctx.pending_asm_expr) is complete")
-        push!(ctx.lines, string.(split(ctx.pending_asm_prefix * ctx.pending_asm_expr, "\n"))...)
+        push!(
+            ctx.lines,
+            string.(split(ctx.pending_asm_prefix * ctx.pending_asm_expr, "\n"))...,
+        )
         ctx.dirty = true
         ctx.pending_asm_expr = ""
         ctx.pending_asm_prefix = ""
@@ -208,8 +291,7 @@ function handle_asm_chunk(ctx::ReplContext, line)
 end
 
 function cmd_asm(ctx::ReplContext, cmd, args)
-    !ctx.dirty &&
-        return
+    !ctx.dirty && return
     if !isdefined(ctx, :worker)
         println("ADDING 6502 WORKER...")
         ctx.worker = add_worker()
@@ -250,12 +332,13 @@ function cmd_edit(ctx::ReplContext, cmd, args)
 end
 
 function cmd_help(ctx::ReplContext, cmd, args)
-    local lines = [
-        "COMMAND               ALIAS  DESCRIPTION"
-    ]
+    local lines = ["COMMAND               ALIAS  DESCRIPTION"]
 
-    for (cmd,def) in DEFS
-        push!(lines, @sprintf "%-23s%-5s%s" cmd * " " * def[2] (length(def) == 3 ? "" : def[4]) def[3])
+    for (cmd, def) in DEFS
+        push!(
+            lines,
+            @sprintf "%-23s%-5s%s" cmd * " " * def[2] (length(def) == 3 ? "" : def[4]) def[3]
+        )
     end
     push!(lines, "CTRL-C                      pause current execution")
     print(join(lines, "\n"))
@@ -265,20 +348,18 @@ function cmd_list(ctx::ReplContext, _, _)
     println(join(ctx.lines, "\n"))
 end
 
-cmderror(msg) = @error msg _module=Main _file="REPL" _line="1"
+cmderror(msg) = @error msg _module = Main _file = "REPL" _line = "1"
 
 function cmd_load(ctx::ReplContext, cmd, args)
     println("LOAD $args")
     local nowatch, file = match(LOAD_PAT, args)
     println("nowatch: $(!isempty(something(nowatch, ""))), file: $file")
-    isempty(something(file, "")) && isempty(last_load) &&
-        return cmderror("No file to load")
+    isempty(something(file, "")) && isempty(last_load) && return cmderror("No file to load")
     load_file(ctx, file)
 end
 
 function load_file(ctx::ReplContext, path)
-    !isnothing(path) && !isfile(path) &&
-        return cmderror("No file $path")
+    !isnothing(path) && !isfile(path) && return cmderror("No file $path")
     path = realpath(path)
     try
         ctx.lines = readlines(path)
@@ -316,28 +397,23 @@ function start_watching(ctx::ReplContext, file::AbstractString)
 end
 
 function input_file_changed(ctx::ReplContext, change)
-    !change.changed &&
-        return
+    !change.changed && return
     println("$(ctx.input_file) changed, reloading...")
     load_file(ctx, ctx.input_file)
 end
 
 function stop_watching(ctx::ReplContext)
-    !isnothing(ctx.input_file_channel) &&
-        put!(ctx.input_file_channel, nothing)
+    !isnothing(ctx.input_file_channel) && put!(ctx.input_file_channel, nothing)
 end
 
 function cmd_save(ctx::ReplContext, cmd, args)
-    isempty(ctx.lines) &&
-        return cmderror("No program in memory")
+    isempty(ctx.lines) && return cmderror("No program in memory")
     local force, file = match(LOAD_PAT, args)
     isempty(something(file, "")) && isempty(last_load)
-        return cmderror("No file to save to")
+    return cmderror("No file to save to")
     local path = realpath(file)
-    !isdir(dirname(path)) &&
-        error("No directory $(dirname(path))")
-    isfile(path) && isempty(something(force, "")) &&
-        error("File $path already exists")
+    !isdir(dirname(path)) && error("No directory $(dirname(path))")
+    isfile(path) && isempty(something(force, "")) && error("File $path already exists")
     open(path, "w") do io
         write(io, join(ctx.lines, "\n"))
     end

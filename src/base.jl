@@ -216,7 +216,10 @@ function call_fake(mach::Machine)
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
         #mprintln(mach,"JSR $label ($addr) [$(hex((addr.value - 1) & 0xFF00))]")
         if addr ∈ keys(mach.fake_routines)
-            mprintln(mach, "@@@ FAKE ROUTINE $(Base.get(mach.addrs, addr, Symbol(string(addr))))")
+            mprintln(
+                mach,
+                "@@@ FAKE ROUTINE $(Base.get(mach.addrs, addr, Symbol(string(addr))))",
+            )
             mach.fake_routines[addr](mach)
             incpc(mach, 3)
             return true
@@ -228,8 +231,7 @@ end
 function call_step(mach::Machine)
     #mprintln(mach, "CALLING STEP")
     #diag(mach)
-    call_fake(mach) &&
-        return
+    call_fake(mach) && return
     #mach.temps = Fake6502m.inner_step6502(mach.newcpu, mach.temps)
     mach.step(mach)
     mach.verbose && diag(mach)
