@@ -61,11 +61,6 @@ end
 const LTR = BorderLeft | BorderTop | BorderRight
 const LTRB = LTR | BorderBottom
 
-log(msg) =
-    open("/tmp/log", "a") do io
-        println(io, msg)
-    end
-
 vertical(::Union{BorderType{:TOP},BorderType{:MID},BorderType{:BOT}}) =
     BOX_DRAWINGS_LIGHT_VERTICAL
 horizontal(::Union{BorderType{:TOP},BorderType{:MID},BorderType{:BOT}}) =

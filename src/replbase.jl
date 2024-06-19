@@ -58,8 +58,8 @@ render(fw::FWidget, area::Rect, buffer::Buffer) = fw.func(area, buffer)
     showcpu::Ref{Bool} = Ref(false)
     cpu::Union{Nothing,Cpu} = nothing
     screenloc::Ref{Tuple{UInt16,UInt16}} = Ref((0x0000, 0x0000)) # row, col
-    screenfile::String = mktemp()
-    image::Vector{UInt8} = mmap(screenfile, Vector{UInt8}, (320*200*3,))
+    screenfile::Tuple{String, IO} = mktemp()
+    #image::Vector{UInt8} = mmap(screenfile[2], Vector{UInt8}, (320*200*3,))
     dirty::Ref{Bool} = Ref(false)
     lastimage::Ref{String} = Ref("")
 end
@@ -84,3 +84,8 @@ end
 
 struct Completer <: CompletionProvider
 end
+
+log(msg) =
+    open("/tmp/log", "a") do io
+        println(io, msg)
+    end

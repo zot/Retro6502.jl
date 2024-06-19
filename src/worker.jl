@@ -10,11 +10,11 @@ module Workers
 
 using Distributed, SharedArrays
 using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM
-using ..C64: C64, @io, @printf, BASIC_ROM
+using ..C64: C64, C64_machine, @io, @printf, BASIC_ROM, c64
 using ..Asm: Asm, CodeContext, getvar
 using ..Fake6502m: Fake6502m, Cpu, Temps, setpc
 import ..Fake6502m:
-    inner_step6502, base_inner_step6502, exec6502, reset6502, ticks, setticks
+    inner_step6502, base_inner_step6502, exec6502, reset6502, ticks, setticks, read6502, write6502, jsr
 
 # extra data after memory
 const OFFSET_DIRTY = 64K + 1
@@ -38,8 +38,10 @@ end
     cpu::Union{Cpu{Worker},Nothing} = nothing
     running::Bool = false
     temps::Temps = Temps()
-    #machine::C64_machine
+    state::C64_machine = C64_machine()
 end
+
+C64.c64(worker::WorkerPrivate) = worker.state
 
 const workers = Dict{Int,Worker}()
 
@@ -130,40 +132,42 @@ updatememory(w::Worker) =
         end
     end
 
+read6502(cpu::Cpu{Worker}, addr::UInt16) = read6502(c64(cpu), cpu, addr)
+write6502(cpu::Cpu{Worker}, addr::UInt16, byte::UInt8) = write6502(c64(cpu), cpu, addr, byte)
+jsr(cpu::Cpu{Worker}, temps) = jsr(c64(cpu), cpu, temps)
+
+function cont(tickcount = Base.max_values(Int))
+    global private
+    local worker = private.worker
+    
+    return lock(private.lock) do
+        isnothing(private.ctx) && error("No program")
+        private.running && error("Program is already running")
+        private.running = true
+        try
+            local temps = private.temps
+            local instructions = 0
+            while ticks(private.cpu, temps) < tickcount && private.cpu.sp != 0xFF
+                temps = worker_step(private.cpu, temps, instructions)
+                instructions += 1
+            end
+            private.cpu.instructions = instructions
+            return Fake6502m.state(private.cpu, private.temps)
+        finally
+            private.running = false
+        end
+    end
+end
+
 function exec(w::Worker, runid::String, label::Symbol; tickcount = Base.max_values(Int))
     remotecall(w.id, label, tickcount) do label, tickcount
-        global private
         local worker = private.worker
-        lock(private.lock) do
-            isnothing(private.ctx) && error("No program")
-            private.running && error("Program is already running")
-            private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
-            private.running = true
-            @spawn try
-                local temps = reset6502(private.cpu, private.temps)
-                local instructions = 0
-                temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
-                temps = setticks(private.cpu, temps, 0)
-                while ticks(private.cpu, temps) < tickcount && private.cpu.sp != 0xFF
-                    temps = worker_step(private.cpu, temps, instructions)
-                    instructions += 1
-                end
-                private.cpu.instructions = instructions
-                temps
-            finally
-                lock(private.lock) do
-                    private.running = false
-                end
-                try
-                    put!(
-                        worker.run_channel,
-                        (; runid, status = Fake6502m.state(private.cpu, private.temps)),
-                    )
-                catch err
-                    @error "Error getting state" exception = (err, catch_backtrace())
-                end
-            end
-        end
+
+        private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
+        private.temps = reset6502(private.cpu, private.temps)
+        private.temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
+        private.temps = setticks(private.cpu, private.temps, 0)
+        return cont(tickcount)
     end
 end
 

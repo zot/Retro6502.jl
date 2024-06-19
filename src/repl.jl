@@ -175,32 +175,12 @@ function repl(specialization = Nothing)
     #ctx.mode.on_done = (_...)->(println("DONE"); nothing)
     ctx.settings = Dict(pairs(DEFAULT_SETTINGS)...)
     ctx.dirty = false
-    ctx.runid = 1
-    monitor_worker(ctx)
     ctx
 end
 
 function takeover_repl(mistate, mode, screen, s::LineEdit.MIState)
     TUI.app(screen)
     REPL.LineEdit.transition(() -> nothing, mistate, mode)
-end
-
-function monitor_worker(ctx::Repl)
-    @async while true
-        try
-            if !isdefined(ctx, :worker)
-                sleep(1)
-                continue
-            end
-            local (runid, status) = take!(ctx.worker.run_channel)
-            local s = status
-            @printf "done: %04X %s a: %02X x: %02X y: %02X sp: %02X [%s]" s.pc Fake6502.status(
-                s.status,
-            ) s.a s.x s.y s.sp runid
-        catch err
-            @error err exception = (err, catch_backtrace())
-        end
-    end
 end
 
 function LineEdit.complete_line(::Repl, state)
