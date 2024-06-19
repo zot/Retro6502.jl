@@ -32,7 +32,7 @@ module AsmRepl
 using TerminalUserInterfaces:
     TerminalUserInterfaces, CrosstermTerminal, tui, move_cursor, TERMINAL, show_cursor
 const TUI = TerminalUserInterfaces
-import TerminalUserInterfaces: render, set, view, update!, init!, should_quit
+import TerminalUserInterfaces: render, set, view, update!, init!, should_quit, Rect, Buffer
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
@@ -44,30 +44,7 @@ using REPL
 using REPL: LineEdit, CompletionProvider
 using Crossterm
 
-function color(rgb::UInt32...)
-    extract(rgb) = rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF
-    color(round.(Ref(UInt8), Base.Iterators.flatten(extract.(rgb)))...)
-end
-
-color(args...) = color(round.(Ref(UInt8), args)...)
-
-function color(r::UInt8, g::UInt8, b::UInt8, args...)
-    isempty(args) && return (; r, g, b)
-    local all =
-        vcat([r g b], ([r1 g1 b1] for (r1, g1, b1) in Iterators.partition(args, 3))...)
-    avg(items) = sum(items) / length(items)
-    color(avg.(eachcol(all))...)
-end
-
-color2int(rgb::@NamedTuple{r::UInt8, g::UInt8, b::UInt8}) = (rgb...,)
-
-#const BORDER = color(0x9f87ef, 0x8978cd, 0x8877cb)
-const BORDER = color(0x9a83e8)
-#const BG = color(0x6347c2, 0x543ea3, 0x614bb4)
-const BG = color(0x55409f)
-#const FG = color(0x9884e3, 0x8673ce, 0x8472c8)
-const FG = color(0x9983ea, 0xFFFFFF)
-
+include("replbase.jl")
 include("screen.jl")
 include("private_replmaker.jl")
 using .PrivateReplMaker
@@ -158,26 +135,9 @@ const REPL_CMDS = Dict(
 const DIRECTIVES = sort([keys(REPL_CMDS)..., dot_cmds...])
 const ALL_CMDS = sort!([ASM_CMDS..., DIRECTIVES...])
 
-mutable struct ReplContext{Specialization} <: CompletionProvider
-    lines::Vector{String}
-    cmd_handler::Function
-    pending_asm_prefix::String
-    pending_asm_expr::String
-    mode::REPL.LineEdit.Prompt
-    input_file::Union{String,Nothing}
-    input_file_channel::Union{Channel{Nothing},Nothing}
-    input_file_changed::Bool
-    worker::Worker
-    labels::Set{Symbol}
-    settings::Dict{Symbol}
-    dirty::Bool
-    runid::Int
-    ReplContext{T}() where {T} = new{T}()
-end
-
-function repl(specialization::Type = Nothing)
+function repl(specialization = Nothing)
     ctx = ReplContext{specialization}()
-    ctx.lines = String[]
+    ctx.asmlines = String[]
     ctx.cmd_handler = handle_command
     ctx.pending_asm_prefix = ""
     ctx.pending_asm_expr = ""
@@ -186,7 +146,8 @@ function repl(specialization::Type = Nothing)
     ctx.input_file_changed = false
     local mistate = nothing
     local mode = nothing
-    local screen = Screen()
+    local screen = Screen{specialization}(; diag = Ref(true), context = ctx)
+    bind_keys(screen)
     ctx.mode = initrepl(
         s -> Base.invokelatest(ctx.cmd_handler, ctx, s);
         prompt_text = "6502> ",
@@ -203,7 +164,7 @@ function repl(specialization::Type = Nothing)
             REPL.LineEdit.transition(() -> nothing, mistate, mode)
         end,
         mode_name = "ASM_mode",
-        completion_provider = ctx,
+        completion_provider = Completer(),
     )
     #ctx.mode.on_done = (_...)->(println("DONE"); nothing)
     ctx.settings = Dict(pairs(DEFAULT_SETTINGS)...)
@@ -243,7 +204,7 @@ end
 
 function handle_command(ctx::ReplContext, line)
     if matches(COMMENT_PAT, line)
-        push!(ctx.lines, line)
+        push!(ctx.asmlines, line)
         return nothing
     end
     local m = match(DIRECTIVE_PAT, line)
@@ -278,7 +239,7 @@ function handle_asm_chunk(ctx::ReplContext, line)
     if !isincomplete(ctx.pending_asm_expr)
         println("$(ctx.pending_asm_expr) is complete")
         push!(
-            ctx.lines,
+            ctx.asmlines,
             string.(split(ctx.pending_asm_prefix * ctx.pending_asm_expr, "\n"))...,
         )
         ctx.dirty = true
@@ -300,7 +261,7 @@ function cmd_asm(ctx::ReplContext, cmd, args)
         Workers.clear(ctx.worker)
     end
     mktemp() do path, io
-        for line in ctx.lines
+        for line in ctx.asmlines
             println(io, line)
         end
         close(io)
@@ -314,7 +275,7 @@ function cmd_break(ctx::ReplContext, cmd, args)
 end
 
 function cmd_clear(ctx::ReplContext, cmd, args)
-    empty!(ctx.lines)
+    empty!(ctx.asmlines)
     ctx.dirty = true
     println("cleared program")
 end
@@ -345,7 +306,7 @@ function cmd_help(ctx::ReplContext, cmd, args)
 end
 
 function cmd_list(ctx::ReplContext, _, _)
-    println(join(ctx.lines, "\n"))
+    println(join(ctx.asmlines, "\n"))
 end
 
 cmderror(msg) = @error msg _module = Main _file = "REPL" _line = "1"
@@ -362,7 +323,7 @@ function load_file(ctx::ReplContext, path)
     !isnothing(path) && !isfile(path) && return cmderror("No file $path")
     path = realpath(path)
     try
-        ctx.lines = readlines(path)
+        ctx.asmlines = readlines(path)
         ctx.dirty = true
         if !isempty(ctx.input_file) && ctx.input_file != path
             stop_watching(ctx)
@@ -407,7 +368,7 @@ function stop_watching(ctx::ReplContext)
 end
 
 function cmd_save(ctx::ReplContext, cmd, args)
-    isempty(ctx.lines) && return cmderror("No program in memory")
+    isempty(ctx.asmlines) && return cmderror("No program in memory")
     local force, file = match(LOAD_PAT, args)
     isempty(something(file, "")) && isempty(last_load)
     return cmderror("No file to save to")
@@ -415,7 +376,7 @@ function cmd_save(ctx::ReplContext, cmd, args)
     !isdir(dirname(path)) && error("No directory $(dirname(path))")
     isfile(path) && isempty(something(force, "")) && error("File $path already exists")
     open(path, "w") do io
-        write(io, join(ctx.lines, "\n"))
+        write(io, join(ctx.asmlines, "\n"))
     end
     println("Wrote program to $path")
 end
@@ -473,7 +434,7 @@ function cmd_assemble(ctx::ReplContext, label, cmd, prefix, expr, line)
         ctx.cmd_handler = handle_asm_chunk
         ctx.mode.prompt = "6502...> "
     else
-        push!(ctx.lines, line)
+        push!(ctx.asmlines, line)
         ctx.dirty = true
     end
 end
