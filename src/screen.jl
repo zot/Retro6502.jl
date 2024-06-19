@@ -65,13 +65,12 @@ vertical(::Union{BorderType{:TOP},BorderType{:MID},BorderType{:BOT}}) =
     BOX_DRAWINGS_LIGHT_VERTICAL
 horizontal(::Union{BorderType{:TOP},BorderType{:MID},BorderType{:BOT}}) =
     BOX_DRAWINGS_LIGHT_HORIZONTAL
+
 top_left(::Union{BorderType{:MID},BorderType{:BOT}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_RIGHT
 top_right(::Union{BorderType{:MID},BorderType{:BOT}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
-bottom_left(::Union{BorderType{:TOP},BorderType{:MID}}) =
-    BOX_DRAWINGS_LIGHT_VERTICAL_AND_RIGHT
-bottom_right(::Union{BorderType{:TOP},BorderType{:MID}}) =
-    BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
 
+bottom_left(::Union{BorderType{:TOP},BorderType{:MID}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_RIGHT
+bottom_right(::Union{BorderType{:TOP},BorderType{:MID}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
 top_left(::BorderType{:TOP}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_RIGHT
 top_right(::BorderType{:TOP}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT
 
@@ -246,11 +245,11 @@ end
 TUI.draw(t::CrosstermTerminal, ::Any) = TUI.draw(t)
 
 function TUI.draw(t::CrosstermTerminal, scr::Screen)
-    (isnothing(scr.cpu) || !scr.dirty[]) &&
-        return
     local lastimage = scr.lastimage[]
     TUI.draw(t)
     scr.cursor[] == (0x0000, 0x0000) &&
+        return
+    (isnothing(scr.cpu) || !scr.dirty[]) &&
         return
     TUI.save_cursor(t)
     move_cursor(TERMINAL[], scr.cursor[]...)
