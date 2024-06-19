@@ -107,16 +107,11 @@ end
 Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
 
 @kwdef mutable struct C64_machine
-    scr_id::Int
-    scr_buf::Array{GLubyte,3} = zeros(GLubyte, (4, scr_width, scr_height))
-    scratch_buf::Array{GLubyte,2} = fill(GLubyte(0xFF), (4, scr_width * scr_height))
     video_lock::ReentrantLock = ReentrantLock()
     needs_update::Atomic{Bool} = Atomic{Bool}(false)
-    has_dirty_rects::Atomic{Bool} = Atomic{Bool}(false)
     all_dirty::Bool = true
     dirty_characters::Array{Bool,1} = zeros(Bool, (40 * 25,)) # characters that have changed
     dirty_character_defs::Array{Bool,1} = zeros(Bool, (256,)) # character defs that have changed
-    dirty_rects::Vector{Rect} = Rect[]
     multicolor::Bool = false
     banks::Set{AddrRange} = Set{AddrRange}()
     screen_mem::Addr = A(0x400)
@@ -131,10 +126,9 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     maxtime::Atomic{UInt64} = Atomic{UInt64}(0)
     curtime::Atomic{UInt64} = Atomic{UInt64}(0)
     fake_routines::Dict{Addr,Function} = Dict{Addr,Function}()
-    pressed_keys::Set{String} = Set{String}()
 end
 
-function pause(f::Function, c::C64_machine)
+function pause(f::Function, c)
     pause(c)
     try
         f()
@@ -143,7 +137,8 @@ function pause(f::Function, c::C64_machine)
     end
 end
 
-function pause(c::C64_machine)
+function pause(state)
+    c = c64(state)
     # issue a pause command
     lock(c.pause) do
         c.pause_count[] += 1
@@ -151,7 +146,8 @@ function pause(c::C64_machine)
     wait_for_pause(c)
 end
 
-function wait_for_pause(c::C64_machine)
+function wait_for_pause(state)
+    c = c64(state)
     # wait for the machine to actually pause
     # once it's paused, the machine is known to be locked
     # so it's safe to modify the state until it's resumed (registers, memory, etc.)
@@ -163,7 +159,8 @@ function wait_for_pause(c::C64_machine)
     end
 end
 
-function resume(c::C64_machine)
+function resume(state)
+    c = c64(state)
     lock(c.pause) do
         c.pause_count[] -= 1
         c.pause_count[] == 0 && notify(c.pause)
@@ -210,14 +207,15 @@ function process_io()
     end
 end
 
-mprint(::Machine{C64_machine}, args...) = @io print(args...)
-mprintln(::Machine{C64_machine}, args...) = @io println(args...)
-mprint(::Cpu{C64_machine}, args...) = @io print(args...)
-mprintln(::Cpu{C64_machine}, args...) = @io println(args...)
+mprint(::Machine, args...) = @io print(args...)
+mprintln(::Machine, args...) = @io println(args...)
+mprint(::Cpu, args...) = @io print(args...)
+mprintln(::Cpu, args...) = @io println(args...)
+
 
 c64(cpu::Cpu{C64_machine})::C64_machine = cpu.user_data
-
 c64(mach::Machine)::C64_machine = c64(mach.newcpu)
+c64(state::C64_machine)::C64_machine = state
 
 function screen_mem(mach::Machine)
     c = c64(mach)
@@ -231,8 +229,9 @@ function character_mem(mach::Machine)
     @view characters[c.character_mem.value:c.character_mem.value+0x7FF]
 end
 
-function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
-    state = c64(cpu)
+Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16) = read6502(c64(cpu), cpu, addr)
+
+function Fake6502m.read6502(state::C64_machine, cpu::Cpu, addr::UInt16)
     banks = state.banks
     adr = A(addr)
     for bank in banks
@@ -241,13 +240,21 @@ function Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16)
     cpu.memory[adr.value]
 end
 
-c64_set_mem(cpu::Cpu{C64_machine}, addr::Addr, byte::UInt8) =
+c64_set_mem(cpu::Cpu, addr::Addr, byte::UInt8) =
     c64_set_mem(cpu, UInt16(addr.value - 0x01), byte)
-c64_set_mem(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
-    Rewinding.write6502(cpu.user_data.rewinder, cpu, addr, byte)
 
-function Fake6502m.jsr(cpu::Cpu{C64_machine}, temps)
-    mach = c64(cpu)
+c64_set_mem(cpu::Cpu, addr::UInt16, byte::UInt8) =
+    c64_set_mem(c64(cpu), cpu, addr, byte)
+
+c64_set_mem(state::C64_machine, cpu::Cpu, addr::Addr, byte::UInt8) =
+    c64_set_mem(state, cpu, UInt16(addr.value - 0x01), byte)
+
+c64_set_mem(state::C64_machine, cpu::Cpu, addr::UInt16, byte::UInt8) =
+    Rewinding.write6502(state.rewinder, cpu, addr, byte)
+
+Fake6502m.jsr(cpu::Cpu{C64_machine}, temps) = Fake6502m.jsr(c64(cpu), cpu, temps)
+
+function Fake6502m.jsr(mach::C64_machine, cpu::Cpu, temps)
     curpc = Fake6502m.pc(cpu, temps)
     curpc >= length(mach.fake_routines) && return Fake6502m.base_jsr(cpu, temps)
     # jumping to fake routine
@@ -256,8 +263,9 @@ function Fake6502m.jsr(cpu::Cpu{C64_machine}, temps)
     return mach.fake_routines[curpc+1](cpu, temps)::Fake6502m.Temps
 end
 
-function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
-    state = c64(cpu)
+Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) = write6502(c64(cpu), cpu, addr, byte)
+
+function Fake6502m.write6502(state::C64_machine, cpu::Cpu, addr::UInt16, byte::UInt8)
     adr = A(addr)
     if isvideo(state, addr)
         video(state) do
@@ -283,7 +291,7 @@ function Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8)
     elseif adr == BANK_SWITCH
         # writing to bank switcher
         @io println("WRITE TO BANK SWITCH")
-        switch_banks(state, byte)
+        switch_banks(state, cpu, byte)
         return
     elseif adr == VIC_MEM || adr == VIC_BANK
         cpu.memory[adr.value] == byte && return
@@ -311,8 +319,8 @@ end
 
 in_bank(addr, bank, banks) = addr ∈ bank && bank ∈ banks
 
-function switch_banks(cpu::Cpu{C64_machine}, value::UInt8)
-    banks = cpu.user_data.banks
+function switch_banks(state::C64_machine, cpu::Cpu, value::UInt8)
+    banks = state.banks
     io = cpu.memory[IO_CTL.value]
     original = settings = cpu.memory[BANK_SWITCH.value]
     for bit in (0x01, 0x02, 0x04)
@@ -330,7 +338,7 @@ function switch_banks(cpu::Cpu{C64_machine}, value::UInt8)
         @io println("BANK CHOICES CHANGED")
         settings != value &&
             @io println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
-        c64_set_mem(cpu, BANK_SWITCH, settings)
+        c64_set_mem(state, cpu, BANK_SWITCH, settings)
     else
         @io println("BANK CHOICES DID NOT CHANGE")
     end
@@ -379,14 +387,8 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
     state.maxtime[] = state.rewinder.curtime
 end
 
-function init(load::Function)
-    state = C64_machine(;
-        scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(
-            scr_width,
-            scr_height,
-        ),
-    )
-    mach = NewMachine(; user_data = state)
+function init(load::Function; state = C64_machine(), user_data = state)
+    mach = NewMachine(; user_data)
     mem(mach)[intrange(screen)] .= ' '
     mach[BORDER] = 0xE
     mach[BG0] = 0x6
@@ -398,7 +400,7 @@ function init(load::Function)
     end
     init_rom()
     mach[IO_CTL] = 0x2F
-    switch_banks(mach.newcpu, 0x07)
+    switch_banks(state, mach.newcpu, 0x07)
     Rewinding.init(state.rewinder, mach.newcpu, mach.temps)
     Rewinding.init_undo_session(state.rewinder, state.session)
     load(mach)
@@ -407,7 +409,6 @@ function init(load::Function)
     labelcount = Ref(0)
     addrs = Dict(addr => name for (name, addr) in labels)
     maxwid = max(length.(string.(keys(labels)))...)
-    state.all_dirty = true
     mach.step = function (mach::Machine)
         global revising
 
@@ -418,7 +419,7 @@ function init(load::Function)
         end
     end
     register(print_n, mach, :print_n)
-    return mach
+    return mach, state
 end
 
 function video(func::Function, mach::C64_machine)

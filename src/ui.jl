@@ -127,17 +127,43 @@ function im_key((s, k)::Tuple{Symbol,LibCImGui.ImGuiKey})
 end
 const IM_INPUTS = Dict{Any,Any}(im_key(imkeys) => (c64key,) for (c64key, imkeys) in KEYS)
 
+mutable struct UIData
+    scr_id::Int
+    scr_buf::Array{GLubyte,3}
+    scratch_buf::Array{GLubyte,2}
+    has_dirty_rects::Atomic{Bool}
+    dirty_rects::Vector{Rect}
+    state::C64_machine
+    pressed_keys::Set{String}
+    function UIData()
+        local ui = new()
+
+        ui.pressed_keys = Set{String}()
+        ui.scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(scr_width, scr_height)
+        ui.scr_buf = zeros(GLubyte, (4, scr_width, scr_height))
+        ui.scratch_buf = fill(GLubyte(0xFF), (4, scr_width * scr_height))
+        ui.has_dirty_rects = Atomic{Bool}(false)
+        ui.dirty_rects = Rect[]
+        return ui
+    end
+end
+
+uidata(mach::Machine{UIData})::UIData = uidata(mach.newcpu)
+uidata(cpu::Cpu{UIData})::UIData = cpu.user_data
+uidata(ui::UIData)::UIData = ui
+
+C64.c64(machine::Union{UIData, Cpu{UIData}, Machine{UIData}}) = uidata(machine).state
+
 """
 C64 IO routine
 """
-function c64_io(cpu::Cpu{C64_machine})
+function c64_io(ui::UIData)
     unsafe_load(CImGui.GetIO().WantCaptureKeyboard) && return
-    local c = c64(cpu)
-    empty!(c.pressed_keys)
+    empty!(ui.pressed_keys)
     # read a keyboard value and write it to memory
     for (imkeys, c64keys) in IM_INPUTS
         if all(CImGui.IsKeyPressed, imkeys)
-            push!(c.pressed_keys, c64keys...)
+            push!(ui.pressed_keys, c64keys...)
             println("PRESSED: $c64keys")
         end
     end
@@ -157,8 +183,8 @@ function c64_io(cpu::Cpu{C64_machine})
     end
 end
 
-function merge_dirty(mach::C64_machine, rect::Rect)
-    dirty = mach.dirty_rects
+function merge_dirty(ui::UIData, rect::Rect)
+    dirty = ui.dirty_rects
     changed = true
     while changed
         changed = false
@@ -171,10 +197,11 @@ function merge_dirty(mach::C64_machine, rect::Rect)
         end
     end
     push!(dirty, rect)
-    mach.has_dirty_rects[] = true
+    ui.has_dirty_rects[] = true
 end
 
 function update_screen(mach::Machine)
+    ui = uidata(mach)
     c = c64(mach)
     all_dirty = c.all_dirty
     dirtydefs = Set(i for (i, d) in enumerate(c.dirty_character_defs) if d)
@@ -185,7 +212,7 @@ function update_screen(mach::Machine)
             i = row * 40 + col
             char = scr_mem[1+i]
             !all_dirty && !c.dirty_characters[1+i] && char ∉ dirtydefs && continue
-            merge_dirty(c, Rect(col * 8, row * 8, 7, 7))
+            merge_dirty(ui, Rect(col * 8, row * 8, 7, 7))
             for pixel = 0:7
                 x = col * 8 + pixel
                 c.multicolor && error("multicolor not supported")
@@ -195,9 +222,9 @@ function update_screen(mach::Machine)
                     y = row * 8 + rowbyte
                     pixels = char_mem[1+8*char+rowbyte]
                     color = (pixels >> (7 - pixel)) & 1 == 1 ? fg : bg
-                    c.scr_buf[1, x+1, y+1] = GLubyte(color[1])
-                    c.scr_buf[2, x+1, y+1] = GLubyte(color[2])
-                    c.scr_buf[3, x+1, y+1] = GLubyte(color[3])
+                    ui.scr_buf[1, x+1, y+1] = GLubyte(color[1])
+                    ui.scr_buf[2, x+1, y+1] = GLubyte(color[2])
+                    ui.scr_buf[3, x+1, y+1] = GLubyte(color[3])
                 end
             end
         end
@@ -206,7 +233,7 @@ function update_screen(mach::Machine)
     c.dirty_character_defs .= false
     c.all_dirty = false
     c.needs_update[] = false
-    @io println("dirty rects after update: ", c.dirty_rects)
+    @io println("dirty rects after update: ", ui.dirty_rects)
 end
 
 struct Close <: Exception end
@@ -227,15 +254,16 @@ function draw_rect(id, x, y, w, h, pixels)
 end
 
 function draw_screen(mach::Machine)
+    ui = uidata(mach)
     state = c64(mach)
-    !state.needs_update[] && !state.has_dirty_rects[] && return
+    !state.needs_update[] && !ui.has_dirty_rects[] && return
     video(state) do
         state.needs_update[] && update_screen(mach)
-        if state.has_dirty_rects[]
-            image_buf = state.scr_buf
-            image_id = state.scr_id
-            pix = state.scratch_buf
-            for r in state.dirty_rects
+        if ui.has_dirty_rects[]
+            image_buf = ui.scr_buf
+            image_id = ui.scr_id
+            pix = ui.scratch_buf
+            for r in ui.dirty_rects
                 count = 1
                 for y = r.y:bottom(r), x = r.x:right(r)
                     for c = 1:3
@@ -245,13 +273,14 @@ function draw_screen(mach::Machine)
                 end
                 draw_rect(image_id, r.x, r.y, r.w + 1, r.h + 1, pix)
             end
-            empty!(state.dirty_rects)
-            state.has_dirty_rects[] = false
+            empty!(ui.dirty_rects)
+            ui.has_dirty_rects[] = false
         end
     end
 end
 
 function draw_ui(mach::Machine, width, height)
+    local ui = uidata(mach)
     local state = c64(mach)
     local nodeco =
         ImGuiWindowFlags_NoDecoration |
@@ -271,7 +300,7 @@ function draw_ui(mach::Machine, width, height)
         sz = CImGui.GetContentRegionAvail()
         antialias(false)
         CImGui.Image(
-            Ptr{Cvoid}(state.scr_id),
+            Ptr{Cvoid}(ui.scr_id),
             CImGui.ImVec2(sz.x, sz.y - GetTextLineHeight() - space),
         )
         antialias(true)
@@ -323,7 +352,7 @@ function draw_ui(mach::Machine, width, height)
         end
     end
     CImGui.End()
-    c64_io(mach.newcpu)
+    c64_io(uidata(mach))
 end
 
 function antialias(enable)
@@ -411,6 +440,32 @@ function with_imgui(func::Function, init::Function)
     end
 end
 
+function Fake6502m.reset6502(cpu::Cpu{UIData}, temps)
+    #lower fidelity emulation for the time being by turning off reads
+    #read6502(cpu, 0x00ff)
+    #read6502(cpu, 0x00ff)
+    #read6502(cpu, 0x00ff)
+    #read6502(cpu, 0x0100)
+    #read6502(cpu, 0x01ff)
+    #read6502(cpu, 0x01fe)
+    cpu.instructions = 0
+    #cpu.pc = mem_6502_read16(cpu, 0xfffc)
+    cpu.sp = 0xfd
+    cpu.status |= Fake6502m.FLAG_CONSTANT | Fake6502m.FLAG_INTERRUPT
+    local pc = UInt16(cpu.memory[0xfffc + 1]) | (UInt16(cpu.memory[0xfffc + 2]) << 8)
+    Fake6502m.setticks(cpu, Fake6502m.Temps(temps; pc), 0)
+end
+
+
+Fake6502m.read6502(cpu::Cpu{UIData}, addr::UInt16) =
+    Fake6502m.read6502(uidata(cpu).state, cpu, addr)
+
+Fake6502m.jsr(cpu::Cpu{UIData}, temps) =
+    Fake6502m.jsr(uidata(cpu).state, cpu, temps)
+
+Fake6502m.write6502(cpu::Cpu{UIData}, addr::UInt16, byte::UInt8) =
+    Fake6502m.write6502(uidata(cpu).state, cpu, addr, byte)
+
 function test_c64(load = load_condensed; revise = false, verbose = false)
     setrevising(revise)
     local mach = nothing
@@ -418,8 +473,11 @@ function test_c64(load = load_condensed; revise = false, verbose = false)
     local task = nothing
 
     function init_c64()
-        mach = init(load)
-        state = c64(mach)
+        local ui = UIData()
+
+        mach, state = init(load; user_data = ui)
+        state.all_dirty = true
+        ui.state = state
         Threads.@spawn begin
             try
                 @io println("CALLING ASMTEST")

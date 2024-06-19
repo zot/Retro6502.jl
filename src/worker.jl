@@ -16,6 +16,9 @@ using ..Fake6502m: Fake6502m, Cpu, Temps, setpc
 import ..Fake6502m:
     inner_step6502, base_inner_step6502, exec6502, reset6502, ticks, setticks
 
+# extra data after memory
+const OFFSET_DIRTY = 64K + 1
+
 # this worker
 private = nothing
 
@@ -24,7 +27,7 @@ private = nothing
     run_channel::RemoteChannel{Channel{Any}} = RemoteChannel() do
         Channel{Any}(10)
     end
-    memory::SharedVector{UInt8} = SharedVector{UInt8}((64K,); pids = procs())
+    memory::SharedVector{UInt8} = SharedVector{UInt8}((64K + 1,); pids = procs())
 end
 
 @kwdef mutable struct WorkerPrivate
@@ -35,6 +38,7 @@ end
     cpu::Union{Cpu{Worker},Nothing} = nothing
     running::Bool = false
     temps::Temps = Temps()
+    #machine::C64_machine
 end
 
 const workers = Dict{Int,Worker}()

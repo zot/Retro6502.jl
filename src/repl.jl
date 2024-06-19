@@ -29,20 +29,24 @@ The REPL manages its own UI along with workers for assembly and execution.
 """
 module AsmRepl
 
+using Unicode, SharedArrays
 using TerminalUserInterfaces:
-    TerminalUserInterfaces, CrosstermTerminal, tui, move_cursor, TERMINAL, show_cursor
+    TerminalUserInterfaces, CrosstermTerminal, tui, move_cursor, TERMINAL, show_cursor, Layout,
+    Paragraph, Block, Constraint, make_words
+using TerminalUserInterfaces.Crayons
 const TUI = TerminalUserInterfaces
 import TerminalUserInterfaces: render, set, view, update!, init!, should_quit, Rect, Buffer
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
 using ...Fake6502: Fake6502, matches, display_chars, intrange, screen
-using ..Fake6502m: opsyms
+using ..Fake6502m: opsyms, Cpu
 using ..C64
 using ..Workers: Workers, Worker, add_worker
 using REPL
 using REPL: LineEdit, CompletionProvider
 using Crossterm
+using Mmap
 
 include("replbase.jl")
 include("screen.jl")
@@ -135,8 +139,10 @@ const REPL_CMDS = Dict(
 const DIRECTIVES = sort([keys(REPL_CMDS)..., dot_cmds...])
 const ALL_CMDS = sort!([ASM_CMDS..., DIRECTIVES...])
 
+Base.println(ctx::Repl, args...) = println(ctx.screen, args...)
+
 function repl(specialization = Nothing)
-    ctx = ReplContext{specialization}()
+    ctx = Repl{specialization}()
     ctx.asmlines = String[]
     ctx.cmd_handler = handle_command
     ctx.pending_asm_prefix = ""
@@ -144,10 +150,10 @@ function repl(specialization = Nothing)
     ctx.input_file = ""
     ctx.input_file_channel = nothing
     ctx.input_file_changed = false
+    ctx.screen = Screen{specialization}(; diag = Ref(true), repl = ctx)
+    bind_keys(ctx.screen)
     local mistate = nothing
     local mode = nothing
-    local screen = Screen{specialization}(; diag = Ref(true), context = ctx)
-    bind_keys(screen)
     ctx.mode = initrepl(
         s -> Base.invokelatest(ctx.cmd_handler, ctx, s);
         prompt_text = "6502> ",
@@ -157,10 +163,10 @@ function repl(specialization = Nothing)
         enter = function (s)
             mistate = Base.active_repl.mistate
             mode = LineEdit.mode(mistate)
-            println("6502...")
+            #println(ctx, "6502...")
         end,
         entered = s -> begin
-            TUI.app(screen)
+            TUI.app(ctx.screen)
             REPL.LineEdit.transition(() -> nothing, mistate, mode)
         end,
         mode_name = "ASM_mode",
@@ -179,7 +185,7 @@ function takeover_repl(mistate, mode, screen, s::LineEdit.MIState)
     REPL.LineEdit.transition(() -> nothing, mistate, mode)
 end
 
-function monitor_worker(ctx::ReplContext)
+function monitor_worker(ctx::Repl)
     @async while true
         try
             if !isdefined(ctx, :worker)
@@ -197,12 +203,12 @@ function monitor_worker(ctx::ReplContext)
     end
 end
 
-function LineEdit.complete_line(::ReplContext, state)
+function LineEdit.complete_line(::Repl, state)
     local str = LineEdit.input_string(state)
     return [dir for dir in ALL_CMDS if startswith(dir, str)], str, true
 end
 
-function handle_command(ctx::ReplContext, line)
+function handle_command(ctx::Repl, line)
     if matches(COMMENT_PAT, line)
         push!(ctx.asmlines, line)
         return nothing
@@ -215,9 +221,10 @@ function handle_command(ctx::ReplContext, line)
         nothing, isempty(toks) ? nothing : toks[1]
     end
     if isnothing(cmd) || string(cmd) ∉ ALL_CMDS
-        isnothing(m) && println("NOT A COMMAND")
-        !isnothing(m) && println("UNRECOGNIZED COMMAND $line")
+        isnothing(m) && println(ctx, "NOT A COMMAND")
+        !isnothing(m) && println(ctx, "UNRECOGNIZED COMMAND $line")
         println(
+            ctx,
             "ASM REPL expected an assembly instruction or a directive: $(join([DIRECTIVES..., dot_cmds...], ", "))",
         )
         return nothing
@@ -225,7 +232,7 @@ function handle_command(ctx::ReplContext, line)
     local prefix = line[1:cmd.offset+length(cmd)]
     local body = line[length(prefix)+1:end]
     if haskey(REPL_CMDS, cmd)
-        println("REPL CMD: $cmd")
+        println(ctx, "REPL CMD: $cmd")
         local (cmd, func) = REPL_CMDS[cmd]
         func(ctx, cmd, strip(body))
     else
@@ -234,10 +241,10 @@ function handle_command(ctx::ReplContext, line)
     nothing
 end
 
-function handle_asm_chunk(ctx::ReplContext, line)
+function handle_asm_chunk(ctx::Repl, line)
     ctx.pending_asm_expr *= line * '\n'
     if !isincomplete(ctx.pending_asm_expr)
-        println("$(ctx.pending_asm_expr) is complete")
+        println(ctx, "$(ctx.pending_asm_expr) is complete")
         push!(
             ctx.asmlines,
             string.(split(ctx.pending_asm_prefix * ctx.pending_asm_expr, "\n"))...,
@@ -251,12 +258,12 @@ function handle_asm_chunk(ctx::ReplContext, line)
     nothing
 end
 
-function cmd_asm(ctx::ReplContext, cmd, args)
+function cmd_asm(ctx::Repl, cmd, args)
     !ctx.dirty && return
     if !isdefined(ctx, :worker)
-        println("ADDING 6502 WORKER...")
+        println(ctx, "ADDING 6502 WORKER...")
         ctx.worker = add_worker()
-        println("DONE")
+        println(ctx, "DONE")
     else
         Workers.clear(ctx.worker)
     end
@@ -270,29 +277,29 @@ function cmd_asm(ctx::ReplContext, cmd, args)
     ctx.dirty = false
 end
 
-function cmd_break(ctx::ReplContext, cmd, args)
-    println("BREAK $args")
+function cmd_break(ctx::Repl, cmd, args)
+    println(ctx, "BREAK $args")
 end
 
-function cmd_clear(ctx::ReplContext, cmd, args)
+function cmd_clear(ctx::Repl, cmd, args)
     empty!(ctx.asmlines)
     ctx.dirty = true
-    println("cleared program")
+    println(ctx, "cleared program")
 end
 
-function cmd_del(ctx::ReplContext, cmd, args)
-    println("DEL $args")
+function cmd_del(ctx::Repl, cmd, args)
+    println(ctx, "DEL $args")
 end
 
-function cmd_diag(ctx::ReplContext, cmd, args)
-    println("DIAG $args")
+function cmd_diag(ctx::Repl, cmd, args)
+    println(ctx, "DIAG $args")
 end
 
-function cmd_edit(ctx::ReplContext, cmd, args)
-    println("EDIT $args")
+function cmd_edit(ctx::Repl, cmd, args)
+    println(ctx, "EDIT $args")
 end
 
-function cmd_help(ctx::ReplContext, cmd, args)
+function cmd_help(ctx::Repl, cmd, args)
     local lines = ["COMMAND               ALIAS  DESCRIPTION"]
 
     for (cmd, def) in DEFS
@@ -302,24 +309,24 @@ function cmd_help(ctx::ReplContext, cmd, args)
         )
     end
     push!(lines, "CTRL-C                      pause current execution")
-    print(join(lines, "\n"))
+    print(ctx, join(lines, "\n"))
 end
 
-function cmd_list(ctx::ReplContext, _, _)
-    println(join(ctx.asmlines, "\n"))
+function cmd_list(ctx::Repl, _, _)
+    println(ctx, join(ctx.asmlines, "\n"))
 end
 
 cmderror(msg) = @error msg _module = Main _file = "REPL" _line = "1"
 
-function cmd_load(ctx::ReplContext, cmd, args)
-    println("LOAD $args")
+function cmd_load(ctx::Repl, cmd, args)
+    println(ctx, "LOAD $args")
     local nowatch, file = match(LOAD_PAT, args)
-    println("nowatch: $(!isempty(something(nowatch, ""))), file: $file")
+    println(ctx, "nowatch: $(!isempty(something(nowatch, ""))), file: $file")
     isempty(something(file, "")) && isempty(last_load) && return cmderror("No file to load")
     load_file(ctx, file)
 end
 
-function load_file(ctx::ReplContext, path)
+function load_file(ctx::Repl, path)
     !isnothing(path) && !isfile(path) && return cmderror("No file $path")
     path = realpath(path)
     try
@@ -336,11 +343,11 @@ function load_file(ctx::ReplContext, path)
     end
 end
 
-function start_watching(ctx::ReplContext, file::AbstractString)
+function start_watching(ctx::Repl, file::AbstractString)
     ctx.input_file = string(file)
     ctx.input_file_channel = Channel{Nothing}()
     @async begin
-        println("WATCHING $file FOR CHANGES")
+        println(ctx, "WATCHING $file FOR CHANGES")
         while true
             if isready(ctx.input_file_channel)
                 take!(ctx.input_file_channel)
@@ -357,17 +364,17 @@ function start_watching(ctx::ReplContext, file::AbstractString)
     end
 end
 
-function input_file_changed(ctx::ReplContext, change)
+function input_file_changed(ctx::Repl, change)
     !change.changed && return
-    println("$(ctx.input_file) changed, reloading...")
+    println(ctx, "$(ctx.input_file) changed, reloading...")
     load_file(ctx, ctx.input_file)
 end
 
-function stop_watching(ctx::ReplContext)
+function stop_watching(ctx::Repl)
     !isnothing(ctx.input_file_channel) && put!(ctx.input_file_channel, nothing)
 end
 
-function cmd_save(ctx::ReplContext, cmd, args)
+function cmd_save(ctx::Repl, cmd, args)
     isempty(ctx.asmlines) && return cmderror("No program in memory")
     local force, file = match(LOAD_PAT, args)
     isempty(something(file, "")) && isempty(last_load)
@@ -378,31 +385,31 @@ function cmd_save(ctx::ReplContext, cmd, args)
     open(path, "w") do io
         write(io, join(ctx.asmlines, "\n"))
     end
-    println("Wrote program to $path")
+    println(ctx, "Wrote program to $path")
 end
 
-function cmd_set(ctx::ReplContext, cmd, args)
-    println("SET $args")
+function cmd_set(ctx::Repl, cmd, args)
+    println(ctx, "SET $args")
 end
 
-function cmd_next(ctx::ReplContext, cmd, args)
-    println("NEXT $args")
+function cmd_next(ctx::Repl, cmd, args)
+    println(ctx, "NEXT $args")
 end
 
-function cmd_run(ctx::ReplContext, cmd, args)
+function cmd_run(ctx::Repl, cmd, args)
     cmd_asm(ctx, cmd, args)
     Workers.exec(ctx.worker, "run-$(ctx.runid)", :main; tickcount = ctx.settings[:maxticks])
     ctx.runid += 1
 end
 
-function cmd_reset(ctx::ReplContext, cmd, args)
-    println("RESET $args")
+function cmd_reset(ctx::Repl, cmd, args)
+    println(ctx, "RESET $args")
     #ctx.
 end
 
-function cmd_screen(ctx::ReplContext, cmd, args)
+function cmd_screen(ctx::Repl, cmd, args)
     if !isdefined(ctx, :worker)
-        println("No program running")
+        println(ctx, "No program running")
         return
     end
     display_chars(@view ctx.worker.memory[intrange(screen)]) do c
@@ -410,24 +417,24 @@ function cmd_screen(ctx::ReplContext, cmd, args)
     end
 end
 
-function cmd_show(ctx::ReplContext, cmd, args)
-    println("SHOW $args")
+function cmd_show(ctx::Repl, cmd, args)
+    println(ctx, "SHOW $args")
 end
 
-function cmd_status(ctx::ReplContext, cmd, args)
-    println("STATUS $args")
+function cmd_status(ctx::Repl, cmd, args)
+    println(ctx, "STATUS $args")
 end
 
-function cmd_step(ctx::ReplContext, cmd, args)
-    println("STEP $args")
+function cmd_step(ctx::Repl, cmd, args)
+    println(ctx, "STEP $args")
 end
 
-function cmd_watch(ctx::ReplContext, cmd, args)
-    println("WATCH $args")
+function cmd_watch(ctx::Repl, cmd, args)
+    println(ctx, "WATCH $args")
 end
 
-function cmd_assemble(ctx::ReplContext, label, cmd, prefix, expr, line)
-    println("ASM CMD: [$label] [$cmd] / [$prefix] [$expr]")
+function cmd_assemble(ctx::Repl, label, cmd, prefix, expr, line)
+    println(ctx, "ASM CMD: [$label] [$cmd] / [$prefix] [$expr]")
     if isincomplete(expr)
         ctx.pending_asm_prefix = prefix
         ctx.pending_asm_expr = expr * '\n'

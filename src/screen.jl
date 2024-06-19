@@ -1,16 +1,8 @@
-using Unicode, SharedArrays
 using TerminalUserInterfaces:
     TextWrap,
-    Layout,
-    Paragraph,
     Word,
-    make_words,
-    Buffer,
-    Rect,
     right,
     bottom,
-    Block,
-    Constraint,
     Length,
     Min,
     inner,
@@ -28,16 +20,15 @@ using TerminalUserInterfaces:
     BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_RIGHT,
     BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT,
     BOX_DRAWINGS_LIGHT_ARC_UP_AND_RIGHT,
-    BOX_DRAWINGS_LIGHT_ARC_UP_AND_LEFT
+    BOX_DRAWINGS_LIGHT_ARC_UP_AND_LEFT,
+    previous_buffer
 using .TextWrap
 
 import TerminalUserInterfaces:
     vertical, horizontal, top_left, top_right, bottom_left, bottom_right, app
-using TerminalUserInterfaces.Crayons
 
 const GSTART = "\e_G"
 const GEND = "\e\\"
-const screen_style = Crayon(; foreground = color2int(FG), background = color2int(BG))
 const RETURN_RIGHT = "⮑"
 const NEWLINE_RIGHT = "⮓"
 const MOD_NAMES = (;
@@ -50,26 +41,13 @@ const KEYMAP = Dict{String,Function}()
 """
 Screen structure, parameterized to allow customization
 """
-@kwdef struct Screen{T} <: TUI.Model
-    regs::Ref{String} = Ref("")
-    monitor::Paragraph =
-        Paragraph(Block(; title = "", border = 0), make_words("C64 state", screen_style), 1)
-    #repl::Page = Page()
-    status::Ref{AbstractString} = "CTRL-Q: QUIT"
-    layout::Layout = Layout(; widgets = [], constraints = Constraint[])
-    quit::Ref{Bool} = Ref(false)
-    cursor::Ref{Tuple{UInt16,UInt16}} = Ref((0x0000, 0x0000)) # row, col
-    screenloc::Ref{Tuple{UInt16,UInt16}} = Ref((0x0000, 0x0000)) # row, col
-    image::SharedVector{UInt8} = SharedVector(fill(0xFF, 40 * 8 * 25 * 8 * 3))
-    repllines::Vector{String} = ["READY!", "asdf"]
-    wrappedlines::Vector{Vector{String}} = [["READY!"], ["asdf"]]
-    screenwidth::Ref{Int} = Ref(0)
-    replarea::Ref{Rect} = Ref(Rect())
-    diag::Ref{Bool} = Ref(false)
-    context::ReplContext
-end
+function setcursor(scr::Screen, y, x)
+    local area = scr.replarea[]
 
-setcursor(scr::Screen, y, x) = scr.cursor[] = UInt16.((y, x))
+    y = max(area.y, min(bottom(area), y))
+    x = max(area.x, min(right(area), x))
+    scr.cursor[] = UInt16.((y, x))
+end
 
 setscreenloc(scr::Screen, y, x) = scr.screenloc[] = UInt16.((y, x))
 
@@ -117,11 +95,13 @@ function screenarea(
     border = LTR,
     border_type = BorderType{:MID}(),
 )
+    global border_style
     local block = Block(;
         title,
+        title_style = border_style,
         border,
         border_type,
-        border_style = Crayon(; foreground = color2int(BORDER)),
+        border_style,
     )
 
     FWidget() do area, buffer
@@ -150,25 +130,31 @@ function set(
     end
 end
 
-function configure(scr::Screen; regs = true, monitor = true, c64screen = true, repl = true)
+function configure(scr::Screen; regs = scr.showcpu[], monitor = regs, c64screen = regs, repl = true)
+    local bordertype = :TOP
+    function bt()
+        local t = bordertype
+        bordertype = :MID
+        return BorderType{t}()
+    end
     empty!(scr.layout.widgets)
     empty!(scr.layout.constraints)
     setcursor(scr, 0x0000, 0x0000)
     setscreenloc(scr, 0x0000, 0x0000)
     if regs
         push!(
-            scr.layout.widgets, screenarea(; title = "Registers", border_type = BorderType{:TOP}()) do area, buf
+            scr.layout.widgets, screenarea(; title = "Registers", border_type = bt()) do area, buf
                 set(buf, area, ["C64 REGISTERS"])
             end
         )
         push!(scr.layout.constraints, Length(2))
     end
     if monitor
-        push!(scr.layout.widgets, screenarea(scr.monitor; title = "Monitor"))
+        push!(scr.layout.widgets, screenarea(scr.monitor; title = "Monitor", border_type = bt()))
         push!(scr.layout.constraints, Length(9))
     end
     if c64screen
-        push!(scr.layout.widgets, screenarea(; title = "Screen") do area, buf
+        push!(scr.layout.widgets, screenarea(; title = "Screen", border_type = bt()) do area, buf
             setscreenloc(scr, area.y, area.x)
             set(buf, area, split("this\nis\nthe\nscreen", '\n'))
         end)
@@ -176,7 +162,7 @@ function configure(scr::Screen; regs = true, monitor = true, c64screen = true, r
     end
     if repl
     #push!(scr.layout.widgets, screenarea(scr.repl; title = "Repl"))
-        push!(scr.layout.widgets, screenarea(; title = "Repl") do area, buf
+        push!(scr.layout.widgets, screenarea(; title = "Repl", border_type = bt()) do area, buf
             drawrepl(scr, area, buf)
         end)
         push!(scr.layout.constraints, Min(2))
@@ -205,9 +191,8 @@ function drawrepl(scr::Screen, area::Rect, buf::Buffer)
     local lines = [Iterators.flatten(scr.wrappedlines)...]
 
     scr.replarea[] = area
-    if scr.cursor[] == (0x0000, 0x0000)
+    scr.cursor[] == (0x0000, 0x0000) &&
         cursorend(scr)
-    end
     set(buf, area, lines)
 end
 
@@ -265,16 +250,26 @@ end
 
 TUI.draw(t::CrosstermTerminal, ::Any) = TUI.draw(t)
 
-function TUI.draw(t::CrosstermTerminal, screen::Screen)
+function TUI.draw(t::CrosstermTerminal, scr::Screen)
+    (isnothing(scr.cpu) || !scr.dirty[]) &&
+        return
+    local lastimage = scr.lastimage[]
     TUI.draw(t)
-    screen.cursor[] == (0x0000, 0x0000) &&
+    scr.cursor[] == (0x0000, 0x0000) &&
         return
     TUI.save_cursor(t)
-    move_cursor(TERMINAL[], screen.cursor[]...)
-    log("OUTPUT $(length(screen.image)) bytes: $(GSTART)f=24,t=s,s=$(40 * 8),v=$(25 * 8),q=2;$(screen.image.segname[2:end])$GEND")
+    move_cursor(TERMINAL[], scr.cursor[]...)
+    log("OUTPUT $(length(scr.image)) bytes: $(GSTART)f=24,t=s,s=$(40 * 8),v=$(25 * 8),q=2;$(scr.image.segname[2:end])$GEND")
     #TUI.put("$(GSTART)f=24,t=s,s=$(40 * 8),v=$(25 * 8);$(screen.image.segname)$GEND")
-    TUI.put("\e[80C$(GSTART)f=24,t=s,s=$(40 * 8),v=$(25 * 8),q=2;$(screen.image.segname[2:end])$GEND")
+    TUI.put("\e[80C$(GSTART)f=24,t=s,s=$(40 * 8),v=$(25 * 8),q=2;$(scr.image.segname[2:end])$GEND")
     TUI.restore_cursor(t)
+    delete_image(t, lastimage)
+end
+
+function delete_image(t::CrosstermTerminal, id::String)
+    id == "" &&
+        return
+    TUI.put("$(GSTART)a=d,d=i,i=$id$GEND")
 end
 
 function trimlines(scr::Screen)
@@ -286,9 +281,13 @@ function trimlines(scr::Screen)
     end
 end
 
+function wraplastline(scr::Screen)
+    scr.wrappedlines[end] = split(wrap(scr.repllines[end]; width=scr.screenwidth[], replace_whitespace=false), "\n")
+end
+
 function key_self_insert(scr::Screen, evt::TUI.KeyEvent, y, x)
     scr.repllines[end] *= TUI.keypress(evt)
-    scr.wrappedlines[end] = split(wrap(scr.repllines[end]; width=scr.screenwidth[], replace_whitespace=false), "\n")
+    wraplastline(scr)
     trimlines(scr)
     cursorend(scr)
 end
@@ -302,11 +301,12 @@ function key_accept(scr::Screen, ::TUI.KeyEvent, y, x)
         y += 1
     end
     setcursor(scr, y, scr.replarea[].x)
-    handle_command(scr.context, scr.repllines[end - 1])
+    handle_command(scr.repl, scr.repllines[end - 1])
 end
 
 function key_forward(scr::Screen, ::TUI.KeyEvent, y, x)
-    setcursor(scr, y, min(scr.replarea[].x + length(scr.repllines[end]), x + 1))
+    local area = scr.replarea[]
+    setcursor(scr, y, min(area.x + length(scr.repllines[end]), x + 1))
 end
 
 function key_back(scr::Screen, ::TUI.KeyEvent, y, x)
@@ -334,7 +334,7 @@ function key_backspace(scr::Screen, ::TUI.KeyEvent, y, x)
         setcursor(scr, y, x)
         if length(line) >= off
             scr.repllines[end] = line[1:off - 1] * line[off + 1:end]
-            scr.wrappedlines[end] = split(wrap(scr.repllines[end]; width=scr.screenwidth[], replace_whitespace=false), "\n")
+            wraplastline(scr)
             trimlines(scr)
         end
     end
@@ -346,7 +346,7 @@ function key_kill(scr::Screen, ::TUI.KeyEvent, y, x)
 
     if length(line) >= off
         scr.repllines[end] = line[1:off - 1]
-        scr.wrappedlines[end] = split(wrap(scr.repllines[end]; width=scr.screenwidth[], replace_whitespace=false), "\n")
+        wraplastline(scr)
         trimlines(scr)
     end
 end
@@ -355,12 +355,20 @@ function key_quit(scr::Screen, ::TUI.KeyEvent, y, x)
     scr.quit[] = true
 end
 
+function key_layout(scr::Screen, ::TUI.KeyEvent, y, x)
+    scr.showcpu[] = !scr.showcpu[]
+    configure(scr)
+end
+
+function key_refresh(::Screen, ::TUI.KeyEvent, y, x)
+    TerminalUserInterfaces.reset(previous_buffer())
+end
+
 function bind_keys(::Screen)
-    for c in 'a':'z'
+    for c in filter(isprint, Char(0):Char(255))
         KEYMAP[string(c)] = key_self_insert
         KEYMAP[string(uppercase(c))] = key_self_insert
     end
-    KEYMAP[" "] = key_self_insert
     merge!(KEYMAP, Dict(
         "Enter" => key_accept,
         "Home" => key_start_line,
@@ -374,5 +382,24 @@ function bind_keys(::Screen)
         "Backspace" => key_backspace,
         "Ctrl-k" => key_kill,
         "Ctrl-q" => key_quit,
+        "Ctrl-l" => key_layout,
+        "Ctrl-r" => key_refresh,
     ))
+end
+
+function Base.println(scr::Screen, args...)
+    scr.cursor[] == (0x0000, 0x0000) &&
+        error("Attempt to print to an uninitialized screen")
+    local content = sprint() do io
+        println(io, args...)
+    end
+    local lines = [split(content, "\n")..., ""]
+    scr.repllines[end] *= lines[1]
+    wraplastline(scr)
+    for line in lines[2:end]
+        push!(scr.repllines, line)
+        wraplastline(scr)
+    end
+    trimlines(scr)
+    cursorend(scr)
 end

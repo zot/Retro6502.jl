@@ -272,12 +272,12 @@ function forward(cpu::Cpu, rewinder::Rewinder, session::RewindSession)
             cpu.memory[snap.addr+2] != undo.u2.value && error(
                 "memory value $(rhex(cpu.memory[snap.addr + 2])) != undo value $(rhex(undo.u2.value))",
             )
-            write6502(cpu, snap.addr + 1, snap.value2)
+            write6502(cpu, snap.addr + 0x01, snap.value2)
             if writes > 2
                 cpu.memory[snap.addr+2] != undo.u2.value && error(
                     "memory value $(rhex(cpu.memory[snap.addr + 3])) != undo value $(rhex(undo.u3.value))",
                 )
-                write6502(cpu, snap.addr + 2, snap.value3)
+                write6502(cpu, snap.addr + 0x02, snap.value3)
             end
         end
     end
