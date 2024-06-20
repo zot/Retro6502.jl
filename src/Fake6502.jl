@@ -24,9 +24,14 @@ const SCREEN_CODES = Vector{Char}(
     String('A':'Z') *
     BLANKS(255 - 219 + 1),
 )
-const ASCII_TO_SCREEN = Dict(v => k - 1 for (k, v) in reverse([enumerate(SCREEN_CODES)...]))
-screen2ascii(char) = SCREEN_CODES[UInt8(char)+1]
-ascii2screen(char) = ASCII_TO_SCREEN[char]
+while length(SCREEN_CODES) < 256
+    push!(SCREEN_CODES, ' ')
+end
+const ASCII_TO_SCREEN = Dict(v => UInt8(k - 1) for (k, v) in reverse([enumerate(SCREEN_CODES)...]))
+screen2ascii(str::AbstractString) = String(screen2ascii.(Vector{UInt8}(str)))
+screen2ascii(char::Integer) = SCREEN_CODES[UInt8(char)+1]
+ascii2screen(str::AbstractString) = ascii2screen.(Vector{UInt8}(str))
+ascii2screen(char::Union{Char, Integer}) = get(ASCII_TO_SCREEN, Char(char), 0xFF)
 const CDIR = joinpath(dirname(@__FILE__), "..", "C")
 const EDIR = joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR = joinpath(dirname(@__FILE__), "..", "resources")
@@ -188,7 +193,7 @@ function test()
     labelcount = 0
     maxwid = max(0, length.(string.(keys(labels)))...)
     mach.step = function (mach::Machine)
-        label = Base.get(addrs, A(pc(mach.newcpu, mach.temps)), nothing)
+        label = get(addrs, A(pc(mach.newcpu, mach.temps)), nothing)
         if !isnothing(label)
             if label === lastlabel
                 labelcount === 0 && println("  LOOP...")

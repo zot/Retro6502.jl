@@ -9,8 +9,8 @@ it's nice to be able to scrap workers to prevent permanent garbage from piling u
 module Workers
 
 using Distributed, SharedArrays
-using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM
-using ..C64: C64, C64_machine, @io, @printf, BASIC_ROM, c64
+using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM, intrange, A
+using ..C64: C64, C64_machine, @io, @printf, BASIC_ROM, c64, initstate
 using ..Asm: Asm, CodeContext, getvar
 using ..Fake6502m: Fake6502m, Cpu, Temps, setpc
 import ..Fake6502m:
@@ -73,17 +73,20 @@ function asmfile(filename::AbstractString)
 end
 
 "Asynchronously execute a function during emulator execution"
-function async(func::Function)
+function async(func::Function; onlyifrunning=false)
     global private
-    !private.running && error("Program is not running")
-    put!(private.cmds, func)
+    if private.running
+        put!(private.cmds, func)
+    elseif !onlyifrunning
+        error("Program is not running")
+    end
 end
 
 "Synchronously execute a function during emulator execution"
-function sync(func::Function)
+function sync(func::Function; onlyifrunning = false)
     local result_chan = Channel{Any}()
     local thrown = nothing
-    async() do
+    async(; onlyifrunning) do
         try
             put!(result_chan, func())
         catch err
@@ -126,15 +129,22 @@ clear(w::Worker) =
 
 updatememory(w::Worker) =
     remotecall_wait(w.id) do
-        sync() do
-            global private
-            private.worker.memory .= private.cpu.memory
+        sync(; onlyifrunning=true) do
+            privateupdate()
         end
     end
 
-read6502(cpu::Cpu{Worker}, addr::UInt16) = read6502(c64(cpu), cpu, addr)
-write6502(cpu::Cpu{Worker}, addr::UInt16, byte::UInt8) = write6502(c64(cpu), cpu, addr, byte)
-jsr(cpu::Cpu{Worker}, temps) = jsr(c64(cpu), cpu, temps)
+function privateupdate()
+    global private
+    (@view private.worker.memory[1:64K]) .= private.cpu.memory
+    for bank in [c64(private).banks..., A(0x1000:0x17FF)]
+        (@view private.worker.memory[intrange(bank)]) .= @view ROM[intrange(bank)]
+    end
+end
+
+read6502(cpu::Cpu{WorkerPrivate}, addr::UInt16) = read6502(c64(cpu), cpu, addr)
+write6502(cpu::Cpu{WorkerPrivate}, addr::UInt16, byte::UInt8) = write6502(c64(cpu), cpu, addr, byte)
+jsr(cpu::Cpu{WorkerPrivate}, temps) = jsr(c64(cpu), cpu, temps)
 
 function cont(tickcount = Base.max_values(Int))
     global private
@@ -151,6 +161,10 @@ function cont(tickcount = Base.max_values(Int))
                 temps = worker_step(private.cpu, temps, instructions)
                 instructions += 1
             end
+            if private.cpu.sp == 0xFF
+                # done running -- copy memory over
+                privateupdate()
+            end
             private.cpu.instructions = instructions
             return Fake6502m.state(private.cpu, private.temps)
         finally
@@ -159,11 +173,13 @@ function cont(tickcount = Base.max_values(Int))
     end
 end
 
-function exec(w::Worker, runid::String, label::Symbol; tickcount = Base.max_values(Int))
-    remotecall(w.id, label, tickcount) do label, tickcount
+function exec(w::Worker, label::Symbol; tickcount = Base.max_values(Int))
+    return remotecall(w.id, label, tickcount) do label, tickcount
         local worker = private.worker
 
         private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
+        mach = initstate(worker.state, private.cpu)
+        private.cpu = mach.newcpu
         private.temps = reset6502(private.cpu, private.temps)
         private.temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
         private.temps = setticks(private.cpu, private.temps, 0)

@@ -6,7 +6,7 @@ module AsmTools
 using Printf: @printf, @sprintf
 using ..Fake6502: hex, rhex, asmerr, matches, ascii2screen
 
-export align, data, word, words, @rel_str, @label_str, @printf, @sprintf
+export align, data, word, words, @rel_str, @label_str, @printf, @sprintf, ascii2screen
 
 context = nothing
 

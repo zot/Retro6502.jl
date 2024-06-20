@@ -47,6 +47,7 @@ using REPL
 using REPL: LineEdit, CompletionProvider
 using Crossterm
 using Mmap
+import Base: print, println
 
 include("replbase.jl")
 include("screen.jl")
@@ -139,7 +140,8 @@ const REPL_CMDS = Dict(
 const DIRECTIVES = sort([keys(REPL_CMDS)..., dot_cmds...])
 const ALL_CMDS = sort!([ASM_CMDS..., DIRECTIVES...])
 
-Base.println(ctx::Repl, args...) = println(ctx.screen, args...)
+println(ctx::Repl, args...) = println(ctx.screen, args...)
+print(ctx::Repl, args...) = print(ctx.screen, args...)
 
 function repl(specialization = Nothing)
     ctx = Repl{specialization}()
@@ -189,6 +191,7 @@ function LineEdit.complete_line(::Repl, state)
 end
 
 function handle_command(ctx::Repl, line)
+    log("Handle command: $line")
     if matches(COMMENT_PAT, line)
         push!(ctx.asmlines, line)
         return nothing
@@ -289,7 +292,8 @@ function cmd_help(ctx::Repl, cmd, args)
         )
     end
     push!(lines, "CTRL-C                      pause current execution")
-    print(ctx, join(lines, "\n"))
+    log("PRINTING HELP")
+    println(ctx, join(lines, "\n"))
 end
 
 function cmd_list(ctx::Repl, _, _)
@@ -378,8 +382,9 @@ end
 
 function cmd_run(ctx::Repl, cmd, args)
     cmd_asm(ctx, cmd, args)
-    Workers.exec(ctx.worker, "run-$(ctx.runid)", :main; tickcount = ctx.settings[:maxticks])
+    Workers.exec(ctx.worker, :main; tickcount = ctx.settings[:maxticks])
     ctx.runid += 1
+    ctx.screen.dirty[] = true
 end
 
 function cmd_reset(ctx::Repl, cmd, args)
@@ -392,7 +397,7 @@ function cmd_screen(ctx::Repl, cmd, args)
         println(ctx, "No program running")
         return
     end
-    display_chars(@view ctx.worker.memory[intrange(screen)]) do c
+    display_chars(ctx, @view ctx.worker.memory[intrange(screen)]) do c
         C64.SCREEN_CODES[c+1]
     end
 end

@@ -387,20 +387,26 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
     state.maxtime[] = state.rewinder.curtime
 end
 
-function init(load::Function; state = C64_machine(), user_data = state)
-    mach = NewMachine(; user_data)
-    mem(mach)[intrange(screen)] .= ' '
-    mach[BORDER] = 0xE
-    mach[BG0] = 0x6
-    mach[BG1] = 0x1
-    mach[BG2] = 0x2
-    mach[BG3] = 0x3
+function initstate(state::C64_machine, cpu::Cpu)
+    local memory = cpu.memory
+
+    memory[intrange(screen)] .= ' '
+    memory[BORDER.value] = 0xE
+    memory[BG0.value] = 0x6
+    memory[BG1.value] = 0x1
+    memory[BG2.value] = 0x2
+    memory[BG3.value] = 0x3
     for mem = 0xD800:0xDBE7
-        mach[mem] = 0x01
+        memory[mem + 1] = 0x01
     end
     init_rom()
-    mach[IO_CTL] = 0x2F
-    switch_banks(state, mach.newcpu, 0x07)
+    memory[IO_CTL.value] = 0x2F
+    switch_banks(state, cpu, 0x07)
+end
+
+function init(load::Function; state = C64_machine(), user_data = state)
+    mach = NewMachine(; user_data)
+    initstate(state, mach.newcpu)
     Rewinding.init(state.rewinder, mach.newcpu, mach.temps)
     Rewinding.init_undo_session(state.rewinder, state.session)
     load(mach)

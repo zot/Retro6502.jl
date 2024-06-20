@@ -1,0 +1,4 @@
+*       = $400
+        .enc "screen"
+        .text "HELLO WORLD"
+

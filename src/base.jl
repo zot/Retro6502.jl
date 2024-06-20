@@ -8,6 +8,7 @@ const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.
 #const fake6502_step = Base.Libc.Libdl.dlsym(lib, :fake6502_step)
 const SCREEN_LEN = 40 * 25
 const screen = A(0x0400:0x07FF)
+const char_defs = A(0x1000:0x17FF)
 const colors = A(0xD800:0xDBFF) # color is bits 8-11, color 1 for each character (color 3 in multicolor)
 const ROM_FILES = Dict(
     A(0x1000:0x1FFF) => "$RDIR/characters.bin", # visible only to VIC-II
@@ -63,8 +64,8 @@ end
 
 type(::Access{T,L}) where {T,L} = L
 offset(a::Access) = getfield(a, :offset)
-get(a::Access{T,L}, ptr::Ptr{T}) where {T,L} = unsafe_load(Ptr{L}(ptr) + offset(a), 1)
-get(::Access{T}, ::Ptr{U}) where {T,U} =
+Base.get(a::Access{T,L}, ptr::Ptr{T}) where {T,L} = unsafe_load(Ptr{L}(ptr) + offset(a), 1)
+Base.get(::Access{T}, ::Ptr{U}) where {T,U} =
     error("Unsafe get: accessor for $T is not compatible with pointer to $U")
 set!(a::Access{T,L}, ptr::Ptr{T}, value) where {T,L} =
     unsafe_store!(Ptr{L}(ptr) + offset(a), convert(L, value), 1)
@@ -103,7 +104,7 @@ offset(a::Accessor, field::Symbol) = offset(access(Accessor(a, field)))
 access(a::Accessor) = getfield(a, :access)
 type(::Accessor{T,L}) where {T,L} = L
 ptr(a::Accessor) = getfield(a, :ptr)
-get(a::Accessor) = get(access(a), ptr(a))
+Base.get(a::Accessor) = get(access(a), ptr(a))
 set!(a::Accessor, value) = set!(access(a), ptr(a), value)
 "Create an Accessor with the same path but a different pointer"
 withptr(a::Accessor{T}, ptr::Ptr{T}) where {T} = Accessor(access(a), ptr)
@@ -488,12 +489,15 @@ end
 
 display_chars(screen_mem::AbstractArray{UInt8,1}) = display_chars(identity, screen_mem)
 
-function display_chars(cvt::Function, screen_mem::AbstractVector{UInt8})
-    println("+", join((x -> "-").(1:40), ""), "+")
+display_chars(cvt::Function, screen_mem::AbstractVector{UInt8}) =
+    display_chars(cvt::Function, stdout, screen_mem::AbstractVector{UInt8})
+
+function display_chars(cvt::Function, io, screen_mem::AbstractVector{UInt8})
+    println(io, "+", join((x -> "-").(1:40), ""), "+")
     for i = 1:40:SCREEN_LEN
-        println("|", String(cvt.(screen_mem[i:i+39])), "|")
+        println(io, "|", String(cvt.(screen_mem[i:i+39])), "|")
     end
-    println("+", join((x -> "-").(1:40), ""), "+")
+    println(io, "+", join((x -> "-").(1:40), ""), "+")
 end
 
 const CONDENSE_START = 2850

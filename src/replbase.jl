@@ -40,6 +40,9 @@ end
 
 render(fw::FWidget, area::Rect, buffer::Buffer) = fw.func(area, buffer)
 
+"""
+Screen structure, parameterized to allow customization
+"""
 @kwdef struct Screen{T} <: TUI.Model
     regs::Ref{String} = Ref("")
     monitor::Paragraph =
@@ -48,20 +51,22 @@ render(fw::FWidget, area::Rect, buffer::Buffer) = fw.func(area, buffer)
     status::Ref{AbstractString} = "CTRL-Q: QUIT"
     layout::Layout = Layout(; widgets = [], constraints = Constraint[])
     quit::Ref{Bool} = Ref(false)
-    cursor::Ref{Tuple{UInt16,UInt16}} = Ref((0x0000, 0x0000)) # row, col
-    repllines::Vector{String} = ["READY!", "asdf"]
-    wrappedlines::Vector{Vector{String}} = [["READY!"], ["asdf"]]
-    screenwidth::Ref{Int} = Ref(0)
+    repllines::Vector{String} = ["READY!", ".load examples/statichello.jas"]
+    wrappedlines::Vector{Vector{String}} = [["READY!"], [".load examples/statichello.jas"]]
+    screenlines::Vector{String} = String[]
+    cursor::Ref{Int} = Ref(0) # col
     replarea::Ref{Rect} = Ref(Rect())
     diag::Ref{Bool} = Ref(false)
     repl::Any
     showcpu::Ref{Bool} = Ref(false)
     cpu::Union{Nothing,Cpu} = nothing
-    screenloc::Ref{Tuple{UInt16,UInt16}} = Ref((0x0000, 0x0000)) # row, col
+    screenloc::Ref{Tuple{UInt16,UInt16}} = Ref((0x0001, 0x0001)) # row, col
     screenfile::Tuple{String, IO} = mktemp()
-    #image::Vector{UInt8} = mmap(screenfile[2], Vector{UInt8}, (320*200*3,))
+    image::Vector{UInt8} = mmap(screenfile[2], Vector{UInt8}, (320*200*3,))
     dirty::Ref{Bool} = Ref(false)
     lastimage::Ref{String} = Ref("")
+    lastcmd::Ref{String} = Ref("")
+    lastevt::Ref{TUI.KeyEvent} = Ref(TUI.KeyEvent(Crossterm.EventTag.KEY, Crossterm.KeyEvent("", String[], "", String[])))
 end
 
 mutable struct Repl{Specialization}
