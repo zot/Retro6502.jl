@@ -71,7 +71,7 @@ Base.hash(r::AddrRange, h::UInt64) = Base.hash(intrange(r), h)
 
 Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
 Base.show(io::IO, addr::Addr) =
-    print(io, "Addr(0x", lpad(string(UInt16(addr.value) - 1; base = 16), 4, "0"), ")")
+    print(io, "Addr(0x", lpad(string(UInt16(addr.value - 1); base = 16), 4, "0"), ")")
 Base.:(>>)(a::Addr, i::UInt64) = Addr((a.value - 1) >> i)
 Base.:(<<)(a::Addr, i::UInt64) = Addr((a.value - 1) << i)
 Base.:(<)(a::Addr, b::Addr) = a.value < b.value

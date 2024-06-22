@@ -9,7 +9,7 @@ it's nice to be able to scrap workers to prevent permanent garbage from piling u
 module Workers
 
 using Distributed, SharedArrays
-using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM, intrange, A
+using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM, intrange, A, char_defs, log
 using ..C64: C64, C64_machine, @io, @printf, BASIC_ROM, c64, initstate
 using ..Asm: Asm, CodeContext, getvar
 using ..Fake6502m: Fake6502m, Cpu, Temps, setpc
@@ -136,8 +136,9 @@ updatememory(w::Worker) =
 
 function privateupdate()
     global private
-    (@view private.worker.memory[1:64K]) .= private.cpu.memory
-    for bank in [c64(private).banks..., A(0x1000:0x17FF)]
+    private.worker.memory .= private.cpu.memory
+    for bank in [c64(private).banks..., char_defs]
+        log("ROM UPDATE: $(bank)")
         (@view private.worker.memory[intrange(bank)]) .= @view ROM[intrange(bank)]
     end
 end
@@ -150,6 +151,7 @@ function cont(tickcount = Base.max_values(Int))
     global private
     local worker = private.worker
     
+    log("CONTINUING EXECUTION")
     return lock(private.lock) do
         isnothing(private.ctx) && error("No program")
         private.running && error("Program is already running")
@@ -157,11 +159,14 @@ function cont(tickcount = Base.max_values(Int))
         try
             local temps = private.temps
             local instructions = 0
+            log("RUNNING...")
             while ticks(private.cpu, temps) < tickcount && private.cpu.sp != 0xFF
                 temps = worker_step(private.cpu, temps, instructions)
                 instructions += 1
             end
+            log("FINISHED. CHECKING WHETHER TO UPDATE MEMORY")
             if private.cpu.sp == 0xFF
+                log("UPDATING MEMORY")
                 # done running -- copy memory over
                 privateupdate()
             end
@@ -175,15 +180,20 @@ end
 
 function exec(w::Worker, label::Symbol; tickcount = Base.max_values(Int))
     return remotecall(w.id, label, tickcount) do label, tickcount
-        local worker = private.worker
+        try
+            local worker = private.worker
 
-        private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
-        mach = initstate(worker.state, private.cpu)
-        private.cpu = mach.newcpu
-        private.temps = reset6502(private.cpu, private.temps)
-        private.temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
-        private.temps = setticks(private.cpu, private.temps, 0)
-        return cont(tickcount)
+            log("REMOTE EXEC")
+            private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
+            log("INITIALIZING STATE")
+            initstate(private.state, private.cpu; clearscreen=false)
+            private.temps = reset6502(private.cpu, private.temps)
+            private.temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
+            private.temps = setticks(private.cpu, private.temps, 0)
+            return cont(tickcount)
+        catch err
+            @error string(err) exception=(err,catch_backtrace())
+        end
     end
 end
 

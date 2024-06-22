@@ -509,3 +509,8 @@ end
 function asmwarn(ctx, msg)
     println(stderr, "Warning: for line $(ctx.line.number) [$(ctx.line.line)]: $msg")
 end
+
+log(msg) =
+    open("/tmp/log", "a") do io
+        println(io, msg)
+    end

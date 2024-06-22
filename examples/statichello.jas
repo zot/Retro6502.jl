@@ -1,3 +1,7 @@
 *       = 0x400
+        .data ascii2screen.(fill(' ', 1000))
+*       = 0x400
         .data ascii2screen.("HELLO WORLD")
+*       = 0xd800
+        .data fill(0x01, 1000)
 main    RTS

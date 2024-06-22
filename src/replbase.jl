@@ -89,8 +89,3 @@ end
 
 struct Completer <: CompletionProvider
 end
-
-log(msg) =
-    open("/tmp/log", "a") do io
-        println(io, msg)
-    end

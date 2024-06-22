@@ -39,7 +39,7 @@ import TerminalUserInterfaces: render, set, view, update!, init!, should_quit, R
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
-using ...Fake6502: Fake6502, matches, display_chars, intrange, screen
+using ...Fake6502: Fake6502, matches, display_chars, intrange, screen, log
 using ..Fake6502m: opsyms, Cpu
 using ..C64
 using ..Workers: Workers, Worker, add_worker
@@ -145,6 +145,7 @@ print(ctx::Repl, args...) = print(ctx.screen, args...)
 
 function repl(specialization = Nothing)
     ctx = Repl{specialization}()
+    global _REPL = ctx
     ctx.asmlines = String[]
     ctx.cmd_handler = handle_command
     ctx.pending_asm_prefix = ""

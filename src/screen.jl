@@ -148,6 +148,7 @@ function configure(scr::Screen; regs = scr.showcpu[], monitor = regs, c64screen 
         bordertype = :MID
         return BorderType{t}()
     end
+    TUI.put("$(GSTART)a=d,d=a$GEND")
     empty!(scr.layout.widgets)
     empty!(scr.layout.constraints)
     if regs

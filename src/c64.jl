@@ -387,10 +387,10 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
     state.maxtime[] = state.rewinder.curtime
 end
 
-function initstate(state::C64_machine, cpu::Cpu)
+function initstate(state::C64_machine, cpu::Cpu; clearscreen=true)
     local memory = cpu.memory
 
-    memory[intrange(screen)] .= ' '
+    clearscreen && (memory[intrange(screen)] .= ' ')
     memory[BORDER.value] = 0xE
     memory[BG0.value] = 0x6
     memory[BG1.value] = 0x1
