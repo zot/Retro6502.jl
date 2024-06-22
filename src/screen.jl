@@ -166,9 +166,9 @@ function configure(scr::Screen; regs = scr.showcpu[], monitor = regs, c64screen 
     if c64screen
         push!(scr.layout.widgets, screenarea(; title = "Screen", border_type = bt()) do area, buf
             setscreenloc(scr, area.y, area.x)
-            set(buf, area, split("this\nis\nthe\nscreen", '\n'))
+            set(buf, area, [])
         end)
-        push!(scr.layout.constraints, Length(27))
+        push!(scr.layout.constraints, Length(26))
     end
     if repl
         push!(scr.layout.widgets, screenarea(; title = "Repl", border_type = bt()) do area, buf
@@ -267,7 +267,7 @@ function TUI.draw(t::CrosstermTerminal, scr::Screen)
         drawscreen(scr)
         move_cursor(TERMINAL[], scr.screenloc[]...)
         local screenfile = base64encode(scr.screenfile[1])
-        local cmd = "$(GSTART)a=T,f=24,t=f,s=$(40 * 8),v=$(25 * 8),q=2;$screenfile$GEND"
+        local cmd = "$(GSTART)a=T,f=24,t=f,s=$(40 * 8),v=$(25 * 8),r=25,q=2;$screenfile$GEND"
 
         log("OUTPUT $(length(scr.image)) bytes: $cmd")
         #TUI.put("\e[80C$(GSTART)a=T,i=1,f=24,t=f,s=$(40 * 8),v=$(25 * 8),q=2;$screenfile$GEND")
