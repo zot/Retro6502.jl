@@ -154,6 +154,7 @@ function repl(specialization = Nothing)
     ctx.input_file_channel = nothing
     ctx.input_file_changed = false
     ctx.screen = Screen{specialization}(; diag = Ref(true), repl = ctx)
+    ctx.state = (;)
     bind_keys(ctx.screen)
     local mistate = nothing
     local mode = nothing
@@ -383,14 +384,12 @@ end
 
 function cmd_run(ctx::Repl, cmd, args)
     cmd_asm(ctx, cmd, args)
-    Workers.exec(ctx.worker, :main; tickcount = ctx.settings[:maxticks])
+    ctx.state = fetch(Workers.exec(ctx.worker, :main; tickcount = ctx.settings[:maxticks]))
     ctx.runid += 1
-    ctx.screen.dirty[] = true
 end
 
 function cmd_reset(ctx::Repl, cmd, args)
     println(ctx, "RESET $args")
-    #ctx.
 end
 
 function cmd_screen(ctx::Repl, cmd, args)

@@ -1,6 +1,7 @@
 using TerminalUserInterfaces:
     TextWrap,
     Word,
+    Rect,
     right,
     bottom,
     Length,
@@ -22,8 +23,9 @@ using TerminalUserInterfaces:
     BOX_DRAWINGS_LIGHT_ARC_UP_AND_RIGHT,
     BOX_DRAWINGS_LIGHT_ARC_UP_AND_LEFT,
     previous_buffer
+using TerminalUserInterfaces.Crossterm.LibCrossterm.libcrossterm_jll
 using .TextWrap
-using ..Fake6502: C64, Workers, screen, char_defs
+using ..Fake6502: C64, Workers, Fake6502m, screen, char_defs, status
 using .C64: C64_PALETTE, BG0, COLOR_MEM
 using .Workers: updatememory
 using Mmap: sync!
@@ -75,24 +77,60 @@ function render(scr::Screen, area::Rect, buffer::Buffer)
     setstatus(scr, "[$col] $keycode $mod $key $(evt.data.kind) $evt $(scr.lastcmd[])")
 end
 
-const LTR = BorderLeft | BorderTop | BorderRight
+const LT = BorderLeft | BorderTop
+const TR = BorderTop | BorderRight
+const LTR = LT | TR
 const LTRB = LTR | BorderBottom
 
-vertical(::Union{BorderType{:TOP},BorderType{:MID},BorderType{:BOT}}) =
+vertical(::Union{BorderType{:TOP},BorderType{:TR},BorderType{:TL},BorderType{:MID},BorderType{:BOT}}) =
     BOX_DRAWINGS_LIGHT_VERTICAL
-horizontal(::Union{BorderType{:TOP},BorderType{:MID},BorderType{:BOT}}) =
+horizontal(::Union{BorderType{:TOP},BorderType{:TR},BorderType{:TL},BorderType{:MID},BorderType{:BOT}}) =
     BOX_DRAWINGS_LIGHT_HORIZONTAL
 
 top_left(::Union{BorderType{:MID},BorderType{:BOT}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_RIGHT
 top_right(::Union{BorderType{:MID},BorderType{:BOT}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
 
+top_left(::Union{BorderType{:TOP},BorderType{:TR}}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_RIGHT
+top_right(::Union{BorderType{:TOP},BorderType{:TL}}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT
 bottom_left(::Union{BorderType{:TOP},BorderType{:MID}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_RIGHT
 bottom_right(::Union{BorderType{:TOP},BorderType{:MID}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
-top_left(::BorderType{:TOP}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_RIGHT
-top_right(::BorderType{:TOP}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT
+
+#top_left(::BorderType{:TOP}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_RIGHT
+#top_right(::BorderType{:TOP}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT
+#bottom_left(::Union{BorderType{:TOP},BorderType{:MID}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_RIGHT
+#bottom_right(::Union{BorderType{:TOP},BorderType{:MID}}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
 
 bottom_left(::BorderType{:BOT}) = BOX_DRAWINGS_LIGHT_ARC_UP_AND_RIGHT
 bottom_right(::BorderType{:BOT}) = BOX_DRAWINGS_LIGHT_ARC_UP_AND_LEFT
+
+is_raw_mode_enabled() = @ccall libcrossterm.crossterm_terminal_is_raw_mode_enabled()::Bool
+
+function windowsize()
+    local oldraw = is_raw_mode_enabled()
+    !oldraw && Crossterm.raw_mode(true)
+    Crossterm.print("\e[14t")
+    Crossterm.flush()
+    local reading = false
+    local chars = Char[]
+    while true
+        local c = read(stdin, Char)
+        if !reading
+            if c == '\e'
+                reading = true
+            else
+                continue
+            end
+        elseif c == 't'
+            break
+        end
+        push!(chars, c)
+    end
+    local height, width = parse.(Ref(Int), match(r"^.*;([^;]+);([^t]+)$", String(chars)).captures)
+    !oldraw && Crossterm.raw_mode(false)
+    Crossterm.flush()
+    local w, h = Crossterm.size()
+    return (; width, height, rows = h, columns = w)
+end
 
 function screenarea(widget; title = "", border = LTR, border_type = BorderType{:MID}())
     screenarea(; title, border, border_type) do area, buffer
@@ -121,7 +159,8 @@ function screenarea(
     end
 end
 
-set(buffer::Buffer, area::Rect, line::AbstractString, style = nothing) = set(buffer, area, [line], style)
+set(buffer::Buffer, area::Rect, line::AbstractString, style = nothing) =
+    set(buffer, area, [line], style)
 
 function set(
     buffer::Buffer,
@@ -143,39 +182,46 @@ end
 
 function configure(scr::Screen; regs = scr.showcpu[], monitor = regs, c64screen = regs, repl = true)
     local bordertype = :TOP
-    function bt()
-        local t = bordertype
+    function bt(t = bordertype)
         bordertype = :MID
         return BorderType{t}()
     end
+
     TUI.put("$(GSTART)a=d,d=a$GEND")
     empty!(scr.layout.widgets)
     empty!(scr.layout.constraints)
-    if regs
-        push!(
-            scr.layout.widgets, screenarea(; title = "Registers", border_type = bt()) do area, buf
-                set(buf, area, ["C64 REGISTERS"])
-            end
-        )
-        push!(scr.layout.constraints, Length(2))
-    end
-    if monitor
-        push!(scr.layout.widgets, screenarea(scr.monitor; title = "Monitor", border_type = bt()))
-        push!(scr.layout.constraints, Length(9))
-    end
     if c64screen
-        push!(scr.layout.widgets, screenarea(; title = "Screen", border_type = bt()) do area, buf
-            setscreenloc(scr, area.y, area.x)
-            set(buf, area, [])
-        end)
+        local width, height, rows, columns = windowsize()
+        local hpix = height / rows * 25
+        local vpix = hpix / 200 * 320
+        local scrwid = Int(ceil(vpix / width * columns))
+        log("pixels: $width X $height, chars: $columns X $rows")
+        log("scrwid: $scrwid")
         push!(scr.layout.constraints, Length(26))
+        push!(scr.layout.widgets, Layout(
+            [screenarea(; title = "Screen", border_type = bt(:TR), border=LT) do area, buf
+                setscreenloc(scr, area.y, area.x)
+                set(buf, area, String[])
+             end,
+             Layout(
+                 [
+                     screenarea(drawregs(scr); title="Registers", border_type=bt(:TL), border=TR),
+                     screenarea(drawmonitor(scr); title="Monitor", border_type=bt(:TL), border=TR),
+                 ],
+                 [Length(3), Min(1)],
+                 :vertical,
+             )],
+            [Length(scrwid + 1), Min(1)],
+            :horizontal,
+        ))
     end
     if repl
+        push!(scr.layout.constraints, Min(2))
         push!(scr.layout.widgets, screenarea(; title = "Repl", border_type = bt()) do area, buf
             drawrepl(scr, area, buf)
         end)
-        push!(scr.layout.constraints, Min(2))
     end
+    push!(scr.layout.constraints, Length(3))
     push!(
         scr.layout.widgets,
         screenarea(
@@ -186,10 +232,39 @@ function configure(scr::Screen; regs = scr.showcpu[], monitor = regs, c64screen 
             drawstatus(scr, area, buf)
         end,
     )
-    push!(scr.layout.constraints, Length(3))
 end
 
 cursorend(scr::Screen) = setcursor(scr, length(scr.repllines[end]) + 1)
+
+drawregs(scr::Screen) = function (area::Rect, buf::Buffer)
+    local st = scr.repl.state
+    !haskey(st, :a) &&
+        return
+    set(buf, area, [
+        (@sprintf "%-4s %-8s %-2s %-2s %-2s %-2s" "PC" "Status" "A" "X" "Y" "SP"),
+        (@sprintf "%04x %s %02x %02x %02x %02x" st.pc status(st.status) st.a st.x st.y st.sp),
+    ])
+end
+
+drawmonitor(scr::Screen) = function(area::Rect, buf::Buffer)
+    local pc = scr.repl.state.pc
+    local start = round(Int, min(0xFFFF - 7, max(0, floor(pc / 16.0 - 1) * 16)))
+    local mem = scr.repl.worker.memory
+    for row in 0:7
+        local offset = start + row * 16
+        local values1 = join((@sprintf "%02x" mem[offset + i] for i in 0:7), " ")
+        local values2 = join((@sprintf "%02x" mem[offset + i] for i in 8:15), " ")
+        local haspc = offset <= pc <= offset + 15
+        set(buf, Rect(; area.x, y=area.y + row, area.width, height=1), [
+            (@sprintf "%s%04x: %s   %s" (haspc ? "*" : " ") offset values1 values2),
+        ], screen_style)
+        if haspc
+            local col = area.x + (pc - offset < 8 ? 7 : 9) + (pc - offset) * 3
+            set(buf, col, area.y + row, pc_style)
+            set(buf, col + 1, area.y + row, pc_style)
+        end
+    end
+end
 
 function drawrepl(scr::Screen, area::Rect, buf::Buffer)
     if scr.replarea != area
@@ -236,7 +311,7 @@ function setstatus(scr::Screen, msg...)
     scr.status[] = "CTRL-Q: QUIT $(string(msg...))"
 end
 
-function app(m::Screen; wait = 1 / 30)
+function app(m::Screen; wait = 1 / 10)
     tui() do
         @debug "Creating terminal"
         t = TUI.Terminal(; wait)
@@ -244,7 +319,7 @@ function app(m::Screen; wait = 1 / 30)
         log("STARTING APP")
         while !should_quit(m)
             @debug "Getting event"
-            evt = TUI.try_get_event(t; wait = 1/60)
+            evt = TUI.try_get_event(t)
             !isnothing(evt) && @debug "Got event" event = evt
             @debug "Updating model"
             TUI.update!(m, evt)
@@ -263,17 +338,20 @@ function TUI.draw(t::CrosstermTerminal, scr::Screen)
     TUI.draw(t)
     scr.cursor[] == 0 &&
         return
-    if scr.showcpu[] && scr.dirty[]
-        drawscreen(scr)
-        move_cursor(TERMINAL[], scr.screenloc[]...)
-        local screenfile = base64encode(scr.screenfile[1])
-        local cmd = "$(GSTART)a=T,f=24,t=f,s=$(40 * 8),v=$(25 * 8),r=25,q=2;$screenfile$GEND"
-
-        log("OUTPUT $(length(scr.image)) bytes: $cmd")
-        #TUI.put("\e[80C$(GSTART)a=T,i=1,f=24,t=f,s=$(40 * 8),v=$(25 * 8),q=2;$screenfile$GEND")
-        #TUI.put("$(GSTART)a=T,i=1,f=24,t=f,s=$(40 * 8),v=$(25 * 8),q=2;$screenfile$GEND")
-        #TUI.put("$(GSTART)a=T,f=24,t=f,s=$(40 * 8),v=$(25 * 8),q=2;$screenfile$GEND")
-        TUI.put(cmd)
+    if isdefined(scr.repl, :worker)
+        local mem = scr.repl.worker.memory
+        local screenmem = @view mem[intrange(screen)]
+        local chardefs = @view mem[intrange(char_defs)]
+        if scr.showcpu[] && (screenmem != scr.lastscreen[] || chardefs != scr.lastchars[])
+            scr.lastscreen[] = screenmem[:]
+            scr.lastchars[] = chardefs[:]
+            drawscreen(scr)
+            move_cursor(TERMINAL[], scr.screenloc[]...)
+            local screenfile = base64encode(scr.screenfile[1])
+            local cmd = "$(GSTART)a=T,f=24,t=f,s=$(40 * 8),v=$(25 * 8),r=25,q=2;$screenfile$GEND"
+            #log("OUTPUT $(length(scr.image)) bytes: $cmd")
+            TUI.put(cmd)
+        end
     end
     showcursor(scr)
 end
@@ -376,7 +454,7 @@ function key_backspace(scr::Screen, ::TUI.KeyEvent, x)
     x -= 1
     local off = x - scr.replarea[].x + 1
 
-    if off < 1
+    if x < 1
         scr.quit[] = true
     else
         setcursor(scr, x)
