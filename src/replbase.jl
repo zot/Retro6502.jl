@@ -62,6 +62,7 @@ Screen structure, parameterized to allow customization
     showcpu::Ref{Bool} = Ref(false)
     cpu::Union{Nothing,Cpu} = nothing
     screenloc::Ref{Tuple{UInt16,UInt16}} = Ref((0x0001, 0x0001)) # row, col
+    screenwid::Ref{Int} = Ref(0)
     screenfile::Tuple{String, IO} = mktemp()
     image::Vector{UInt8} = mmap(screenfile[2], Vector{UInt8}, (320*200*3,))
     # snapshot of previous screen and char defs to eliminate computing redundant images
