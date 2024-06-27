@@ -16,6 +16,12 @@ const ROM_FILES = Dict(
     [A(0xA000:0xBFFF), A(0xE000:0xFFFF)] => "$RDIR/basic-kernal.bin", # visible by default
     A(0xD000:0xDFFF) => "$RDIR/characters.bin", # not visible by default
 )
+const VIC_BANK = A(0xDD00)
+const VIC_MEM = A(0xD018)
+const BANKS_VIC = 0x0F
+const BANKS_BASIC = 0x10
+const BANKS_CHARS = 0x20
+const BANKS_KERNAL = 0x40
 const ROM = zeros(UInt8, 64K)
 rom_initialized = false
 scanline_counter = 0
@@ -160,6 +166,57 @@ Base.getproperty(ctx::Ptr{Context}, prop::Symbol) = getproperty(unsafe_load(ctx)
 Base.propertynames(::Accessor{T,L}) where {T,L} = Base.fieldnames(L)
 Base.getproperty(a::Access, prop::Symbol) = Access(a, prop)
 Base.setproperty!(a::Access, prop::Symbol, value) = set!(getproperty(a, prop), value)
+
+@kwdef mutable struct BankSettings
+    # A000-BFFF (ADDR & 0xA000 == 0xA000)
+    basic::Bool = false
+    # D000-DFFF
+    chars::Bool = false
+    # E000-FFFF (ADDR & 0xE000 == 0xE000)
+    kernal::Bool = false
+    # 0000, 4000, 8000, C000
+    vicbank::UInt16 = 0
+    # bits 11-13 of character mem (or'ed with vicbank)
+    # 0000, 0800, 1000, 1800, 2000, 2800, 3000, 3800
+    chrmem::UInt16 = 0
+    # bits 10-13 of screen mem (or'ed with vicbank)
+    # 0000, 0400, 0800, 0C00, 1000, 1400, 1800, 1C00, 2000, 2400, 2800, 2C00, 3000, 3400, 3800, 3C00
+    scrmem::UInt16 = 0
+    # vicbank 0: chrmem 1000 -> ROM
+    # vicbank 2: chrmem 1800 -> ROM
+    chrrom::Bool = 0
+end
+
+function updatesettings(bs::BankSettings, banks::UInt8, mem::Vector{UInt8})
+    local bank = (3 - (banks & BANKS_VIC)) << 14
+
+    bs.basic = (banks & BANKS_BASIC) != 0
+    bs.chars = (banks & BANKS_CHARS) != 0
+    bs.kernal = (banks & BANKS_KERNAL) != 0
+    bs.vicbank = bank
+    bs.scrmem = bank + ((mem[VIC_MEM] & 0xF0) << 6)
+    bs.chrmem = bank + ((mem[VIC_MEM] & 0x0E) << 11)
+    bs.chrrom = bank === 0 && bs.chrmem == 0x1000 || bank === 0x1800 && bs.chrmem == 0x1800
+end
+
+hasmask(addr, mask) = addr & mask === mask
+
+function getmem(bs::BankSettings, mem::Vector{UInt8}, addr::Int)
+    local userom = if hasmask(addr, 0xA000)
+        bs.basic
+    elseif hasmask(addr, 0xD000)
+        bs.chars
+    elseif hasmask(addr, 0xE000)
+        bs.kernal
+    else
+        false
+    end
+    return (userom ? ROM : mem)[addr + 1]
+end
+
+getchr(bs::BankSettings, mem::Vector{UInt8}) = @view (!bs.chrrom ? mem : ROM)[bs.chrmem:bs.chrmem+0x7FF]
+
+getscr(bs::BankSettings, mem::Vector{UInt8}) = @view mem[bs.scrmem:bs.scrmem+0x3FF]
 
 # these might work but they are untested
 #Base.getindex(a::Access, key::Integer) = index(a, key)
@@ -461,8 +518,11 @@ end
 function loadprg(filename, mach::Machine; labelfile = "")
     local off, len = loadprg(filename, mach.mem, mach.labels, mach.addrs; labelfile)
     mach.newcpu.memory[off:off+len-1] = mach.mem[off:off+len-1]
+    initprg(A(off:off + len - 1), mach, mach.newcpu.user_data)
     off, len
 end
+
+initprg(memrange::AddrRange, _::Machine, ::Any) = nothing
 
 function reset(mach::Machine)
     mprintln(mach, "RESETTING...")

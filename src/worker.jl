@@ -9,15 +9,19 @@ it's nice to be able to scrap workers to prevent permanent garbage from piling u
 module Workers
 
 using Distributed, SharedArrays
-using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM, intrange, A, char_defs, log
+using ..Fake6502: Fake6502, K, Machine, EDIR, hex, ROM, intrange, A, char_defs, log, AddrRange
 using ..C64: C64, C64_machine, @io, @printf, BASIC_ROM, c64, initstate
 using ..Asm: Asm, CodeContext, getvar
 using ..Fake6502m: Fake6502m, Cpu, Temps, setpc
-import ..Fake6502m:
-    inner_step6502, base_inner_step6502, exec6502, reset6502, ticks, setticks, read6502, write6502, jsr
+import ..Fake6502: initprg
+import ..Fake6502m: inner_step6502, base_inner_step6502, exec6502, reset6502, ticks, setticks, read6502, write6502, jsr
 
 # extra data after memory
-const OFFSET_DIRTY = 64K + 1
+@enum Offsets begin
+    offset_dirty = 64K + 1
+    # basic:1, chars:1, kernal:1, vicbank:4
+    offset_banks
+end
 
 # this worker
 private = nothing
@@ -144,8 +148,12 @@ function privateupdate()
 end
 
 read6502(cpu::Cpu{WorkerPrivate}, addr::UInt16) = read6502(c64(cpu), cpu, addr)
+
 write6502(cpu::Cpu{WorkerPrivate}, addr::UInt16, byte::UInt8) = write6502(c64(cpu), cpu, addr, byte)
+
 jsr(cpu::Cpu{WorkerPrivate}, temps) = jsr(c64(cpu), cpu, temps)
+
+initprg(memrange::AddrRange, mach::Machine, worker::WorkerPrivate) = initprg(memrange, mach, worker.state)
 
 function cont(tickcount = Base.max_values(Int))
     global private
@@ -211,6 +219,7 @@ function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
     mach.newcpu.memory = mach.mem = w.memory
     merge!(mach.labels, labels)
     merge!(mach.addrs, addrs)
+    initprg(off:off + total - 1, mach, mach.newcpu.user_data)
     off, total
 end
 

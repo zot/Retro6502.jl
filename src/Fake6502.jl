@@ -58,16 +58,24 @@ end
 
 # 1-based addresses
 A(x::Integer) = Addr(UInt32(x))
-A(v::AbstractRange) = Addr(first(v)):Addr(last(v))
+A(r::AddrRange) = A(first(r)-1:last(r)-1)
+A(v::AbstractRange) = A(first(v)):Addr(last(v))
 A(v::AbstractVector) = Addr.(v)
 
 intrange(r::AddrRange) = r.first.value:r.last.value
-Base.in(addr::Addr, r::AddrRange) = addr.value ∈ r.first.value:r.last.value
+Base.in(addr::Addr, r::AddrRange) = addr.value ∈ intrange(r)
+Base.in(r1::AddrRange, r2::AddrRange) = intersect(r1, r2) == r1
 Base.:(:)(a::Addr, b::Addr) = AddrRange(a, b)
 Base.first(r::AddrRange) = r.first
 Base.last(r::AddrRange) = r.last
 Base.length(r::AddrRange) = r.last.value - r.first.value + 1
 Base.hash(r::AddrRange, h::UInt64) = Base.hash(intrange(r), h)
+function Base.intersect(r1::AddrRange, r2::AddrRange)
+    local sect = intersect(intrange(r1), intrange(r2))
+    A(first(sect)-1:last(sect)-1)
+end
+Base.getindex(x::AbstractArray, r::AddrRange) = getindex(x, intrange(r))
+Base.getindex(x::AbstractArray, r::Addr) = getindex(x, r.value)
 
 Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
 Base.show(io::IO, addr::Addr) =
@@ -226,6 +234,10 @@ function test()
         C64.SCREEN_CODES[c+1]
     end
     println("done testing, ", mach.emu.clockticks, " clock ticks")
+end
+
+function __init__()
+    init_rom()
 end
 
 end # module Fake6502

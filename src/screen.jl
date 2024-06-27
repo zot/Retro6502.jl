@@ -188,6 +188,7 @@ function configure(scr::Screen; regs = scr.showcpu[], monitor = regs, c64screen 
     end
 
     TUI.put("$(GSTART)a=d,d=a$GEND")
+    scr.imageshown[] = false
     empty!(scr.layout.widgets)
     empty!(scr.layout.constraints)
     if c64screen
@@ -343,15 +344,20 @@ function TUI.draw(t::CrosstermTerminal, scr::Screen)
         local mem = scr.repl.worker.memory
         local screenmem = @view mem[intrange(screen)]
         local chardefs = @view mem[intrange(char_defs)]
-        if scr.showcpu[] && (screenmem != scr.lastscreen[] || chardefs != scr.lastchars[])
-            scr.lastscreen[] = screenmem[:]
-            scr.lastchars[] = chardefs[:]
-            drawscreen(scr)
-            move_cursor(TERMINAL[], scr.screenloc[]...)
-            local screenfile = base64encode(scr.screenfile[1])
-            local cmd = "$(GSTART)a=T,f=24,t=f,s=320,v=200,r=25,c=$(scr.screenwid[]),q=2;$screenfile$GEND"
-            #log("OUTPUT $(length(scr.image)) bytes: $cmd")
-            TUI.put(cmd)
+        if scr.showcpu[]
+            if screenmem != scr.lastscreen[] || chardefs != scr.lastchars[]
+                scr.lastscreen[] = screenmem[:]
+                scr.lastchars[] = chardefs[:]
+                drawscreen(scr)
+            end
+            if !scr.imageshown[]
+                move_cursor(TERMINAL[], scr.screenloc[]...)
+                local screenfile = base64encode(scr.screenfile[1])
+                local cmd = "$(GSTART)a=T,f=24,t=f,s=320,v=200,r=25,c=$(scr.screenwid[]),q=2;$screenfile$GEND"
+                #log("OUTPUT $(length(scr.image)) bytes: $cmd")
+                TUI.put(cmd)
+                scr.imageshown[] = true
+            end
         end
     end
     showcursor(scr)
@@ -384,6 +390,7 @@ function drawscreen(scr::Screen)
         end
     end
     sync!(image)
+    scr.imageshown[] = false
 end
 
 function delete_image(t::CrosstermTerminal, id::String)

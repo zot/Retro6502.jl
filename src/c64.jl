@@ -2,8 +2,9 @@ module C64
 using Revise
 using ..Fake6502
 using ..Fake6502:
-    Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step
-using ..Fake6502: ROM, init_rom, Addr, AddrRange, intrange, hex, SCREEN_CODES, screen2ascii
+    Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step,
+    VIC_BANK, VIC_MEM
+using ..Fake6502: ROM, Addr, AddrRange, intrange, hex, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
 using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte, call_fake
 import ..Fake6502: Fake6502m, mem, mprint, mprintln
@@ -52,8 +53,6 @@ const CHAR_ROM = A(0xD000:0xDFFF)
 const KERNAL_ROM = A(0xE000:0xFFFF)
 BANK_CHOICES = [(true, BASIC_ROM), (true, KERNAL_ROM), (), (false, CHAR_ROM)]
 const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
-const VIC_MEM = A(0xD018)
-const VIC_BANK = A(0xDD00)
 const UPDATE_PERIOD = 1000000 ÷ 5
 revising = false
 #! format: off
@@ -399,7 +398,6 @@ function initstate(state::C64_machine, cpu::Cpu; clearscreen=true)
     for mem = 0xD800:0xDBE7
         memory[mem + 1] = 0x01
     end
-    init_rom()
     memory[IO_CTL.value] = 0x2F
     switch_banks(state, cpu, 0x07)
 end
@@ -439,6 +437,16 @@ function video(func::Function, mach::C64_machine)
 end
 
 ticks(mach::Machine) = Fake6502m.ticks(mach.newcpu, mach.temps)
+
+# setup banks after load
+function initprg(memrange::AddrRange, mach::Machine, state::C64_machine)
+    if BANK_SWITCH:BANK_SWITCH+1 ∈ memrange && mach.newcpu.memory[BANK_SWITCH] != 0
+        switch_banks(state, mach.newcpu, mach.newcpu.memory[BANK_SWITCH])
+    end
+    if VIC_MEM:VIC_BANK ∈ memrange
+        update_vic_bank(mach.newcpu.memory, state)
+    end
+end
 
 function load_condensed(mach::Machine)
     labels = mach.labels

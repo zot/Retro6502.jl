@@ -65,6 +65,7 @@ Screen structure, parameterized to allow customization
     screenwid::Ref{Int} = Ref(0)
     screenfile::Tuple{String, IO} = mktemp()
     image::Vector{UInt8} = mmap(screenfile[2], Vector{UInt8}, (320*200*3,))
+    imageshown::Ref{Bool} = Ref(false)
     # snapshot of previous screen and char defs to eliminate computing redundant images
     lastscreen::Ref{Vector{UInt8}} = Ref(UInt8[])
     lastchars::Ref{Vector{UInt8}} = Ref(UInt8[])
