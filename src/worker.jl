@@ -68,8 +68,7 @@ private = nothing
     run_channel::RemoteChannel{Channel{Any}} = RemoteChannel() do
         Channel{Any}(10)
     end
-    memory::SharedVector{UInt8} =
-        SharedVector{UInt8}((SHARED_END - 1,); pids = procs())
+    memory::SharedVector{UInt8} = SharedVector{UInt8}((SHARED_END - 1,); pids = procs())
 end
 
 @kwdef mutable struct WorkerPrivate

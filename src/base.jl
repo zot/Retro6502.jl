@@ -211,9 +211,12 @@ function getmem(bs::BankSettings, mem::Vector{UInt8}, addr::Int)
 end
 
 charmem(bs::BankSettings, mem::AbstractVector{UInt8}) =
-    @view (bs.chrmem ∈ (0x1000, 0x1800, 0x9000, 0x9800) ? ROM : mem)[A(bs.chrmem:bs.chrmem+0x7FF)]
+    @view (bs.chrmem ∈ (0x1000, 0x1800, 0x9000, 0x9800) ? ROM : mem)[A(
+        bs.chrmem:bs.chrmem+0x7FF,
+    )]
 
-screenmem(bs::BankSettings, mem::AbstractVector{UInt8}) = @view mem[A(bs.scrmem:bs.scrmem+0x3FF)]
+screenmem(bs::BankSettings, mem::AbstractVector{UInt8}) =
+    @view mem[A(bs.scrmem:bs.scrmem+0x3FF)]
 
 # these might work but they are untested
 #Base.getindex(a::Access, key::Integer) = index(a, key)
