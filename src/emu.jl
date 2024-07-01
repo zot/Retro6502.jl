@@ -1447,7 +1447,7 @@ const addrsyms = (
 #=E=# :imm, :indx,:imm,:indx,:zp, :zp, :zp, :zp, :imp,:imm, :imp,:imm, :abso,:abso,:abso,:abso, #=E=#
 #=F=# :rel, :indy,:imp,:indy,:zpx,:zpx,:zpx,:zpx,:imp,:absy,:imp,:absy,:absx,:absx,:absx,:absx, #=F=#
 )
-#! format: off
+#! format: on
 
 is_acc(op::UInt8) = op & 0x90 == 0x00 && op & 0x0F == 0x0A
 
@@ -1455,6 +1455,7 @@ is_imm(op::UInt8) =
     (op & 0x90 == 0x80 && op & 0x0D == 0x00) ||
     (op & 0x10 == 0x00 && (op & 0x0F == 0x09 || op & 0x0F == 0x0B))
 
+#! format: off
 function address(c::Cpu, t::Temps)::Temps
     local o = c.opcode
     #o = t.opcode
@@ -1524,267 +1525,25 @@ function address(c::Cpu, t::Temps)::Temps
     elseif o == 0xFC absx(c, t) elseif o == 0xFD absx(c, t) elseif o == 0xFE absx(c, t) elseif o == 0xFF absx(c, t)
     end
 end
-#! format: on
 
-#! format: off
 const opsyms = (
-    #    |  0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |  A |  B |   C |  D |  E |  F |
-    :brk,
-    :ora,
-    :jam,
-    :slo,
-    :nop,
-    :ora,
-    :asl,
-    :slo,
-    :php,
-    :ora,
-    :asl,
-    :anc,
-    :nop,
-    :ora,
-    :asl,
-    :slo, #=0=#
-    :bpl,
-    :ora,
-    :jam,
-    :slo,
-    :nop,
-    :ora,
-    :asl,
-    :slo,
-    :clc,
-    :ora,
-    :nop,
-    :slo,
-    :nop,
-    :ora,
-    :asl,
-    :slo, #=1=#
-    :jsr,
-    :and,
-    :jam,
-    :rla,
-    :bit,
-    :and,
-    :rol,
-    :rla,
-    :plp,
-    :and,
-    :rol,
-    :anc,
-    :bit,
-    :and,
-    :rol,
-    :rla, #=2=#
-    :bmi,
-    :and,
-    :jam,
-    :rla,
-    :nop,
-    :and,
-    :rol,
-    :rla,
-    :sec,
-    :and,
-    :nop,
-    :rla,
-    :nop,
-    :and,
-    :rol,
-    :rla, #=3=#
-    :rti,
-    :eor,
-    :jam,
-    :sre,
-    :nop,
-    :eor,
-    :lsr,
-    :sre,
-    :pha,
-    :eor,
-    :lsr,
-    :alr,
-    :jmp,
-    :eor,
-    :lsr,
-    :sre, #=4=#
-    :bvc,
-    :eor,
-    :jam,
-    :sre,
-    :nop,
-    :eor,
-    :lsr,
-    :sre,
-    :cli,
-    :eor,
-    :nop,
-    :sre,
-    :nop,
-    :eor,
-    :lsr,
-    :sre, #=5=#
-    :rts,
-    :adc,
-    :jam,
-    :rra,
-    :nop,
-    :adc,
-    :ror,
-    :rra,
-    :pla,
-    :adc,
-    :ror,
-    :arr,
-    :jmp,
-    :adc,
-    :ror,
-    :rra, #=6=#
-    :bvs,
-    :adc,
-    :jam,
-    :rra,
-    :nop,
-    :adc,
-    :ror,
-    :rra,
-    :sei,
-    :adc,
-    :nop,
-    :rra,
-    :nop,
-    :adc,
-    :ror,
-    :rra, #=7=#
-    :nop,
-    :sta,
-    :nop,
-    :sax,
-    :sty,
-    :sta,
-    :stx,
-    :sax,
-    :dey,
-    :nop,
-    :txa,
-    :ane,
-    :sty,
-    :sta,
-    :stx,
-    :sax, #=8=#
-    :bcc,
-    :sta,
-    :jam,
-    :sha,
-    :sty,
-    :sta,
-    :stx,
-    :sax,
-    :tya,
-    :sta,
-    :txs,
-    :tas,
-    :shy,
-    :sta,
-    :shy,
-    :sha, #=9=#
-    :ldy,
-    :lda,
-    :ldx,
-    :lax,
-    :ldy,
-    :lda,
-    :ldx,
-    :lax,
-    :tay,
-    :lda,
-    :tax,
-    :lxa,
-    :ldy,
-    :lda,
-    :ldx,
-    :lax, #=A=#
-    :bcs,
-    :lda,
-    :jam,
-    :lax,
-    :ldy,
-    :lda,
-    :ldx,
-    :lax,
-    :clv,
-    :lda,
-    :tsx,
-    :las,
-    :ldy,
-    :lda,
-    :ldx,
-    :lax, #=B=#
-    :cpy,
-    :cmp,
-    :nop,
-    :dcp,
-    :cpy,
-    :cmp,
-    :dec,
-    :dcp,
-    :iny,
-    :cmp,
-    :dex,
-    :sbx,
-    :cpy,
-    :cmp,
-    :dec,
-    :dcp, #=C=#
-    :bne,
-    :cmp,
-    :jam,
-    :dcp,
-    :nop,
-    :cmp,
-    :dec,
-    :dcp,
-    :cld,
-    :cmp,
-    :nop,
-    :dcp,
-    :nop,
-    :cmp,
-    :dec,
-    :dcp, #=D=#
-    :cpx,
-    :sbc,
-    :nop,
-    :isc,
-    :cpx,
-    :sbc,
-    :inc,
-    :isc,
-    :inx,
-    :sbc,
-    :nop,
-    :usbc,
-    :cpx,
-    :sbc,
-    :inc,
-    :isc, #=E=#
-    :beq,
-    :sbc,
-    :jam,
-    :isc,
-    :nop,
-    :sbc,
-    :inc,
-    :isc,
-    :sed,
-    :sbc,
-    :nop,
-    :isc,
-    :nop,
-    :sbc,
-    :inc,
-    :isc, #=F=#
+#  0  |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |  9 |  A |  B |   C |  D |  E |  F |
+  :brk,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:php,:ora,:asl,:anc, :nop,:ora,:asl,:slo, #=0=#
+  :bpl,:ora,:jam,:slo,:nop,:ora,:asl,:slo,:clc,:ora,:nop,:slo, :nop,:ora,:asl,:slo, #=1=#
+  :jsr,:and,:jam,:rla,:bit,:and,:rol,:rla,:plp,:and,:rol,:anc, :bit,:and,:rol,:rla, #=2=#
+  :bmi,:and,:jam,:rla,:nop,:and,:rol,:rla,:sec,:and,:nop,:rla, :nop,:and,:rol,:rla, #=3=#
+  :rti,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:pha,:eor,:lsr,:alr, :jmp,:eor,:lsr,:sre, #=4=#
+  :bvc,:eor,:jam,:sre,:nop,:eor,:lsr,:sre,:cli,:eor,:nop,:sre, :nop,:eor,:lsr,:sre, #=5=#
+  :rts,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:pla,:adc,:ror,:arr, :jmp,:adc,:ror,:rra, #=6=#
+  :bvs,:adc,:jam,:rra,:nop,:adc,:ror,:rra,:sei,:adc,:nop,:rra, :nop,:adc,:ror,:rra, #=7=#
+  :nop,:sta,:nop,:sax,:sty,:sta,:stx,:sax,:dey,:nop,:txa,:ane, :sty,:sta,:stx,:sax, #=8=#
+  :bcc,:sta,:jam,:sha,:sty,:sta,:stx,:sax,:tya,:sta,:txs,:tas, :shy,:sta,:shy,:sha, #=9=#
+  :ldy,:lda,:ldx,:lax,:ldy,:lda,:ldx,:lax,:tay,:lda,:tax,:lxa, :ldy,:lda,:ldx,:lax, #=A=#
+  :bcs,:lda,:jam,:lax,:ldy,:lda,:ldx,:lax,:clv,:lda,:tsx,:las, :ldy,:lda,:ldx,:lax, #=B=#
+  :cpy,:cmp,:nop,:dcp,:cpy,:cmp,:dec,:dcp,:iny,:cmp,:dex,:sbx, :cpy,:cmp,:dec,:dcp, #=C=#
+  :bne,:cmp,:jam,:dcp,:nop,:cmp,:dec,:dcp,:cld,:cmp,:nop,:dcp, :nop,:cmp,:dec,:dcp, #=D=#
+  :cpx,:sbc,:nop,:isc,:cpx,:sbc,:inc,:isc,:inx,:sbc,:nop,:usbc,:cpx,:sbc,:inc,:isc, #=E=#
+  :beq,:sbc,:jam,:isc,:nop,:sbc,:inc,:isc,:sed,:sbc,:nop,:isc, :nop,:sbc,:inc,:isc, #=F=#
 )
 #! format: on
 
