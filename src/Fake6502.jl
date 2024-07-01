@@ -4,6 +4,7 @@
 module Fake6502
 using Printf, StaticArrays
 #using ProfileCanvas
+import Base.to_index
 
 export reset, step
 
@@ -27,11 +28,12 @@ const SCREEN_CODES = Vector{Char}(
 while length(SCREEN_CODES) < 256
     push!(SCREEN_CODES, ' ')
 end
-const ASCII_TO_SCREEN = Dict(v => UInt8(k - 1) for (k, v) in reverse([enumerate(SCREEN_CODES)...]))
+const ASCII_TO_SCREEN =
+    Dict(v => UInt8(k - 1) for (k, v) in reverse([enumerate(SCREEN_CODES)...]))
 screen2ascii(str::AbstractString) = String(screen2ascii.(Vector{UInt8}(str)))
 screen2ascii(char::Integer) = SCREEN_CODES[UInt8(char)+1]
 ascii2screen(str::AbstractString) = ascii2screen.(Vector{UInt8}(str))
-ascii2screen(char::Union{Char, Integer}) = get(ASCII_TO_SCREEN, Char(char), 0xFF)
+ascii2screen(char::Union{Char,Integer}) = get(ASCII_TO_SCREEN, Char(char), 0xFF)
 const CDIR = joinpath(dirname(@__FILE__), "..", "C")
 const EDIR = joinpath(dirname(@__FILE__), "..", "examples")
 const RDIR = joinpath(dirname(@__FILE__), "..", "resources")
@@ -74,8 +76,13 @@ function Base.intersect(r1::AddrRange, r2::AddrRange)
     local sect = intersect(intrange(r1), intrange(r2))
     A(first(sect)-1:last(sect)-1)
 end
+
 Base.getindex(x::AbstractArray, r::AddrRange) = getindex(x, intrange(r))
-Base.getindex(x::AbstractArray, r::Addr) = getindex(x, r.value)
+Base.getindex(x::AbstractArray, a::Addr) = getindex(x, a.value)
+Base.setindex!(x::AbstractArray, value, a::Addr) = setindex!(x, value, a.value)
+Base.setindex!(x::AbstractArray, value, r::AddrRange) = setindex!(x, value, intrange(r))
+Base.to_index(x::AbstractArray, r::AddrRange) = Base.to_index(x, intrange(r))
+Base.to_index(::AbstractArray, a::Addr) = a.value
 
 Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
 Base.show(io::IO, addr::Addr) =

@@ -31,15 +31,24 @@ module AsmRepl
 
 using Unicode, SharedArrays
 using TerminalUserInterfaces:
-    TerminalUserInterfaces, CrosstermTerminal, tui, move_cursor, TERMINAL, show_cursor, Layout,
-    Paragraph, Block, Constraint, make_words
+    TerminalUserInterfaces,
+    CrosstermTerminal,
+    tui,
+    move_cursor,
+    TERMINAL,
+    show_cursor,
+    Layout,
+    Paragraph,
+    Block,
+    Constraint,
+    make_words
 using TerminalUserInterfaces.Crayons
 const TUI = TerminalUserInterfaces
 import TerminalUserInterfaces: render, set, view, update!, init!, should_quit, Rect, Buffer
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
-using ...Fake6502: Fake6502, matches, display_chars, intrange, screen, log
+using ...Fake6502: Fake6502, matches, display_chars, intrange, screen, log, BankSettings
 using ..Fake6502m: opsyms, Cpu
 using ..C64
 using ..Workers: Workers, Worker, add_worker
@@ -144,42 +153,48 @@ println(ctx::Repl, args...) = println(ctx.screen, args...)
 print(ctx::Repl, args...) = print(ctx.screen, args...)
 
 function repl(specialization = Nothing)
-    ctx = Repl{specialization}()
-    global _REPL = ctx
-    ctx.asmlines = String[]
-    ctx.cmd_handler = handle_command
-    ctx.pending_asm_prefix = ""
-    ctx.pending_asm_expr = ""
-    ctx.input_file = ""
-    ctx.input_file_channel = nothing
-    ctx.input_file_changed = false
-    ctx.screen = Screen{specialization}(; diag = Ref(true), repl = ctx)
-    ctx.state = (;)
-    bind_keys(ctx.screen)
-    local mistate = nothing
-    local mode = nothing
-    ctx.mode = initrepl(
-        s -> Base.invokelatest(ctx.cmd_handler, ctx, s);
-        prompt_text = "6502> ",
-        #prompt_text = "",
-        prompt_color = :light_yellow,
-        start_key = '}',
-        enter = function (s)
-            mistate = Base.active_repl.mistate
-            mode = LineEdit.mode(mistate)
-            #println(ctx, "6502...")
-        end,
-        entered = s -> begin
-            TUI.app(ctx.screen)
-            REPL.LineEdit.transition(() -> nothing, mistate, mode)
-        end,
-        mode_name = "ASM_mode",
-        completion_provider = Completer(),
-    )
-    #ctx.mode.on_done = (_...)->(println("DONE"); nothing)
-    ctx.settings = Dict(pairs(DEFAULT_SETTINGS)...)
-    ctx.dirty = false
-    ctx
+    try
+        ctx = Repl{specialization}()
+        global _REPL = ctx
+        ctx.asmlines = String[]
+        ctx.cmd_handler = handle_command
+        ctx.pending_asm_prefix = ""
+        ctx.pending_asm_expr = ""
+        ctx.input_file = ""
+        ctx.input_file_channel = nothing
+        ctx.input_file_changed = false
+        ctx.screen = Screen{specialization}(; diag = Ref(true), repl = ctx)
+        ctx.banksettings = BankSettings()
+        ctx.state = (;)
+        ctx.runid = 1
+        bind_keys(ctx.screen)
+        local mistate = nothing
+        local mode = nothing
+        ctx.mode = initrepl(
+            s -> Base.invokelatest(ctx.cmd_handler, ctx, s);
+            prompt_text = "6502> ",
+            #prompt_text = "",
+            prompt_color = :light_yellow,
+            start_key = '}',
+            enter = function (s)
+                mistate = Base.active_repl.mistate
+                mode = LineEdit.mode(mistate)
+                #println(ctx, "6502...")
+            end,
+            entered = s -> begin
+                TUI.app(ctx.screen)
+                REPL.LineEdit.transition(() -> nothing, mistate, mode)
+            end,
+            mode_name = "ASM_mode",
+            completion_provider = Completer(),
+        )
+        #ctx.mode.on_done = (_...)->(println("DONE"); nothing)
+        ctx.settings = Dict(pairs(DEFAULT_SETTINGS)...)
+        ctx.dirty = false
+        ctx
+    catch err
+        @info "Error initializing REPL" exception = (err, catch_backtrace())
+    end
 end
 
 function takeover_repl(mistate, mode, screen, s::LineEdit.MIState)
@@ -294,7 +309,6 @@ function cmd_help(ctx::Repl, cmd, args)
         )
     end
     push!(lines, "CTRL-C                      pause current execution")
-    log("PRINTING HELP")
     println(ctx, join(lines, "\n"))
 end
 
@@ -384,7 +398,12 @@ end
 
 function cmd_run(ctx::Repl, cmd, args)
     cmd_asm(ctx, cmd, args)
-    ctx.state = fetch(Workers.exec(ctx.worker, :main; tickcount = ctx.settings[:maxticks]))
+    ctx.state = Workers.exec(
+        ctx.worker,
+        :main;
+        tickcount = ctx.settings[:maxticks],
+        bs = ctx.banksettings,
+    )
     ctx.runid += 1
 end
 

@@ -2,8 +2,19 @@ module C64
 using Revise
 using ..Fake6502
 using ..Fake6502:
-    Machine, NewMachine, A, display_chars, diag, CONDENSE_START, loadprg, screen, run, step,
-    VIC_BANK, VIC_MEM
+    Machine,
+    NewMachine,
+    A,
+    display_chars,
+    diag,
+    CONDENSE_START,
+    loadprg,
+    screen,
+    run,
+    step,
+    VIC_BANK,
+    VIC_MEM,
+    log
 using ..Fake6502: ROM, Addr, AddrRange, intrange, hex, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
 using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte, call_fake
@@ -115,6 +126,7 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     banks::Set{AddrRange} = Set{AddrRange}()
     screen_mem::Addr = A(0x400)
     character_mem::Addr = A(0x1000)
+    vic_bank_summary::UInt8 = 0x00
     pause::Condition = Condition()
     pause_count::Atomic{Int} = Atomic{Int}(0)
     actually_paused::Condition = Condition()
@@ -242,8 +254,7 @@ end
 c64_set_mem(cpu::Cpu, addr::Addr, byte::UInt8) =
     c64_set_mem(cpu, UInt16(addr.value - 0x01), byte)
 
-c64_set_mem(cpu::Cpu, addr::UInt16, byte::UInt8) =
-    c64_set_mem(c64(cpu), cpu, addr, byte)
+c64_set_mem(cpu::Cpu, addr::UInt16, byte::UInt8) = c64_set_mem(c64(cpu), cpu, addr, byte)
 
 c64_set_mem(state::C64_machine, cpu::Cpu, addr::Addr, byte::UInt8) =
     c64_set_mem(state, cpu, UInt16(addr.value - 0x01), byte)
@@ -262,7 +273,8 @@ function Fake6502m.jsr(mach::C64_machine, cpu::Cpu, temps)
     return mach.fake_routines[curpc+1](cpu, temps)::Fake6502m.Temps
 end
 
-Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) = write6502(c64(cpu), cpu, addr, byte)
+Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
+    write6502(c64(cpu), cpu, addr, byte)
 
 function Fake6502m.write6502(state::C64_machine, cpu::Cpu, addr::UInt16, byte::UInt8)
     adr = A(addr)
@@ -349,6 +361,7 @@ function update_vic_bank(mem::AbstractVector{UInt8}, state::C64_machine)
     offset = A((3 - (mem[VIC_BANK] & 0xF)) << 14)
     state.screen_mem = offset + ((mem[VIC_MEM] & 0xF0) << 6)
     state.character_mem = offset + ((mem[VIC_MEM] & 0x0E) << 11)
+    state.vic_bank_summary = mem[VIC_MEM]
 end
 
 function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcount, maxwid)
@@ -386,7 +399,7 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
     state.maxtime[] = state.rewinder.curtime
 end
 
-function initstate(state::C64_machine, cpu::Cpu; clearscreen=true)
+function initstate(state::C64_machine, cpu::Cpu; clearscreen = true)
     local memory = cpu.memory
 
     clearscreen && (memory[intrange(screen)] .= ' ')
@@ -396,9 +409,12 @@ function initstate(state::C64_machine, cpu::Cpu; clearscreen=true)
     memory[BG2.value] = 0x2
     memory[BG3.value] = 0x3
     for mem = 0xD800:0xDBE7
-        memory[mem + 1] = 0x01
+        memory[mem+1] = 0x01
     end
     memory[IO_CTL.value] = 0x2F
+    memory[VIC_BANK] = 0x3
+    memory[VIC_MEM] = 0x14
+    update_vic_bank(cpu.memory, state)
     switch_banks(state, cpu, 0x07)
 end
 
@@ -443,9 +459,11 @@ function initprg(memrange::AddrRange, mach::Machine, state::C64_machine)
     if BANK_SWITCH:BANK_SWITCH+1 ∈ memrange && mach.newcpu.memory[BANK_SWITCH] != 0
         switch_banks(state, mach.newcpu, mach.newcpu.memory[BANK_SWITCH])
     end
-    if VIC_MEM:VIC_BANK ∈ memrange
-        update_vic_bank(mach.newcpu.memory, state)
+    if VIC_MEM:VIC_BANK ∉ memrange
+        mach.newcpu.memory[VIC_BANK] = 0x03
+        mach.newcpu.memory[VIC_MEM] = 0x00
     end
+    update_vic_bank(mach.newcpu.memory, state)
 end
 
 function load_condensed(mach::Machine)

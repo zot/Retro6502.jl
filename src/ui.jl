@@ -1,12 +1,51 @@
 module UI
 
 using Revise
-using ..Fake6502: C64, Rewinding, Fake6502m, K, Addr, A, ROM, mprint, mprintln, Machine, call_6502, call_frth,
-    diag, reset, run
+using ..Fake6502:
+    C64,
+    Rewinding,
+    Fake6502m,
+    K,
+    Addr,
+    A,
+    ROM,
+    mprint,
+    mprintln,
+    Machine,
+    call_6502,
+    call_frth,
+    diag,
+    reset,
+    run
 using .Fake6502m: Cpu
-using .C64: C64, SCREEN_WIDTH, SCREEN_HEIGHT, scr_width, scr_height, COLOR_DEFS, KEYBOARD_INPUTS, use_io,
-    load_condensed, init, c64, C64_machine, screen_mem, character_mem, C64_PALETTE, BG0, COLOR_MEM, @io,
-    video, Rect, bottom, right, intersects, merge, pause, setrevising, process_io
+using .C64:
+    C64,
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
+    scr_width,
+    scr_height,
+    COLOR_DEFS,
+    KEYBOARD_INPUTS,
+    use_io,
+    load_condensed,
+    init,
+    c64,
+    C64_machine,
+    screen_mem,
+    character_mem,
+    C64_PALETTE,
+    BG0,
+    COLOR_MEM,
+    @io,
+    video,
+    Rect,
+    bottom,
+    right,
+    intersects,
+    merge,
+    pause,
+    setrevising,
+    process_io
 using .Rewinding: Rewinder, RewindSession
 
 using CImGui:
@@ -139,7 +178,8 @@ mutable struct UIData
         local ui = new()
 
         ui.pressed_keys = Set{String}()
-        ui.scr_id = ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(scr_width, scr_height)
+        ui.scr_id =
+            ImGuiOpenGLBackend.ImGui_ImplOpenGL3_CreateImageTexture(scr_width, scr_height)
         ui.scr_buf = zeros(GLubyte, (4, scr_width, scr_height))
         ui.scratch_buf = fill(GLubyte(0xFF), (4, scr_width * scr_height))
         ui.has_dirty_rects = Atomic{Bool}(false)
@@ -152,7 +192,7 @@ uidata(mach::Machine{UIData})::UIData = uidata(mach.newcpu)
 uidata(cpu::Cpu{UIData})::UIData = cpu.user_data
 uidata(ui::UIData)::UIData = ui
 
-C64.c64(machine::Union{UIData, Cpu{UIData}, Machine{UIData}}) = uidata(machine).state
+C64.c64(machine::Union{UIData,Cpu{UIData},Machine{UIData}}) = uidata(machine).state
 
 """
 C64 IO routine
@@ -452,7 +492,7 @@ function Fake6502m.reset6502(cpu::Cpu{UIData}, temps)
     #cpu.pc = mem_6502_read16(cpu, 0xfffc)
     cpu.sp = 0xfd
     cpu.status |= Fake6502m.FLAG_CONSTANT | Fake6502m.FLAG_INTERRUPT
-    local pc = UInt16(cpu.memory[0xfffc + 1]) | (UInt16(cpu.memory[0xfffc + 2]) << 8)
+    local pc = UInt16(cpu.memory[0xfffc+1]) | (UInt16(cpu.memory[0xfffc+2]) << 8)
     Fake6502m.setticks(cpu, Fake6502m.Temps(temps; pc), 0)
 end
 
@@ -460,8 +500,7 @@ end
 Fake6502m.read6502(cpu::Cpu{UIData}, addr::UInt16) =
     Fake6502m.read6502(uidata(cpu).state, cpu, addr)
 
-Fake6502m.jsr(cpu::Cpu{UIData}, temps) =
-    Fake6502m.jsr(uidata(cpu).state, cpu, temps)
+Fake6502m.jsr(cpu::Cpu{UIData}, temps) = Fake6502m.jsr(uidata(cpu).state, cpu, temps)
 
 Fake6502m.write6502(cpu::Cpu{UIData}, addr::UInt16, byte::UInt8) =
     Fake6502m.write6502(uidata(cpu).state, cpu, addr, byte)

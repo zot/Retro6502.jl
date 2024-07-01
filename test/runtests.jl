@@ -64,7 +64,14 @@ import Fake6502.C64: C64, @io, BASIC_ROM
 import Fake6502.Workers: Workers, Worker, add_worker
 
 const EDIR = joinpath(dirname(dirname(@__FILE__)), "examples")
-const REGISTERS = ((:a, :a, :a),(:x, :x, :x), (:y, :y, :y), (:pc, :pc, :pc),(:sp, :s, :s), (:status, :p, :flags))
+const REGISTERS = (
+    (:a, :a, :a),
+    (:x, :x, :x),
+    (:y, :y, :y),
+    (:pc, :pc, :pc),
+    (:sp, :s, :s),
+    (:status, :p, :flags),
+)
 
 const CYCLES = []
 const FAKE_CYCLES = []
@@ -75,12 +82,12 @@ const CYCLE_ACCURACY = :none
 struct TestCpu end
 
 function read6502(cpu::Cpu{TestCpu}, addr::UInt16)
-    push!(CYCLES, [addr, cpu.memory[addr + 1], "read"])
-    cpu.memory[addr + 1]
+    push!(CYCLES, [addr, cpu.memory[addr+1], "read"])
+    cpu.memory[addr+1]
 end
 function write6502(cpu::Cpu{TestCpu}, addr::UInt16, value::UInt8)
     push!(CYCLES, [addr, value, "write"])
-    cpu.memory[addr + 1] = value
+    cpu.memory[addr+1] = value
 end
 
 function fake_read_mem(mach::Machine, addr::UInt16)::UInt8
@@ -105,10 +112,8 @@ end
 
 function testcondstr(buf, cond)
     push!(buf, join([register(cond, p) for p in (:a, :x, :y, :s, :p, :pc)], " "))
-    for (addr, val) in sort(cond.ram; by=first)
-        note = addr == cond.pc ? "*" :
-            addr == 0x0100 | cond.s ? ">" :
-            " "
+    for (addr, val) in sort(cond.ram; by = first)
+        note = addr == cond.pc ? "*" : addr == 0x0100 | cond.s ? ">" : " "
         push!(buf, @sprintf "  %s%04x: %02x" note addr val)
     end
 end
@@ -118,7 +123,7 @@ function teststr(test)
     testcondstr(buf, test.initial)
     testcondstr(buf, test.final)
     push!(buf, @sprintf "%-15s%s" "EXPECTED" "ACTUAL")
-    for i in 1:max(length(test.cycles), length(CYCLES))
+    for i = 1:max(length(test.cycles), length(CYCLES))
         local str1 = if i <= length(test.cycles)
             local (addr, val, type) = test.cycles[i]
             @sprintf "%-5s %04x %02x  " type addr val
@@ -150,8 +155,8 @@ function run_fake_test(machine::Cpu, fake::Machine, test, file, number)
         setproperty!(fake.cpu, fk, convert(typeof(val), test.initial[std]))
     end
     for (addr, value) in test.initial.ram
-        machine.memory[addr + 1] = value
-        fake.mem[addr + 1] = value
+        machine.memory[addr+1] = value
+        fake.mem[addr+1] = value
     end
     Fake6502.call_step(fake)
     Fake6502m.step6502(machine)
@@ -164,7 +169,7 @@ function run_fake_test(machine::Cpu, fake::Machine, test, file, number)
         end
     end
     for (addr,) in test.final.ram
-        if machine.memory[addr + 1] != fake.mem[addr + 1]
+        if machine.memory[addr+1] != fake.mem[addr+1]
             push!(errs, "[$addr:$(machine.memory[addr + 1])] != $(fake.mem[addr + 1])")
         end
     end
@@ -194,7 +199,7 @@ function run_data_test(machine::Cpu, test, file, number)
         end
     end
     for (addr, value) in test.initial.ram
-        machine.memory[addr + 1] = value
+        machine.memory[addr+1] = value
     end
     temps = Fake6502m.step6502(machine, temps)
     errs = []
@@ -203,15 +208,21 @@ function run_data_test(machine::Cpu, test, file, number)
         if retrievefield(machine, temps, new) != test.final[std]
             if new == :status
                 local diff = machine.status ⊻ UInt8(test.final.p)
-                push!(errs, "status ($(status(machine.status, diff))) != p ($(status(test.final.p, diff)))")
+                push!(
+                    errs,
+                    "status ($(status(machine.status, diff))) != p ($(status(test.final.p, diff)))",
+                )
             else
-                push!(errs, "$new ($(rhex(retrievefield(machine, temps, new)))) != $std ($(rhex(test.final[std])))")
+                push!(
+                    errs,
+                    "$new ($(rhex(retrievefield(machine, temps, new)))) != $std ($(rhex(test.final[std])))",
+                )
             end
         end
     end
     for (addr, value) in test.final.ram
-        if machine.memory[addr + 1] != value
-            push!(errs, @sprintf "[%04x %02x] != %02x" addr machine.memory[addr + 1] value)
+        if machine.memory[addr+1] != value
+            push!(errs, @sprintf "[%04x %02x] != %02x" addr machine.memory[addr+1] value)
         end
     end
     if CYCLE_ACCURACY == :complete
@@ -224,7 +235,8 @@ function run_data_test(machine::Cpu, test, file, number)
         @error "$file:$number:test $(test.name) ($(opsyms[op]) $(addrsyms[op])) WARNING: clock ticks $(temps.clockticks6502) != $(length(test.cycles))"
     end
     if !isempty(errs)
-        local op = first([val for (addr, val) in test.initial.ram if addr == test.initial.pc])
+        local op =
+            first([val for (addr, val) in test.initial.ram if addr == test.initial.pc])
         fail(machine, test, file, number, join(errs, "\n  "))
     end
     empty!(CYCLES)
@@ -234,7 +246,7 @@ function cyclestr(cyc)
     join([@sprintf("  %-5s %04x %02x", type, addr, val) for (addr, val, type) in cyc], "\n")
 end
 
-function runtests(machine::Cpu, dir, inst; mode=:data)
+function runtests(machine::Cpu, dir, inst; mode = :data)
     name = rhex(inst)
     println(name, "...")
     file = joinpath(dir, "$name.json")
@@ -249,36 +261,149 @@ function runtests(machine::Cpu, dir, inst; mode=:data)
     end
 end
 
-function runtests(dir, inst; mode=:data)
+function runtests(dir, inst; mode = :data)
     println("DIR: ", dir)
     runtests(Cpu{TestCpu}(), dir, inst; mode)
 end
 
 const ILLEGAL = [
-    0x02, 0x03, 0x04, 0x07, 0xFF, 0x0B, 0x0C, 0x0F,
-    0x12, 0x13, 0x14, 0x17, 0x1A, 0x1B, 0x1C, 0x1F,
-    0x22, 0x23, 0xFF, 0x27, 0xFF, 0x2B, 0xFF, 0x2F,
-    0x32, 0x33, 0x34, 0x37, 0x3A, 0x3B, 0x3C, 0x3F,
-    0x42, 0x43, 0x44, 0x47, 0xFF, 0x4B, 0xFF, 0x4F,
-    0x52, 0x53, 0x54, 0x57, 0x5A, 0x5B, 0x5C, 0x5F,
-    0x62, 0x63, 0x64, 0x67, 0xFF, 0x6B, 0xFF, 0x6F,
-    0x72, 0x73, 0x74, 0x77, 0x7A, 0x7B, 0x7C, 0x7F,
-    0x82, 0x83, 0xFF, 0x87, 0xFF, 0x8B, 0xFF, 0x8F,
-    0x92, 0x93, 0xFF, 0x97, 0xFF, 0x9B, 0x9C, 0x9E, 0x9F,
-    0xFF, 0xA3, 0xFF, 0xA7, 0xFF, 0xAB, 0xFF, 0xAF,
-    0xB2, 0xB3, 0xFF, 0xB7, 0xFF, 0xBB, 0xBC, 0xBF,
-    0xC2, 0xC3, 0xFF, 0xC7, 0xFF, 0xCB, 0xCC, 0xCF,
-    0xD2, 0xD3, 0xD4, 0xD7, 0xDA, 0xDB, 0xDC, 0xDF,
-    0xE2, 0xE3, 0xFF, 0xE7, 0xFF, 0xEB, 0xEC, 0xEF,
-    0xF2, 0xF3, 0xF4, 0xF7, 0xFA, 0xFB, 0xFC, 0xFF,
+    0x02,
+    0x03,
+    0x04,
+    0x07,
+    0xFF,
+    0x0B,
+    0x0C,
+    0x0F,
+    0x12,
+    0x13,
+    0x14,
+    0x17,
+    0x1A,
+    0x1B,
+    0x1C,
+    0x1F,
+    0x22,
+    0x23,
+    0xFF,
+    0x27,
+    0xFF,
+    0x2B,
+    0xFF,
+    0x2F,
+    0x32,
+    0x33,
+    0x34,
+    0x37,
+    0x3A,
+    0x3B,
+    0x3C,
+    0x3F,
+    0x42,
+    0x43,
+    0x44,
+    0x47,
+    0xFF,
+    0x4B,
+    0xFF,
+    0x4F,
+    0x52,
+    0x53,
+    0x54,
+    0x57,
+    0x5A,
+    0x5B,
+    0x5C,
+    0x5F,
+    0x62,
+    0x63,
+    0x64,
+    0x67,
+    0xFF,
+    0x6B,
+    0xFF,
+    0x6F,
+    0x72,
+    0x73,
+    0x74,
+    0x77,
+    0x7A,
+    0x7B,
+    0x7C,
+    0x7F,
+    0x82,
+    0x83,
+    0xFF,
+    0x87,
+    0xFF,
+    0x8B,
+    0xFF,
+    0x8F,
+    0x92,
+    0x93,
+    0xFF,
+    0x97,
+    0xFF,
+    0x9B,
+    0x9C,
+    0x9E,
+    0x9F,
+    0xFF,
+    0xA3,
+    0xFF,
+    0xA7,
+    0xFF,
+    0xAB,
+    0xFF,
+    0xAF,
+    0xB2,
+    0xB3,
+    0xFF,
+    0xB7,
+    0xFF,
+    0xBB,
+    0xBC,
+    0xBF,
+    0xC2,
+    0xC3,
+    0xFF,
+    0xC7,
+    0xFF,
+    0xCB,
+    0xCC,
+    0xCF,
+    0xD2,
+    0xD3,
+    0xD4,
+    0xD7,
+    0xDA,
+    0xDB,
+    0xDC,
+    0xDF,
+    0xE2,
+    0xE3,
+    0xFF,
+    0xE7,
+    0xFF,
+    0xEB,
+    0xEC,
+    0xEF,
+    0xF2,
+    0xF3,
+    0xF4,
+    0xF7,
+    0xFA,
+    0xFB,
+    0xFC,
+    0xFF,
 ]
 const DONE = 0x00:0x6F
 const SKIP = [0x10]
 
-function runtests(dir; mode=:data)
+function runtests(dir; mode = :data)
     println("DIR: ", dir)
     machine = Cpu(; user_data = TestCpu())
-    for inst in 0x00:0xFF
+    for inst = 0x00:0xFF
         #inst ∈ ILLEGAL && continue
         #inst ∈ DONE && continue
         #inst ∈ SKIP && continue
@@ -286,7 +411,7 @@ function runtests(dir; mode=:data)
     end
 end
 
-function test_asm(dir::AbstractString; cleanup=true)
+function test_asm(dir::AbstractString; cleanup = true)
     tmpdir = mktempdir(; cleanup)
     for filename in ["simple", "labeled"]
         local tassfile = joinpath(dir, "$filename.tass")
@@ -295,7 +420,9 @@ function test_asm(dir::AbstractString; cleanup=true)
         # asm simple.jas, compare to simple.prg
         path = joinpath(tmpdir, filename)
         !cleanup && println("@@@\n@@@  PATH:$(path)\n@@@")
-        run(`64tass --cbm-prg -o $path-tass.prg -L $path-tass.list -l $path-tass.labels $tassfile`)
+        run(
+            `64tass --cbm-prg -o $path-tass.prg -L $path-tass.list -l $path-tass.labels $tassfile`,
+        )
         local ctx = asmfile(jasfile; output = "$path-jas", list = true, verbose = true)
         expectedbytes = read("$path-tass.prg")
         actualbytes = read("$path-jas.prg")
@@ -306,24 +433,30 @@ function test_asm(dir::AbstractString; cleanup=true)
     end
 end
 
-load_condensed(w::Worker) = (mach::Machine)-> begin
-    off, total = Workers.loadprg(w, mach, "$EDIR/condensed.prg"; labelfile = "$EDIR/condensed.labels")
-    @io println(
-        "Loaded ",
-        total,
-        " bytes at 0x",
-        string(off; base = 16, pad = 4),
-        ", ",
-        length(mach.labels),
-        " labels",
-    )
-    @io print("labels:")
-    for name in sort([keys(mach.labels)...])
-        @printf "\n  %04x %s" mach.labels[name].value - 1 name
+load_condensed(w::Worker) =
+    (mach::Machine) -> begin
+        off, total = Workers.loadprg(
+            w,
+            mach,
+            "$EDIR/condensed.prg";
+            labelfile = "$EDIR/condensed.labels",
+        )
+        @io println(
+            "Loaded ",
+            total,
+            " bytes at 0x",
+            string(off; base = 16, pad = 4),
+            ", ",
+            length(mach.labels),
+            " labels",
+        )
+        @io print("labels:")
+        for name in sort([keys(mach.labels)...])
+            @printf "\n  %04x %s" mach.labels[name].value - 1 name
+        end
+        @io println()
+        @io println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
     end
-    @io println()
-    @io println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
-end
 
 function test_worker()
     w = add_worker()
@@ -331,7 +464,10 @@ function test_worker()
 end
 
 
-@testset "test assembly" test_asm(joinpath(dirname(realpath(@__FILE__)), "test-asm-files"); cleanup=false)
+@testset "test assembly" test_asm(
+    joinpath(dirname(realpath(@__FILE__)), "test-asm-files");
+    cleanup = false,
+)
 
 #@testset "test worker" test_worker()
 

@@ -18,7 +18,7 @@ const ROM_FILES = Dict(
 )
 const VIC_BANK = A(0xDD00)
 const VIC_MEM = A(0xD018)
-const BANKS_VIC = 0x0F
+const BANKS_VIC = 0x03
 const BANKS_BASIC = 0x10
 const BANKS_CHARS = 0x20
 const BANKS_KERNAL = 0x40
@@ -182,21 +182,17 @@ Base.setproperty!(a::Access, prop::Symbol, value) = set!(getproperty(a, prop), v
     # bits 10-13 of screen mem (or'ed with vicbank)
     # 0000, 0400, 0800, 0C00, 1000, 1400, 1800, 1C00, 2000, 2400, 2800, 2C00, 3000, 3400, 3800, 3C00
     scrmem::UInt16 = 0
-    # vicbank 0: chrmem 1000 -> ROM
-    # vicbank 2: chrmem 1800 -> ROM
-    chrrom::Bool = 0
 end
 
-function updatesettings(bs::BankSettings, banks::UInt8, mem::Vector{UInt8})
+function updatesettings(bs::BankSettings, banks::UInt8, vicmem::UInt8)
     local bank = (3 - (banks & BANKS_VIC)) << 14
 
     bs.basic = (banks & BANKS_BASIC) != 0
     bs.chars = (banks & BANKS_CHARS) != 0
     bs.kernal = (banks & BANKS_KERNAL) != 0
     bs.vicbank = bank
-    bs.scrmem = bank + ((mem[VIC_MEM] & 0xF0) << 6)
-    bs.chrmem = bank + ((mem[VIC_MEM] & 0x0E) << 11)
-    bs.chrrom = bank === 0 && bs.chrmem == 0x1000 || bank === 0x1800 && bs.chrmem == 0x1800
+    bs.scrmem = bank + ((vicmem & 0x00F0) << 6)
+    bs.chrmem = bank + ((vicmem & 0x000E) << 10)
 end
 
 hasmask(addr, mask) = addr & mask === mask
@@ -211,12 +207,13 @@ function getmem(bs::BankSettings, mem::Vector{UInt8}, addr::Int)
     else
         false
     end
-    return (userom ? ROM : mem)[addr + 1]
+    return (userom ? ROM : mem)[addr+1]
 end
 
-getchr(bs::BankSettings, mem::Vector{UInt8}) = @view (!bs.chrrom ? mem : ROM)[bs.chrmem:bs.chrmem+0x7FF]
+charmem(bs::BankSettings, mem::AbstractVector{UInt8}) =
+    @view (bs.chrmem ∈ (0x1000, 0x1800, 0x9000, 0x9800) ? ROM : mem)[A(bs.chrmem:bs.chrmem+0x7FF)]
 
-getscr(bs::BankSettings, mem::Vector{UInt8}) = @view mem[bs.scrmem:bs.scrmem+0x3FF]
+screenmem(bs::BankSettings, mem::AbstractVector{UInt8}) = @view mem[A(bs.scrmem:bs.scrmem+0x3FF)]
 
 # these might work but they are untested
 #Base.getindex(a::Access, key::Integer) = index(a, key)
@@ -518,7 +515,7 @@ end
 function loadprg(filename, mach::Machine; labelfile = "")
     local off, len = loadprg(filename, mach.mem, mach.labels, mach.addrs; labelfile)
     mach.newcpu.memory[off:off+len-1] = mach.mem[off:off+len-1]
-    initprg(A(off:off + len - 1), mach, mach.newcpu.user_data)
+    initprg(A(off:off+len-1), mach, mach.newcpu.user_data)
     off, len
 end
 

@@ -22,7 +22,7 @@ const BG = color(0x55409f)
 #const FG = color(0x9884e3, 0x8673ce, 0x8472c8)
 const FG = color(0x9983ea, 0xFFFFFF)
 const screen_style = Crayon(; foreground = color2int(FG), background = color2int(BG))
-const pc_style = merge(screen_style, Crayon(; underline=true, bold=true))
+const pc_style = merge(screen_style, Crayon(; underline = true, bold = true))
 const border_style = Crayon(; foreground = color2int(BG), background = color2int(BORDER))
 
 # currently unused
@@ -56,21 +56,32 @@ Screen structure, parameterized to allow customization
     wrappedlines::Vector{Vector{String}} = [["READY!"], [".load examples/statichello.jas"]]
     screenlines::Vector{String} = String[]
     cursor::Ref{Int} = Ref(0) # col
-    replarea::Ref{Rect} = Ref(Rect())
     diag::Ref{Bool} = Ref(false)
     repl::Any
     showcpu::Ref{Bool} = Ref(false)
     cpu::Union{Nothing,Cpu} = nothing
     screenloc::Ref{Tuple{UInt16,UInt16}} = Ref((0x0001, 0x0001)) # row, col
+    areas::Dict{Symbol,Rect} = Dict{Symbol,Rect}(
+        :repl => Rect(),
+        :registers => Rect(),
+        :monitor => Rect(),
+        :status => Rect(),
+    )
+    mouse_area::Ref{Symbol} = Ref(:repl)
     screenwid::Ref{Int} = Ref(0)
-    screenfile::Tuple{String, IO} = mktemp()
-    image::Vector{UInt8} = mmap(screenfile[2], Vector{UInt8}, (320*200*3,))
+    screenfile::Tuple{String,IO} = mktemp()
+    image::Vector{UInt8} = mmap(screenfile[2], Vector{UInt8}, (320 * 200 * 3,))
     imageshown::Ref{Bool} = Ref(false)
     # snapshot of previous screen and char defs to eliminate computing redundant images
     lastscreen::Ref{Vector{UInt8}} = Ref(UInt8[])
     lastchars::Ref{Vector{UInt8}} = Ref(UInt8[])
     lastcmd::Ref{String} = Ref("")
-    lastevt::Ref{TUI.KeyEvent} = Ref(TUI.KeyEvent(Crossterm.EventTag.KEY, Crossterm.KeyEvent("", String[], "", String[])))
+    lastevt::Ref{Crossterm.Event} = Ref{Crossterm.Event}(
+        TUI.KeyEvent(
+            Crossterm.EventTag.KEY,
+            Crossterm.KeyEvent("", String[], "", String[]),
+        ),
+    )
 end
 
 mutable struct Repl{Specialization}
@@ -88,9 +99,9 @@ mutable struct Repl{Specialization}
     settings::Dict{Symbol}
     dirty::Bool
     runid::Int
+    banksettings::BankSettings
     screen::Screen{Specialization}
     Repl{T}() where {T} = new{T}()
 end
 
-struct Completer <: CompletionProvider
-end
+struct Completer <: CompletionProvider end
