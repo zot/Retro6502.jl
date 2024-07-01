@@ -191,7 +191,7 @@ function screenarea(
     title = "",
     border = LTR,
     border_type = BorderType{:MID}(),
-    adjust=false,
+    adjust = false,
 )
     global border_style
     local block =
@@ -263,14 +263,15 @@ function configure(
                                 border_type = bt(:SCREEN),
                                 border = LT,
                             ) do area, buf
+                                scr.areas[:screen] = area
                                 setscreenloc(scr, area.y, area.x)
                                 set(buf, area, String[])
                             end,
                             Block(;
                                 title = "Repl",
                                 title_style = border_style,
-                                border=LT,
-                                border_type=bt(:REPL_BORDER),
+                                border = LT,
+                                border_type = bt(:REPL_BORDER),
                                 border_style,
                             ),
                         ],
@@ -290,7 +291,7 @@ function configure(
                                 title = "Monitor",
                                 border_type = bt(:MONITOR),
                                 border = LTRB,
-                                adjust=true,
+                                adjust = true,
                             ),
                         ],
                         [Length(3), Min(1)],
@@ -305,13 +306,19 @@ function configure(
     if repl
         push!(scr.layout.constraints, Min(2))
         if c64screen
-            push!(scr.layout.widgets, screenarea(; title = "", border_type = bt(), border=LR) do area, buf
-                      drawrepl(scr, area, buf)
-                  end)
+            push!(
+                scr.layout.widgets,
+                screenarea(; title = "", border_type = bt(), border = LR) do area, buf
+                    drawrepl(scr, area, buf)
+                end,
+            )
         else
-            push!(scr.layout.widgets, screenarea(; title = "Repl", border_type = bt()) do area, buf
-                      drawrepl(scr, area, buf)
-                  end)
+            push!(
+                scr.layout.widgets,
+                screenarea(; title = "Repl", border_type = bt()) do area, buf
+                    drawrepl(scr, area, buf)
+                end,
+            )
         end
     end
     push!(scr.layout.constraints, Length(3))
@@ -346,9 +353,10 @@ end
 drawmonitor(scr::Screen) = function (area::Rect, buf::Buffer)
     local pc = scr.repl.state.pc
     local height = area.height
-    local start = round(Int, min(0xFFFF - height * 16 + 1, max(0, floor(pc / 16.0 - 1) * 16)))
+    local start =
+        round(Int, min(0xFFFF - height * 16 + 1, max(0, floor(pc / 16.0 - 1) * 16)))
     local mem = scr.repl.worker.memory
-    scr.areas[:screen] = area
+    scr.areas[:monitor] = area
     for row = 0:area.height
         local offset = start + row * 16
         local values1 = join((@sprintf "%02x" mem[offset+i] for i = 0:7), " ")
@@ -370,7 +378,6 @@ end
 
 function drawrepl(scr::Screen, area::Rect, buf::Buffer)
     if scr.areas[:repl] != area
-        scr.areas[:repl] = area
         scr.areas[:repl] = area
         empty!(scr.wrappedlines)
         for line in scr.repllines
@@ -399,10 +406,11 @@ TUI.view(scr::Screen) = scr
 
 function TUI.update!(scr::Screen, evt::TUI.MouseEvent)
     evt.data.kind !== "DownLeft" && return
+    scr.mouse_area[] = :unknown
     for (name, area) in scr.areas
         !(
-            left(area) <= evt.data.column <= right(area) &&
-            top(area) <= evt.data.row <= bottom(area)
+            left(area) <= evt.data.column + 1 <= right(area) &&
+            top(area) <= evt.data.row + 1 <= bottom(area)
         ) && continue
         scr.mouse_area[] = name
     end
