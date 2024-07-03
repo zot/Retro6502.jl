@@ -9,6 +9,7 @@ There are additional directives:
 .load FILE           load FILE as local program (see .edit and .save)
 .save FILE           save local program to FILE (see .edit and .load)
 .list                list the current program
+.prg                 Assembler output for current program
 .edit                run ENV["EDITOR"] on local program and reload afterwards (see .load and .save)
 .status              print the current machine status
 .diag                show status and list all break and watch points
@@ -82,6 +83,7 @@ function cmd_help() end
 function cmd_list() end
 function cmd_load() end
 function cmd_next() end
+function cmd_prg() end
 function cmd_run() end
 function cmd_reset() end
 function cmd_save() end
@@ -118,6 +120,7 @@ const DEFS = [
         "perform one step (optiaonlly from LOCATION) -- if it's a JSR, break upon return",
         ".n",
     ),
+    ".prg" => (cmd_prg, "", "Show assembler output (if available)"),
     ".run" => (
         cmd_run,
         "[LOCATION]",
@@ -157,6 +160,7 @@ function repl(specialization = Nothing)
         ctx = Repl{specialization}()
         global _REPL = ctx
         ctx.asmlines = String[]
+        ctx.asmlist = ""
         ctx.cmd_handler = handle_command
         ctx.pending_asm_prefix = ""
         ctx.pending_asm_expr = ""
@@ -272,9 +276,13 @@ function cmd_asm(ctx::Repl, cmd, args)
             println(io, line)
         end
         close(io)
-        ctx.labels = Workers.asmfile(ctx.worker, path)
+        ctx.labels, ctx.asmlist = Workers.asmfile(ctx.worker, path)
     end
     ctx.dirty = false
+end
+
+function cmd_prg(ctx::Repl, cmd, args)
+    println(ctx, ctx.asmlist)
 end
 
 function cmd_break(ctx::Repl, cmd, args)

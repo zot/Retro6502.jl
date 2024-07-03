@@ -174,6 +174,8 @@ const BASE_STACK = 0x100
     user_data::T
 end
 
+Base.show(io::IO, ::Cpu) = print(io, "Cpu")
+
 """
 Passing an immutable Temps structure instead of changing certain fields
 in the mutable Cpu struct improves performance
@@ -933,7 +935,9 @@ function jam(cpu, temps)
     return addticks(cpu, temps, 1)
 end
 
-function jmp(cpu, temps)
+jmp(cpu, temps) = base_jmp(cpu, temps)
+
+function base_jmp(cpu, temps)
     #cpu.pc = cpu.ea
     #cpu.pc = temps.ea
     return Temps(temps; pc = cpu.ea)

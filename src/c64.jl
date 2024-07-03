@@ -18,8 +18,8 @@ using ..Fake6502:
 using ..Fake6502: ROM, Addr, AddrRange, intrange, hex, SCREEN_CODES, screen2ascii
 using ..Fake6502: register, print_n, call_6502, call_frth, reset, EDIR
 using ..Fake6502: prep_call, finish_call, prep_frth, finish_frth, setpc, dbyte, call_fake
-import ..Fake6502: Fake6502m, mem, mprint, mprintln
-using ..Fake6502.Fake6502m: Cpu
+import ..Fake6502: Fake6502m, mem, mprint, mprintln, initprg
+using ..Fake6502.Fake6502m: Cpu, Temps
 import ..Fake6502.Fake6502m: read6502, write6502
 using ..Fake6502.Rewinding
 using ..Fake6502.Rewinding: Rewinder, RewindSession
@@ -62,7 +62,7 @@ const BANK_SWITCH = A(0x0001)
 const BASIC_ROM = A(0xA000:0xBFFF)
 const CHAR_ROM = A(0xD000:0xDFFF)
 const KERNAL_ROM = A(0xE000:0xFFFF)
-BANK_CHOICES = [(true, BASIC_ROM), (true, KERNAL_ROM), (), (false, CHAR_ROM)]
+BANK_CHOICES = [(false, BASIC_ROM), (true, KERNAL_ROM), (), (false, CHAR_ROM)]
 const VIC_SETS = Set([A(0x1000), A(0x1800), A(0x9000), A(0x9800)])
 const UPDATE_PERIOD = 1000000 ÷ 5
 revising = false
@@ -78,6 +78,98 @@ const KEYBOARD_INPUTS = [
     "CRSR DN"   "F5"       "F3"        "F1"       "F7"        "CRSR RT"   "RETURN"    "DELETE"
 ]
 #! format: on
+
+const KEY_CODES = [
+"Inst/Del",
+"Return",
+"Crsr ←→",
+"F7/F8",
+"F1/F2",
+"F3/F4",
+"F5/F6",
+"Crsr ↑↓",
+"3",
+"w",
+"a",
+"4",
+"z",
+"s",
+"e",
+"",
+"5",
+"r",
+"d",
+"6",
+"c",
+"f",
+"t",
+"x",
+"7",
+"y",
+"g",
+"8",
+"b",
+"h",
+"u",
+"v",
+"9",
+"i",
+"j",
+"0",
+"m",
+"k",
+"o",
+"n",
+"+",
+"p",
+"l",
+"−",
+">",
+"[",
+"@",
+"<",
+"£",
+"*",
+"]",
+"Clr/Home",
+"",
+"=",
+"↑",
+"?",
+"1",
+"←",
+"",
+"2",
+" ",
+"",
+"q",
+"Run/Stop",
+]
+
+const KEY_TO_CODE = Dict(k=>i for (i, k) in enumerate(KEY_CODES))
+
+const SHIFTED = [
+    ("delete", "insert")=>"Inst/Del",("right", "left")=>"Crsr ←→", ("f1", "f2")=>"F1/F2",
+    ("f3", "f4")=>"F3/F4", ("f5", "f6")=>"F5/F6", ("f7", "f8")=>"F7/F8", ("down", "up")=>"Crsr ↑↓",
+    ("home", "end")=>"Clr/Home", ("esc", "")=>"Run/Stop"
+]
+
+const ASCII_TO_KEY_CODE = Dict(
+    (k=>i for (i, k) in enumerate(KEY_CODES) if length(k) == 1)...,
+    "^"=>KEY_TO_CODE["↑"],
+    (k=>KEY_TO_CODE[v] for ((k,), v) in SHIFTED)...,
+    "enter"=>KEY_TO_CODE["Return"],
+)
+
+const CTRL = 0x40
+const SHIFT = 0x80
+const UNUSED_KEYS = [i for (i, k) in enumerate(KEY_CODES) if k == ""]
+
+function __init__()
+    for ((_,k), v) in SHIFTED
+        ASCII_TO_KEY_CODE[k] = KEY_TO_CODE[v] | SHIFT
+    end
+end
 
 setrevising(rev::Bool) = global revising = rev
 
@@ -138,6 +230,8 @@ Rect(x, y; r, b) = Rect(x, y, r - x, b - y)
     curtime::Atomic{UInt64} = Atomic{UInt64}(0)
     fake_routines::Dict{Addr,Function} = Dict{Addr,Function}()
 end
+
+Base.show(io::IO, ::C64_machine) = print(io, "C64_machine")
 
 function pause(f::Function, c)
     pause(c)
@@ -224,9 +318,9 @@ mprint(::Cpu, args...) = @io print(args...)
 mprintln(::Cpu, args...) = @io println(args...)
 
 
-c64(cpu::Cpu{C64_machine})::C64_machine = cpu.user_data
+c64(cpu::Cpu)::C64_machine = c64(cpu.user_data)
+c64(state::C64_machine) = state
 c64(mach::Machine)::C64_machine = c64(mach.newcpu)
-c64(state::C64_machine)::C64_machine = state
 
 function screen_mem(mach::Machine)
     c = c64(mach)
@@ -243,12 +337,15 @@ end
 Fake6502m.read6502(cpu::Cpu{C64_machine}, addr::UInt16) = read6502(c64(cpu), cpu, addr)
 
 function Fake6502m.read6502(state::C64_machine, cpu::Cpu, addr::UInt16)
+    #log("C64 READ 1")
     banks = state.banks
     adr = A(addr)
+    #log("C64 READ 2")
     for bank in banks
-        adr ∈ bank && return ROM[adr.value]
+        adr ∈ bank && return ROM[adr]
     end
-    cpu.memory[adr.value]
+    #log("C64 READ 3")
+    cpu.memory[adr]
 end
 
 c64_set_mem(cpu::Cpu, addr::Addr, byte::UInt8) =
@@ -264,13 +361,24 @@ c64_set_mem(state::C64_machine, cpu::Cpu, addr::UInt16, byte::UInt8) =
 
 Fake6502m.jsr(cpu::Cpu{C64_machine}, temps) = Fake6502m.jsr(c64(cpu), cpu, temps)
 
-function Fake6502m.jsr(mach::C64_machine, cpu::Cpu, temps)
-    curpc = Fake6502m.pc(cpu, temps)
-    curpc >= length(mach.fake_routines) && return Fake6502m.base_jsr(cpu, temps)
+function Fake6502m.jsr(mach::C64_machine, cpu::Cpu, temps::Temps)
+    temps = Fake6502m.base_jsr(cpu, temps)
+    return jumpfake("JSR", mach, cpu, temps)
+end
+
+function Fake6502m.jmp(mach::C64_machine, cpu::Cpu, temps::Temps)
+    temps = Fake6502m.base_jmp(cpu, temps)
+    return jumpfake("JMP", mach, cpu, temps)
+end
+
+function jumpfake(label, mach::C64_machine, cpu::Cpu, temps::Temps)
+    local curpc = Fake6502m.pc(cpu, temps)
+    #log("C64 $label TO $(repr(curpc))")
+    curpc >= length(mach.fake_routines) && return temps
     # jumping to fake routine
-    temps = Fake6502m.incpc(cpu, temps, 0x3)
-    mprintln(mach, "@@@ JSR FAKE ROUTINE $(mach.addrs[Addr(curpc)])")
-    return mach.fake_routines[curpc+1](cpu, temps)::Fake6502m.Temps
+    #log("FAKE ROUTINE $(repr(curpc))")
+    temps = mach.fake_routines[A(curpc)](cpu, temps)::Fake6502m.Temps
+    return Fake6502m.rts(cpu, temps)
 end
 
 Fake6502m.write6502(cpu::Cpu{C64_machine}, addr::UInt16, byte::UInt8) =
@@ -305,7 +413,7 @@ function Fake6502m.write6502(state::C64_machine, cpu::Cpu, addr::UInt16, byte::U
         switch_banks(state, cpu, byte)
         return
     elseif adr == VIC_MEM || adr == VIC_BANK
-        cpu.memory[adr.value] == byte && return
+        cpu.memory[adr] == byte && return
         c64_set_mem(cpu, addr, byte)
         update_vic_bank(cpu.memory, state)
         @io println("WRITE TO VIC MEM")
@@ -323,7 +431,7 @@ function c64_read_mem(mach::Machine, addr::UInt16)
     banks = state.banks
     adr = A(addr)
     for bank in banks
-        adr ∈ bank && return ROM[adr.value]
+        adr ∈ bank && return ROM[adr]
     end
     return mach[adr]
 end
@@ -331,27 +439,28 @@ end
 in_bank(addr, bank, banks) = addr ∈ bank && bank ∈ banks
 
 function switch_banks(state::C64_machine, cpu::Cpu, value::UInt8)
-    banks = state.banks
-    io = cpu.memory[IO_CTL.value]
-    original = settings = cpu.memory[BANK_SWITCH.value]
+    local banks = state.banks
+    local originalbanks = Set(banks)
+    local io = cpu.memory[IO_CTL]
+    local settings = cpu.memory[BANK_SWITCH]
     for bit in (0x01, 0x02, 0x04)
         if io & bit != 0
-            settings = (settings & ~bit) | bit
-            (on, bank) = BANK_CHOICES[bit]
-            if on
-                push!(banks, bank)
-            else
-                delete!(banks, bank)
+            on, bank = BANK_CHOICES[bit]
+            settings = (settings & ~bit) | (value & bit)
+            #log("$value & $bit = $(value & bit)")
+            if value & bit == 0
+                on = !on
+                #log("FLIPPED BANK $bit TO $(on ? "on" : "off")")
             end
+            #log("BIT $bit $(on ? "on" : "off")")
+            (on ? push! : delete!)(banks, bank)
         end
     end
-    if settings != original
-        @io println("BANK CHOICES CHANGED")
-        settings != value &&
-            @io println("WARNING, BANK CHOICES IS $settings BUT VALUE WAS $value")
+    if originalbanks != banks
+        #log("BANK CHOICES CHANGED TO $banks, SET $(io & 7) VALUE $(bitstring(value)[end-2:end])")
         c64_set_mem(state, cpu, BANK_SWITCH, settings)
     else
-        @io println("BANK CHOICES DID NOT CHANGE")
+        #log("BANK CHOICES DID NOT CHANGE FROM $banks, SET $(io & 7) VALUE $(bitstring(value)[end-2:end])")
     end
 end
 
@@ -381,8 +490,8 @@ function c64_step(mach::Machine, state::C64_machine, addrs, lastlabel, labelcoun
     #println("c64 step")
     label = Base.get(addrs, A(mach.cpu.pc), nothing)
     if !isnothing(label)
-        if label === lastlabel[]
-            labelcount[] === 0 && @io println("  LOOP...")
+        if label == lastlabel[]
+            labelcount[] == 0 && @io println("  LOOP...")
             labelcount[] += 1
         else
             @io print(rpad(string(label) * ": ", maxwid + 2))
@@ -403,15 +512,15 @@ function initstate(state::C64_machine, cpu::Cpu; clearscreen = true)
     local memory = cpu.memory
 
     clearscreen && (memory[intrange(screen)] .= ' ')
-    memory[BORDER.value] = 0xE
-    memory[BG0.value] = 0x6
-    memory[BG1.value] = 0x1
-    memory[BG2.value] = 0x2
-    memory[BG3.value] = 0x3
+    memory[BORDER] = 0xE
+    memory[BG0] = 0x6
+    memory[BG1] = 0x1
+    memory[BG2] = 0x2
+    memory[BG3] = 0x3
     for mem = 0xD800:0xDBE7
         memory[mem+1] = 0x01
     end
-    memory[IO_CTL.value] = 0x2F
+    memory[IO_CTL] = 0x2F
     memory[VIC_BANK] = 0x3
     memory[VIC_MEM] = 0x14
     update_vic_bank(cpu.memory, state)
@@ -455,15 +564,21 @@ end
 ticks(mach::Machine) = Fake6502m.ticks(mach.newcpu, mach.temps)
 
 # setup banks after load
-function initprg(memrange::AddrRange, mach::Machine, state::C64_machine)
-    if BANK_SWITCH:BANK_SWITCH+1 ∈ memrange && mach.newcpu.memory[BANK_SWITCH] != 0
-        switch_banks(state, mach.newcpu, mach.newcpu.memory[BANK_SWITCH])
+initprg(memrange::AddrRange, mach::Machine, state::C64_machine) =
+    initprg(memrange, mach.newcpu, state)
+
+function initprg(memrange::AddrRange, cpu::Cpu, state::C64_machine)
+    if IO_CTL:BANK_SWITCH ∈ memrange && cpu.memory[IO_CTL] != 0
+        switch_banks(state, cpu, cpu.memory[BANK_SWITCH])
+        #log("INITIALIZED BANKS WITH $(cpu.memory[IO_CTL]), $(cpu.memory[BANK_SWITCH]) TO $(state.banks)")
+    #else
+    #    log("DID NOT INITIALIZE BANKS, MEMRANGE: $memrange")
     end
     if VIC_MEM:VIC_BANK ∉ memrange
-        mach.newcpu.memory[VIC_BANK] = 0x03
-        mach.newcpu.memory[VIC_MEM] = 0x00
+        cpu.memory[VIC_BANK] = 0x03
+        cpu.memory[VIC_MEM] = 0x00
     end
-    update_vic_bank(mach.newcpu.memory, state)
+    update_vic_bank(cpu.memory, state)
 end
 
 function load_condensed(mach::Machine)
@@ -483,7 +598,7 @@ function load_condensed(mach::Machine)
         @printf "\n  %04x %s" labels[name].value - 1 name
     end
     println()
-    println("ROM MEM: ", hex(ROM[BASIC_ROM.first.value]))
+    println("ROM MEM: ", hex(ROM[BASIC_ROM.first]))
 end
 
 end # module C64

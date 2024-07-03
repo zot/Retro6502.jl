@@ -41,6 +41,9 @@ end
 
 render(fw::FWidget, area::Rect, buffer::Buffer) = fw.func(area, buffer)
 
+#const EXAMPLE = ["READY!", ".load examples/statichello.jas"]
+const EXAMPLE = ["READY!", ".load examples/move.jas"]
+
 """
 Screen structure, parameterized to allow customization
 """
@@ -52,8 +55,8 @@ Screen structure, parameterized to allow customization
     status::Ref{AbstractString} = "CTRL-Q: QUIT"
     layout::Layout = Layout(; widgets = [], constraints = Constraint[])
     quit::Ref{Bool} = Ref(false)
-    repllines::Vector{String} = ["READY!", ".load examples/statichello.jas"]
-    wrappedlines::Vector{Vector{String}} = [["READY!"], [".load examples/statichello.jas"]]
+    repllines::Vector{String} = EXAMPLE
+    wrappedlines::Vector{Vector{String}} = [[e] for e in EXAMPLE]
     screenlines::Vector{String} = String[]
     cursor::Ref{Int} = Ref(0) # col
     diag::Ref{Bool} = Ref(false)
@@ -86,6 +89,7 @@ end
 
 mutable struct Repl{Specialization}
     asmlines::Vector{String}
+    asmlist::String
     cmd_handler::Function
     pending_asm_prefix::String
     pending_asm_expr::String

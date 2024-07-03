@@ -49,7 +49,8 @@ import ..Fake6502m:
     setticks,
     read6502,
     write6502,
-    jsr
+    jsr,
+    jmp
 
 # extra data after memory
 const OFFSET_DIRTY = 64K + 1
@@ -76,11 +77,13 @@ end
     lock::ReentrantLock = ReentrantLock()
     cmds::Channel{Function} = Channel{Function}(10)
     ctx::Union{CodeContext,Nothing} = nothing
-    cpu::Union{Cpu{Worker},Nothing} = nothing
+    cpu::Union{Cpu{WorkerPrivate},Nothing} = nothing
     running::Bool = false
     temps::Temps = Temps()
     state::C64_machine = C64_machine()
 end
+
+Base.show(io::IO, ::WorkerPrivate) = print(io, "WorkerPrivate")
 
 C64.c64(worker::WorkerPrivate) = worker.state
 
@@ -98,19 +101,26 @@ function init()
     return private.worker
 end
 
-function loadprg(filename, labelfile)
-    labels = Dict()
-    addrs = Dict()
-    off, len = Fake6502.loadprg(filename, private.worker.memory, labels, addrs; labelfile)
-    labels, addrs, off, len
-end
+#function loadprg(filename, labelfile)
+#    labels = Dict()
+#    addrs = Dict()
+#    off, len = Fake6502.loadprg(filename, private.worker.memory, labels, addrs; labelfile)
+#    labels, addrs, off, len
+#end
 
 function asmfile(filename::AbstractString)
     global private
     local ctx = private.ctx = Asm.asmfile(filename)
 
     private.worker.memory[ctx.min+1:ctx.max+1] .= ctx.memory[ctx.min+1:ctx.max+1]
-    ctx.labels
+    #log("ASSEMBLED CONTEXT, SETTING WORKERS TO $Workers")
+    try
+        invokelatest(Asm.eval(ctx, :(function(workers) global Workers = workers end)), Workers)
+    catch err
+        log(err)
+    end
+    local listing = sprint(io-> Asm.listings(io, ctx))
+    ctx.labels, listing
 end
 
 "Asynchronously execute a function during emulator execution"
@@ -141,7 +151,7 @@ function sync(func::Function; onlyifrunning = false)
 end
 
 # instructions is only used if there is a command waiting
-function worker_step(cpu::Cpu{Worker}, temps::Temps, instructions)
+function worker_step(cpu::Cpu{WorkerPrivate}, temps::Temps, instructions)
     global private
 
     println("STEP")
@@ -201,12 +211,25 @@ function privateupdate()
     private.worker.memory[OFFSET_VIC_MEM] = state.vic_bank_summary
 end
 
-read6502(cpu::Cpu{WorkerPrivate}, addr::UInt16) = read6502(c64(cpu), cpu, addr)
+function read6502(cpu::Cpu{WorkerPrivate}, addr::UInt16)
+    #log("READ $addr, $(c64(cpu))")
+    read6502(c64(cpu), cpu, addr)
+end
 
-write6502(cpu::Cpu{WorkerPrivate}, addr::UInt16, byte::UInt8) =
+function write6502(cpu::Cpu{WorkerPrivate}, addr::UInt16, byte::UInt8)
+    #log("WRITE $addr")
     write6502(c64(cpu), cpu, addr, byte)
+end
 
-jsr(cpu::Cpu{WorkerPrivate}, temps) = jsr(c64(cpu), cpu, temps)
+function jsr(cpu::Cpu{WorkerPrivate}, temps)
+    #log("WORKER JSR $(Fake6502m.state(cpu, temps))")
+    jsr(c64(cpu), cpu, temps)
+end
+
+function jmp(cpu::Cpu{WorkerPrivate}, temps)
+    #log("WORKER JMP $(Fake6502m.state(cpu, temps))")
+    jmp(c64(cpu), cpu, temps)
+end
 
 initprg(memrange::AddrRange, mach::Machine, worker::WorkerPrivate) =
     initprg(memrange, mach, worker.state)
@@ -217,18 +240,32 @@ function exec(
     tickcount = Base.max_values(Int),
     bs::Union{Nothing,BankSettings} = nothing,
 )
+    #log("EXEC 1")
     local result = remotecall(w.id, label, tickcount) do label, tickcount
         try
             local worker = private.worker
 
-            private.cpu = Cpu(; memory = [worker.memory...], user_data = worker)
+            #log("EXEC 2")
+            private.cpu = Cpu(; memory = [worker.memory...], user_data = private)
             initstate(private.state, private.cpu; clearscreen = false)
+            local memrange = A(private.ctx.min:private.ctx.max)
+            #log("EXEC 3")
+            private.cpu.memory[memrange] .= worker.memory[memrange]
+            initprg(memrange, private.cpu, c64(private))
+            for (label, (i, routine)) in private.ctx.fakes
+                c64(private).fake_routines[A(i)] = routine
+                log("FAKE $label[$i] => $routine")
+            end
+            #log("EXEC 4")
             private.temps = reset6502(private.cpu, private.temps)
+            #log("RUNNING $(getvar(private.ctx, label))")
             private.temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
             private.temps = setticks(private.cpu, private.temps, 0)
             return cont(tickcount)
         catch err
-            @error string(err) exception = (err, catch_backtrace())
+            @error err exception=(err,catch_backtrace())
+            log(err)
+            return Fake6502m.state(private.cpu, private.temps)
         end
     end
     isnothing(bs) && return
@@ -250,9 +287,16 @@ function cont(
 end
 
 function cont(tickcount = Base.max_values(Int))
+    #log("CONT")
+    invokelatest(innercont, tickcount)
+end
+
+function innercont(tickcount)
     global private
 
+    #log("INNERCONT 1")
     return lock(private.lock) do
+        #log("INNERCONT 2")
         isnothing(private.ctx) && error("No program")
         private.running && error("Program is already running")
         private.running = true
@@ -260,6 +304,7 @@ function cont(tickcount = Base.max_values(Int))
             local temps = private.temps
             local instructions = 0
             while ticks(private.cpu, temps) < tickcount && private.cpu.sp != 0xFF
+                #log("STEP $(Fake6502m.state(private.cpu, temps))")
                 temps = worker_step(private.cpu, temps, instructions)
                 instructions += 1
             end
@@ -267,6 +312,8 @@ function cont(tickcount = Base.max_values(Int))
             privateupdate()
             private.cpu.instructions = instructions
             return Fake6502m.state(private.cpu, private.temps)
+        catch err
+            log(err)
         finally
             private.running = false
         end
@@ -281,14 +328,24 @@ state(w::Worker) =
         end
     end
 
-function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
-    w.memory .= mach.newcpu.memory
-    labels, addrs, off, total = fetch(@spawnat w.id loadprg(filename, labelfile))
-    mach.newcpu.memory = mach.mem = w.memory
-    merge!(mach.labels, labels)
-    merge!(mach.addrs, addrs)
-    initprg(off:off+total-1, mach, mach.newcpu.user_data)
-    off, total
+#function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
+#    w.memory .= mach.newcpu.memory
+#    labels, addrs, off, total = fetch(@spawnat w.id loadprg(filename, labelfile))
+#    mach.newcpu.memory = mach.mem = w.memory
+#    merge!(mach.labels, labels)
+#    merge!(mach.addrs, addrs)
+#    initprg(off:off+total-1, mach, mach.newcpu.user_data)
+#    off, total
+#end
+
+function SCNKEY(cpu::Cpu, temps::Temps)
+    log("SCNKEY")
+    return temps
+end
+
+function GETIN(cpu::Cpu, temps::Temps)
+    log("GETIN")
+    return temps
 end
 
 end

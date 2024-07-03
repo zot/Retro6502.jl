@@ -2,6 +2,7 @@
 6502 8-bit microprocessor emulator and tools
 """
 module Fake6502
+
 using Printf, StaticArrays
 #using ProfileCanvas
 import Base.to_index
@@ -85,8 +86,7 @@ Base.to_index(x::AbstractArray, r::AddrRange) = Base.to_index(x, intrange(r))
 Base.to_index(::AbstractArray, a::Addr) = a.value
 
 Base.hash(a::Addr, h::UInt64) = Base.hash(a.value, h)
-Base.show(io::IO, addr::Addr) =
-    print(io, "Addr(0x", lpad(string(UInt16(addr.value - 1); base = 16), 4, "0"), ")")
+Base.show(io::IO, addr::Addr) = print(io, "Addr($(hex(UInt16(addr.value - 1))))")
 Base.:(>>)(a::Addr, i::UInt64) = Addr((a.value - 1) >> i)
 Base.:(<<)(a::Addr, i::UInt64) = Addr((a.value - 1) << i)
 Base.:(<)(a::Addr, b::Addr) = a.value < b.value
@@ -111,6 +111,7 @@ include("asmtools.jl")
 include("asm.jl")
 include("worker.jl")
 include("repl.jl")
+include("fakerom.jl")
 
 using .AsmRepl: repl
 export repl
@@ -210,8 +211,8 @@ function test()
     mach.step = function (mach::Machine)
         label = get(addrs, A(pc(mach.newcpu, mach.temps)), nothing)
         if !isnothing(label)
-            if label === lastlabel
-                labelcount === 0 && println("  LOOP...")
+            if label == lastlabel
+                labelcount == 0 && println("  LOOP...")
                 labelcount += 1
             else
                 diag(mach, rpad(string(label) * ": ", maxwid + 2))

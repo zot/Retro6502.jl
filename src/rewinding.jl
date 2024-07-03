@@ -93,6 +93,8 @@ end
     bypass::Bool = false
 end
 
+Base.show(io::IO, ::Rewinder) = print(io, "Rewinder")
+
 struct MemWrite
     addr::UInt16
     value::UInt8

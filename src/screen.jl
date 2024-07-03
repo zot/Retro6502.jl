@@ -27,9 +27,10 @@ using TerminalUserInterfaces:
     previous_buffer
 using TerminalUserInterfaces.Crossterm.LibCrossterm.libcrossterm_jll
 using .TextWrap
-using ..Fake6502: C64, Workers, Fake6502m, screen, char_defs, status, screenmem, charmem
-using .C64: C64_PALETTE, BG0, COLOR_MEM
-using .Workers: updatememory
+using ..Fake6502: C64, Workers, Fake6502m, screen, char_defs, status, screenmem, charmem, ASCII_TO_SCREEN
+using .C64: C64_PALETTE, BG0, COLOR_MEM, KEYBOARD_INPUTS, KEY_CODES, UNUSED_KEYS, ASCII_TO_KEY_CODE,
+    SHIFT, CTRL, SHIFTED
+using .Workers: updatememory, OFFSET_KEY
 using Mmap: sync!
 using Base64
 
@@ -81,9 +82,10 @@ function render(scr::Screen, area::Rect, buffer::Buffer)
     local key = evt isa TUI.KeyEvent ? TUI.keycode(evt) : ""
     local keycode = join((v for (k, v) in pairs(MOD_NAMES) if string(k) ∈ mod), "-")
     local col = scr.cursor[]
+    local c64key = scr.mouse_area[] === :screen ? scr.repl.worker.memory[OFFSET_KEY] : 0xFF
     setstatus(
         scr,
-        "[$col] $keycode $mod $key $(evt.data.kind) $evt $(scr.lastcmd[]) {$(scr.mouse_area)}",
+        "[$col] $c64key $keycode $mod $key[$(typeof(key))] $(evt.data.kind) $evt $(scr.lastcmd[]) {$(scr.mouse_area)}",
     )
 end
 
@@ -412,7 +414,13 @@ function TUI.update!(scr::Screen, evt::TUI.MouseEvent)
             left(area) <= evt.data.column + 1 <= right(area) &&
             top(area) <= evt.data.row + 1 <= bottom(area)
         ) && continue
+        local old = scr.mouse_area[]
         scr.mouse_area[] = name
+        if name === :screen
+            Crossterm.hide()
+        elseif old === :screen
+            Crossterm.show()
+        end
     end
     scr.lastevt[] = evt
 end
@@ -424,8 +432,25 @@ function TUI.update!(scr::Screen, evt::TUI.KeyEvent)
 
     keycode = isempty(keycode) ? key : keycode * "-" * key
     scr.lastevt[] = evt
-    evt.data.kind ∉ ["Press", "Repeat"] && return
-    get(KEYMAP, keycode, (a...) -> nothing)(scr, evt, scr.cursor[]...)
+    if scr.mouse_area[] === :screen
+        if evt.data.kind == "Release"
+            scr.repl.worker.memory[OFFSET_KEY] = UNUSED_KEYS[1]
+        elseif evt.data.kind == "Press"
+            local keybyte = get(ASCII_TO_KEY_CODE, lowercase(key), nothing)
+
+            isnothing(keybyte) &&
+                return
+            if length(key) == 1 && lowercase(key) != key || "SHIFT" ∈ mod
+                keybyte |= SHIFT
+            end
+            if "CONTROL" ∈ mod
+                keybyte |= CTRL
+            end
+            scr.repl.worker.memory[OFFSET_KEY] = keybyte
+        end
+    elseif evt.data.kind ∈ ["Press", "Repeat"]
+        get(KEYMAP, keycode, (a...) -> nothing)(scr, evt, scr.cursor[]...)
+    end
 end
 
 function setstatus(scr::Screen, msg...)
@@ -481,6 +506,7 @@ function TUI.draw(t::CrosstermTerminal, scr::Screen)
 end
 
 function drawscreen(scr::Screen)
+    log("draw screen")
     local image = scr.image
     local mem = scr.repl.worker.memory
     local scrm = screenmem(scr.repl.banksettings, mem)

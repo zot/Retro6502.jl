@@ -1,0 +1,33 @@
+;;;;;;;;;;;;;;;
+;;;; BANKS ;;;;
+;;;;;;;;;;;;;;;
+*           = 0x0000
+            .data 0b111
+            .data 0b101
+
+;;;;;;;;;;;;;;;;;;;;;;
+;;;; SCREEN SETUP ;;;;
+;;;;;;;;;;;;;;;;;;;;;;
+*           = 0x400
+            .data ascii2screen.(fill(' ', 1000))
+*           = 0xd800
+            .data fill(0x01, 1000)
+
+;;;;;;;;;;;;;;;;;;;;;;
+;;;; ROM ROUTINES ;;;;
+;;;;;;;;;;;;;;;;;;;;;;
+JL_SCNKEY   .fake (mach, temps)-> Workers.SCNKEY(mach, temps)
+JL_GETIN    .fake (mach, temps)-> Workers.GETIN(mach, temps)
+*           = 0xFF9F
+SCNKEY      JMP JL_SCNKEY
+*           = 0xFFE4
+GETIN       JMP JL_GETIN
+
+;;;;;;;;;;;;;;
+;;;; MAIN ;;;;
+;;;;;;;;;;;;;;
+*           = 0x0800
+main
+keyevent    JSR SCNKEY      ;SCAN KEYBOARD
+            JSR GETIN       ;GET CHARACTER
+            RTS

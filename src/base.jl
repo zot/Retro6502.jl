@@ -1,4 +1,6 @@
 using Printf
+using Logging
+
 export reset, step
 
 const JSR = 0x20
@@ -63,7 +65,7 @@ function Access(a::Access{Base}, field::Symbol) where {Base}
     T = type(a)
     for i = 1:fieldcount(T)
         name = fieldname(T, i)
-        name === field && return Access{Base,fieldtype(T, i)}(offset(a) + fieldoffset(T, i))
+        name == field && return Access{Base,fieldtype(T, i)}(offset(a) + fieldoffset(T, i))
     end
     error("No field $field in type $T")
 end
@@ -195,7 +197,7 @@ function updatesettings(bs::BankSettings, banks::UInt8, vicmem::UInt8)
     bs.chrmem = bank + ((vicmem & 0x000E) << 10)
 end
 
-hasmask(addr, mask) = addr & mask === mask
+hasmask(addr, mask) = addr & mask == mask
 
 function getmem(bs::BankSettings, mem::Vector{UInt8}, addr::Int)
     local userom = if hasmask(addr, 0xA000)
@@ -260,15 +262,15 @@ end
 
 hex(num::Union{UInt8,Int8}) = hex(num, 2)
 hex(num::Union{UInt16,Int16}) = hex(num, 4)
-hex(num::Integer, pad = num <= 0xFF ? 2 : 4) = "0x" * lpad(string(num; base = 16), pad, "0")
+hex(num::Integer, pad = num <= 0xFF ? 2 : 4) = "0x" * rhex(num)
 hex(vec::AbstractVector) = "0x" * join(rhex.(vec))
 rhex(num::Union{UInt8,Int8}) = rhex(num, 2)
 rhex(num::Union{UInt16,Int16}) = rhex(num, 4)
-rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(string(num; base = 16), pad, "0")
+rhex(num::Integer, pad = num <= 0xFF ? 2 : 4) = lpad(uppercase(string(num; base = 16)), pad, "0")
 rhex(vec::AbstractVector) = join(rhex.(vec))
 
 function call_fake(mach::Machine)
-    if mach[pc(mach)] === JSR
+    if mach[pc(mach)] == JSR
         # check for fake routine
         addr = A(mach[pc(mach)+1] + (UInt16(mach[pc(mach)+2]) << 8))
         label = Base.get(mach.addrs, addr, hex(UInt16(addr.value - 1)))
@@ -568,6 +570,14 @@ end
 
 function asmwarn(ctx, msg)
     println(stderr, "Warning: for line $(ctx.line.number) [$(ctx.line.line)]: $msg")
+end
+
+function log(exc::Exception, bt = catch_backtrace())
+    open("/tmp/log", "a") do io
+        Logging.with_logger(ConsoleLogger(io)) do
+	        @error exc exception=(exc,bt)
+        end
+    end
 end
 
 log(msg) =

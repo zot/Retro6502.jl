@@ -158,6 +158,7 @@ end
 
 @kwdef mutable struct CodeContext
     env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16))))
+    using ...Fake6502: Fake6502, C64, Asm, AsmTools
     using ..AsmTools
     import ..Asm: @asm_str, @noasm_str
     import ...Fake6502: rhex
@@ -225,10 +226,10 @@ function subenv(ctx::CodeContext)
         !eval(ctx, :($n isa Module))
     ]
     local expr = :(module $subname
-    using ....AsmTools
-    import ....Asm
-    import ....Asm: @asm_str, @noasm_str
+    using  .....Fake6502: Fake6502, C64, Asm, AsmTools
+    using  ....AsmTools
     import .....Fake6502: rhex
+    import ....Asm: @asm_str, @noasm_str
     end)
     local mod = eval(ctx, expr)
     importall(mod, ctx.env)
@@ -717,14 +718,14 @@ asm_fake(ctx::CodeContext) =
     assembleif(ctx, ".fake") do
         eattok(ctx)
         local expr, extra = parse_julia(ctx)
-        (expr.head ∉ (:function, :->) || expr.args[1] != :(())) &&
-            lineerror(ctx, """.fake expects a zero-argument function""")
+        (expr.head ∉ (:function, :->) || length(expr.args[1].args) != 2) &&
+            lineerror(ctx, """.fake expects a 2-argument function""")
         isnothing(ctx.label) && lineerror(ctx, """.fake with no label""")
-        local index = 0xFFFF - length(ctx.fakes)
+        local index = length(ctx.fakes)
         local label = ctx.label
         deflabel(ctx, index)
         add_listing(ctx, :fake, extra)
-        ctx.fakes[ctx.label] = (index, () -> nothing)
+        ctx.fakes[ctx.label] = (index, (mach) -> nothing)
         pushfunc!(ctx, 4) do
             ctx.fakes[label] = (index, eval(ctx, expr))
             ctx.min = min(ctx.min, index)
@@ -1128,7 +1129,7 @@ function print_listing(io, ctx::CodeContext, line::ListingLine)
         "#", ""
     elseif line.type == :opcode
         #local op = line.line.tokens[isempty(label) ? 1 : 2].match * " "
-        local op = "$(opsyms[bytes[1] + 1]) "
+        local op = uppercase("$(opsyms[bytes[1] + 1]) ")
 
         if addrsyms[bytes[1]+1] == :imm
             op *= "#"
@@ -1143,20 +1144,24 @@ function print_listing(io, ctx::CodeContext, line::ListingLine)
     elseif line.type == :include
         "@", ""
     end
-    @printf(io, "%s%04X  %-32s%-12s%s\n", type, line.addr, uppercase(first), label, text)
+    @printf(io, "%s%04X  %-32s%-12s%s\n", type, line.addr, first, label, text)
 end
 
 function listings(ctx::CodeContext, file)
     println("LISTINGS FOR $file[$(hex(ctx.min)):$(hex(ctx.max))]")
     open(file, "w") do io
-        println(io, trimlines("""
+        listings(io, ctx)
+    end
+end
+
+function listings(io::IO, ctx::CodeContext)
+    println(io, trimlines("""
             ; JAS Julia-based 6502 Assembler
             ; jas $(join(ARGS, " "))
             ; $(now())
         """))
-        for line in sort(ctx.listing, by = l -> l.addr)
-            print_listing(io, ctx, line)
-        end
+    for line in sort(ctx.listing, by = l -> l.addr)
+        print_listing(io, ctx, line)
     end
 end
 
