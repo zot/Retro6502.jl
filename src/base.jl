@@ -11,7 +11,7 @@ const lib = Base.Libc.Libdl.dlopen(joinpath(dirname(@__FILE__), CDIR, "fake6502.
 const SCREEN_LEN = 40 * 25
 const screen = A(0x0400:0x07FF)
 const char_defs = A(0x1000:0x17FF)
-const colors = A(0xD800:0xDBFF) # color is bits 8-11, color 1 for each character (color 3 in multicolor)
+const colors = A(0xD800:0xDBFF) # color is bits 0-7, color 1 for each character (color 3 in multicolor)
 const ROM_FILES = Dict(
     A(0x1000:0x1FFF) => "$RDIR/characters.bin", # visible only to VIC-II
     A(0x9000:0x9FFF) => "$RDIR/characters.bin", # visible only to VIC-II
@@ -213,9 +213,9 @@ function getmem(bs::BankSettings, mem::Vector{UInt8}, addr::Int)
 end
 
 charmem(bs::BankSettings, mem::AbstractVector{UInt8}) =
-    @view (bs.chrmem ∈ (0x1000, 0x1800, 0x9000, 0x9800) ? ROM : mem)[A(
-        bs.chrmem:bs.chrmem+0x7FF,
-    )]
+    @view (bs.vicbank == 0 && bs.chrmem == 0x1000 || bs.vicbank == 0 && bs.chrmem == 0x9000 ? ROM : mem)[
+        A(bs.chrmem:bs.chrmem+0x7FF)
+    ]
 
 screenmem(bs::BankSettings, mem::AbstractVector{UInt8}) =
     @view mem[A(bs.scrmem:bs.scrmem+0x3FF)]

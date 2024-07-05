@@ -1,41 +1,36 @@
-;;;;;;;;;;;;;;;;;;
-;;;; INCLUDES ;;;;
-;;;;;;;;;;;;;;;;;;
-.imm using ....Fake6502: log
-.imm using ...Workers
-
 ;;;;;;;;;;;;;;
 ;;;; DEFS ;;;;
 ;;;;;;;;;;;;;;
-D6510           = 0x0000
-R6510           = 0x0001
-VIC_BANK        = 0xDD00
-VIC_MEM         = 0xD018
-STD_VIC_BANK    = 0x03
-STD_VIC_MEM     = 0x14
+D6510           = $0000
+R6510           = $0001
+VIC_BANK        = $DD00
+VIC_MEM         = $D018
+STD_VIC_BANK    = $03
+STD_VIC_MEM     = $14
+JL_SCNKEY       = $0000
+JL_GETIN        = $0001
 
 ;;;;;;;;;;;;;;;;;;;;;;
 ;;;; SCREEN SETUP ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;
-*           = 0x400
-            .data ascii2screen.(fill(' ', 1000))
-*           = 0x400
-            .data ascii2screen.("                MOVEMENT")
-*           = 0xD800
-            .data fill(0x01, 1000)
+            .enc "screen"
+*           = $400
+            .text " " x 1000
+*           = $400
+            .text "                MOVEMENT"
+*           = $D800
+            .fill 1000, 1
 *           = VIC_BANK
-            .data STD_VIC_BANK
+            .byte STD_VIC_BANK
 *           = VIC_MEM
-            .data STD_VIC_MEM
+            .byte STD_VIC_MEM
 
 ;;;;;;;;;;;;;;;;;;;;;;
 ;;;; ROM ROUTINES ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;
-JL_SCNKEY   .fake Workers.SCNKEY
-JL_GETIN    .fake Workers.GETIN
-*           = 0xFF9F
+*           = $FF9F
 SCNKEY      JMP JL_SCNKEY
-*           = 0xFFE4
+*           = $FFE4
 GETIN       JMP JL_GETIN
 
 ;;;;
@@ -43,7 +38,7 @@ GETIN       JMP JL_GETIN
 ;;
 ;; cursor keys
 ;; down: 17
-;; up: 145 (17 + 0x80)
+;; up: 145 (17 + $80)
 ;; right: 29
 ;; left: 157
 ;;;;
@@ -51,29 +46,31 @@ GETIN       JMP JL_GETIN
 ;;;;;;;;;;;;;;
 ;;;; MAIN ;;;;
 ;;;;;;;;;;;;;;
-row         = 0x4a0
-left        = 0x9d
-right       = 0x1d
+row         = $4a0
+left        = $9d
+right       = $1d
 
-*           = 0x0800
-pos         .data 0x00
+*           = $0800
+pos         .byte $00
 
 main
             ;; hide ROM
-            LDA #0b000
+            LDA #%000
             STA R6510
-            LDA #0b101
+            LDA #%111
             STA D6510
+
+
             ;; set up first position
-            LDX #0
-            LDY #0
+            LDX #$00
+            LDY #$00
 
 update      ;; X <- oldpos, Y <- newpos
             CPY #40
-            BCC store ; Y < 40
-            LDY #0    ; Y >= 40 so wrap it to 0
+            BCC store
+            LDY #0
 store       ;; erase the old spot then draw the new
-            LDA #' '
+            LDA #" "
             STA row,x
             LDA #90 ; diamond
             STA row,y
@@ -82,13 +79,15 @@ store       ;; erase the old spot then draw the new
 keyevent    ;; read a key and check if it's an arrow
             JSR SCNKEY      ;SCAN KEYBOARD
             JSR GETIN       ;GET CHARACTER
+            JMP keyevent
             LDX pos
             LDY pos
-            CMP #left
+            CMP left
             BEQ moveleft
-            CMP #right
+            CMP right
             BNE keyevent
             INY
             INY
 moveleft    DEY
             JMP update
+

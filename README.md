@@ -64,13 +64,13 @@ start   PHA
 
 ### Directives
 
-- `.include`: include a Julia file.
+- `.include`: include a Julia file or a jas file.
 - `.data EXPR`: convert Julia result into bytes and add to memory.
-- `.imm EXPR`: execute Julia expression on pass 1, the `align` function should only be called within `.imm`, rather than `.julia`. This is evaluated at the top-level so you can define functions here if you like.
 - `.julia EXPR`: execute Julia expression on pass 2. This is evaluated at the top-level so you can define functions here if you like.
+- `.imm EXPR`: execute Julia expression on pass 1, the `align` function should only be called within `.imm`, rather than `.julia`. This is evaluated at the top-level so you can define functions here if you like.
 - `.macro (ARGS)-> EXPR`: define an asm macro in Julia -- must return an AssemblyCode struct
 - `.value EXPR`: specify the value of a macro which gets assigned to the label on its call. This defaults to the first location the macro assembles.
-- `.fake ()-> EXPR`: define a fake routine that executes outside the emulator.
+- `.fake (cpu, temps)-> EXPR`: define a fake routine that executes outside the emulator -- returns temps or the result if it is a Temps.
 
 ### Julia functions and macros
 
@@ -81,23 +81,23 @@ start   PHA
 
 ## Native Julia 6502 emulation
 
-Retro6502 provides a fast, pure Julia 6502 emulator to provide developers an easy path to extension in a very high
-level language without needing to dip down into C / C++ do to the fast parts. The emulator comes with a
-comprehensive test suite (thanks to
-[Thommyh on Reddit](https://www.reddit.com/r/EmuDev/comments/prq29l/comment/hdqh7rc)), tests
-[here](https://drive.google.com/file/d/1XpRo4GvdGKiSCljx2cHzAtxp9TAt7Pfw/view?usp=sharing)). As of 2024 FEB 03, it
-passes all of the tests with respect to the register and memory contents. It is not currently "cycle
-accurate", meaning that it does not do the redundant writes and reads that the real 6502 does. This could
-potentially have implications for high-fidelity hardware emulation. Nevertheless, I think this is a decent place
-to start for game development.
+Retro6502 provides a fast, pure Julia 6502 emulator to provide developers an easy path to extension in a
+very high level language without needing to dip down into C / C++ do to the fast parts. The emulator comes
+with a comprehensive test suite (thanks to [Thommyh on
+Reddit](https://www.reddit.com/r/EmuDev/comments/prq29l/comment/hdqh7rc)), tests
+[here](https://drive.google.com/file/d/1XpRo4GvdGKiSCljx2cHzAtxp9TAt7Pfw/view?usp=sharing)). As of 2024 FEB 03, it passes all of the tests with respect to the register and memory contents. It is not currently "cycle accurate", meaning that it does not do the redundant writes and reads that the real 6502 does. This could potentially have implications for high-fidelity hardware emulation. Nevertheless, I think this is a decent place to start for game development.
+
+## Asm REPL
+
+Screen-based extension to the Julia REPL that lets you program in assembly. It also watches files you load. Ctrl-L shows an image of the emulator's screen in the REPL as it runs. The C64 screen is very basic, it only supports character graphics, no sprites yet, and does not have raster line accuracy.
 
 ## UI with C64 screen
 
-This uses Dear ImGui for its UI. For performance reasons, this uses a separate thread for the emulator -- the
-emulator is well encapsulated and you can run more than one if you like.
+The REPL is replacing this.
 
-The C64 screen is very basic, it only supports character graphics, no sprites yet, and does not have raster line
-accuracy.
+This uses Dear ImGui for its UI. For performance reasons, this uses a separate thread for the emulator -- the emulator is well encapsulated and you can run more than one if you like.
+
+The C64 screen is very basic, it only supports character graphics, no sprites yet, and does not have raster line accuracy.
 
 ## Time travel
 

@@ -39,6 +39,8 @@ using ..C64:
     KERNAL_ROM
 using ..Asm: Asm, CodeContext, getvar
 using ..Fake6502m: Fake6502m, Cpu, Temps, setpc
+using StructIO: StructIO
+
 import ..Fake6502: initprg, updatesettings
 import ..Fake6502m:
     inner_step6502,
@@ -52,14 +54,31 @@ import ..Fake6502m:
     jsr,
     jmp
 
+StructIO.@io struct CpuState
+    pc::UInt16
+    a::UInt8
+    x::UInt8
+    y::UInt8
+    sp::UInt8
+    status::UInt8
+    instructions::Int64
+    clockticks6502::Int64
+    slack::Float64
+    running::Bool
+    banks::UInt8
+    vicmem::UInt8
+    update::Int
+end align_packed
+
 # extra data after memory
 const OFFSET_DIRTY = 64K + 1
-# basic:1, chars:1, kernal:1, vicbank:2
-const OFFSET_BANKS = 64K + 2
-# [char-mem:3][scr-mem:4]
-const OFFSET_VIC_MEM = 64K + 3
+const OFFSET_COUNTL = 64K + 2
+const OFFSET_COUNTH = 64K + 3
 const OFFSET_KEY = 64K + 4
-const SHARED_END = 64K + 5
+const OFFSET_CHR = 64K + 5
+const OFFSET_STATE = 64K + 6
+const SHARED_END = 64K + 6 + sizeof(CpuState)
+const UPDATE_PERIOD = 10000
 
 # this worker
 private = nothing
@@ -80,7 +99,9 @@ end
     cpu::Union{Cpu{WorkerPrivate},Nothing} = nothing
     running::Bool = false
     temps::Temps = Temps()
+    slack::Float64 = 0
     state::C64_machine = C64_machine()
+    updatecount::Int = 0
 end
 
 Base.show(io::IO, ::WorkerPrivate) = print(io, "WorkerPrivate")
@@ -96,8 +117,16 @@ function add_worker()
     fetch(@spawnat id Fake6502.Workers.init())
 end
 
+function remove_worker(w::Worker)
+    w.id == -1 &&
+        return
+    rmprocs(w.id)
+    w.id = -1
+end
+
 function init()
     global private = WorkerPrivate(; worker = Worker(; id = myid()))
+    #log("PRIVATE WORKER DIRTY CHARACTERS: $(private.state.dirty_characters)")
     return private.worker
 end
 
@@ -108,19 +137,26 @@ end
 #    labels, addrs, off, len
 #end
 
-function asmfile(filename::AbstractString)
-    global private
-    local ctx = private.ctx = Asm.asmfile(filename)
+asmfile(filename::AbstractString) = invokelatest(innerasmfile, filename)
 
-    private.worker.memory[ctx.min+1:ctx.max+1] .= ctx.memory[ctx.min+1:ctx.max+1]
-    #log("ASSEMBLED CONTEXT, SETTING WORKERS TO $Workers")
+function innerasmfile(filename::AbstractString)
     try
-        invokelatest(Asm.eval(ctx, :(function(workers) global Workers = workers end)), Workers)
+        global private
+        local ctx = private.ctx = Asm.asmfile(filename)
+
+        private.worker.memory[ctx.min+1:ctx.max+1] .= ctx.memory[ctx.min+1:ctx.max+1]
+        #log("ASSEMBLED CONTEXT, SETTING WORKERS TO $Workers")
+        #try
+        #    invokelatest(Asm.eval(ctx, :(function(workers) global Workers = workers end)), Workers)
+        #catch err
+        #    log(err)
+        #end
+        local listing = sprint(io-> Asm.listings(io, ctx))
+        ctx.labels, listing
     catch err
         log(err)
+        rethrow()
     end
-    local listing = sprint(io-> Asm.listings(io, ctx))
-    ctx.labels, listing
 end
 
 "Asynchronously execute a function during emulator execution"
@@ -150,24 +186,17 @@ function sync(func::Function; onlyifrunning = false)
     return res
 end
 
-# instructions is only used if there is a command waiting
-function worker_step(cpu::Cpu{WorkerPrivate}, temps::Temps, instructions)
+# EXTERNAL API
+stop(w::Worker) = remotecall(w.id) do
     global private
 
-    println("STEP")
-    while isready(private.cmds)
-        try
-            private.temps = temps
-            private.cpu.instructions = instructions
-            take!(private.cmds)()
-        catch err
-            @error "Error in worker command: $err" exception = (err, catch_backtrace())
-        end
+    if private.running
+        log("STOPPING")
+    else
+        log("NOT RUNNING")
     end
-    return base_inner_step6502(cpu, temps)
+    private.running = false
 end
-
-# EXTERNAL API
 
 asmfile(w::Worker, filename) = remotecall_fetch(asmfile, w.id, filename)
 
@@ -178,38 +207,58 @@ clear(w::Worker) =
         private.cpu = nothing
     end
 
-function updatesettings(w::Worker, bs::BankSettings)
-    updatesettings(bs, w.memory[OFFSET_BANKS], w.memory[OFFSET_VIC_MEM])
-end
-
-function updatememory(w::Worker, bs::BankSettings)
-    remotecall_wait(w.id) do
-        sync(; onlyifrunning = true) do
-            privateupdate()
-        end
-    end
-    updatesettings(w, bs)
+function updatesettings(bs::BankSettings, cpustate::CpuState)
+    updatesettings(bs, cpustate.banks, cpustate.vicmem)
 end
 
 function privateupdate()
     global private
-    local state::C64_machine = c64(private)
-    private.worker.memory .= private.cpu.memory
-    for bank in [c64(state).banks..., char_defs]
-        (@view private.worker.memory[intrange(bank)]) .= @view ROM[intrange(bank)]
+    local c64state::C64_machine = c64(private)
+    local workermem = private.worker.memory
+    local cpumem = private.cpu.memory
+
+    if cpumem[OFFSET_COUNTL] == 0xFF
+        cpumem[OFFSET_COUNTL] = 0x00
+        if cpumem[OFFSET_COUNTH] == 0xFF
+            cpumem[OFFSET_COUNTH] = 0x00
+        else
+            cpumem[OFFSET_COUNTH] += 1
+        end
+    else
+        cpumem[OFFSET_COUNTL] += 1
     end
-    private.worker.memory[OFFSET_DIRTY] =
-        any(state.dirty_characters) || any(state.dirty_character_defs)
+    private.updatecount += 1
+    workermem .= cpumem
+    for bank in c64(c64state).banks
+        (@view workermem[intrange(bank)]) .= @view ROM[intrange(bank)]
+    end
+    local chars = @view workermem[c64state.character_mem:A(c64state.character_mem.value - 1 + 0x07FF)]
+    #log("worker 30 CHAR BYTES: $(hex(chars[1:30]))")
+    #log("CHAR MEM: $(c64state.character_mem:A(c64state.character_mem.value - 1 + 0x07FF))")
+    if any(c64state.dirty_characters) || any(c64state.dirty_character_defs) || c64state.all_dirty
+        workermem[OFFSET_DIRTY] = 1
+        c64state.dirty_characters .= false
+        c64state.dirty_character_defs .= false
+        c64state.all_dirty = false
+    end
     local banks = 0x00
     for (flag, bank) in
         (BANKS_BASIC => BASIC_ROM, BANKS_CHARS => CHAR_ROM, BANKS_KERNAL => KERNAL_ROM)
-        if bank ∈ state.banks
+        if bank ∈ c64state.banks
             banks |= flag
         end
     end
-    private.worker.memory[OFFSET_BANKS] = banks | (private.cpu.memory[VIC_BANK] & 0x03)
-    private.worker.memory[OFFSET_VIC_MEM] = state.vic_bank_summary
+    local cpustate = CpuState(Fake6502m.state(private.cpu, private.temps)...,
+                              private.slack,
+                              private.running,
+                              banks | (private.cpu.memory[VIC_BANK] & 0x03),
+                              c64state.vic_bank_summary,
+                              private.updatecount,
+                              )
+    StructIO.pack(IOBuffer(@view workermem[OFFSET_STATE:SHARED_END-1]; write=true), cpustate)
 end
+
+cpustate(w::Worker) = StructIO.unpack(IOBuffer(@view w.memory[OFFSET_STATE:SHARED_END-1]), CpuState)
 
 function read6502(cpu::Cpu{WorkerPrivate}, addr::UInt16)
     #log("READ $addr, $(c64(cpu))")
@@ -238,52 +287,51 @@ function exec(
     w::Worker,
     label::Symbol;
     tickcount = Base.max_values(Int),
-    bs::Union{Nothing,BankSettings} = nothing,
 )
     #log("EXEC 1")
-    local result = remotecall(w.id, label, tickcount) do label, tickcount
-        try
-            local worker = private.worker
-
-            #log("EXEC 2")
-            private.cpu = Cpu(; memory = [worker.memory...], user_data = private)
-            initstate(private.state, private.cpu; clearscreen = false)
-            local memrange = A(private.ctx.min:private.ctx.max)
-            #log("EXEC 3")
-            private.cpu.memory[memrange] .= worker.memory[memrange]
-            initprg(memrange, private.cpu, c64(private))
-            for (label, (i, routine)) in private.ctx.fakes
-                c64(private).fake_routines[A(i)] = routine
-                log("FAKE $label[$i] => $routine")
-            end
-            #log("EXEC 4")
-            private.temps = reset6502(private.cpu, private.temps)
-            #log("RUNNING $(getvar(private.ctx, label))")
-            private.temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
-            private.temps = setticks(private.cpu, private.temps, 0)
-            return cont(tickcount)
-        catch err
-            @error err exception=(err,catch_backtrace())
-            log(err)
-            return Fake6502m.state(private.cpu, private.temps)
-        end
+    remote_do(w.id, label, tickcount) do label, tickcount
+        invokelatest(innerexec, label, tickcount)
     end
-    isnothing(bs) && return
-    local state = fetch(result)
-    updatesettings(w, bs)
-    return state
+end
+
+function innerexec(label, tickcount)
+    global private
+
+    private.running &&
+        return :running
+    try
+        local worker = private.worker
+
+        #log("EXEC 2")
+        private.cpu = Cpu(; memory = [worker.memory...], user_data = private)
+        initstate(private.state, private.cpu; clearscreen = false)
+        local memrange = A(private.ctx.min:private.ctx.max)
+        #log("EXEC 3")
+        private.cpu.memory[memrange] .= worker.memory[memrange]
+        initprg(memrange, private.cpu, c64(private))
+        for (label, (i, routine)) in private.ctx.fakes
+            c64(private).fake_routines[A(i)] = routine
+            #log("FAKE $label[$i] => $routine")
+        end
+        #log("EXEC 4")
+        private.temps = reset6502(private.cpu, private.temps)
+        #log("RUNNING $(getvar(private.ctx, label))")
+        private.temps = setpc(private.cpu, Temps(), getvar(private.ctx, label))
+        private.temps = setticks(private.cpu, private.temps, 0)
+        privateupdate()
+        @spawn cont(tickcount)
+    catch err
+        @error err exception=(err,catch_backtrace())
+        log(err)
+        privateupdate()
+    end
 end
 
 function cont(
     w::Worker;
     tickcount = Base.max_values(Int),
-    bs::Union{Nothing,BankSettings} = nothing,
 )
-    local result = remotecall(cont, w.id, tickcount)
-    isnothing(bs) && return
-    local state = fetch(result)
-    updatesettings(w, bs)
-    return state
+    remote_do(cont, w.id, tickcount)
 end
 
 function cont(tickcount = Base.max_values(Int))
@@ -300,33 +348,67 @@ function innercont(tickcount)
         isnothing(private.ctx) && error("No program")
         private.running && error("Program is already running")
         private.running = true
+        local instructions = 0
         try
             local temps = private.temps
-            local instructions = 0
-            while ticks(private.cpu, temps) < tickcount && private.cpu.sp != 0xFF
-                #log("STEP $(Fake6502m.state(private.cpu, temps))")
-                temps = worker_step(private.cpu, temps, instructions)
+            local nextupdate = UPDATE_PERIOD
+            local updatetime = UPDATE_PERIOD / 1000000
+            local checkpoint = time()
+            #local nextlog = 5000
+            while private.running && ticks(private.cpu, temps) < tickcount && private.cpu.sp != 0xFF
+                temps = base_inner_step6502(private.cpu, temps)
                 instructions += 1
+                local tick = ticks(private.cpu, temps)
+                if tick > nextupdate
+                    nextupdate += UPDATE_PERIOD
+                    #if tick > nextlog
+                    #    while tick > nextlog
+                    #        nextlog += 5000
+                    #    end
+                    #    log("TICK COUNT $tick SLACK $(private.slack)")
+                    #end
+                    #log("STEP $(Fake6502m.state(private.cpu, temps))")
+                    private.temps = temps
+                    while isready(private.cmds)
+                        try
+                            private.cpu.instructions = instructions
+                            take!(private.cmds)()
+                        catch err
+                            log("Error in worker command")
+                            log(err)
+                            @error "Error in worker command: $err" exception = (err, catch_backtrace())
+                        end
+                    end
+                    privateupdate()
+                    local seconds = time() - checkpoint
+                    if seconds < updatetime
+                        # throttle execution
+                        private.slack += updatetime - seconds
+                        sleep(updatetime - seconds)
+                    else
+                        yield()
+                    end
+                    checkpoint = time()
+                end
             end
-            # done running -- copy memory over
-            privateupdate()
-            private.cpu.instructions = instructions
-            return Fake6502m.state(private.cpu, private.temps)
         catch err
             log(err)
         finally
+            # done running -- copy memory over
+            log("FINISHED EXECUTING")
+            private.cpu.instructions = instructions
             private.running = false
+            privateupdate()
         end
     end
 end
 
-state(w::Worker) =
-    remotecall_fetch(w.id) do
-        global private
-        sync() do
-            Fake6502m.state(private.cpu, private.temps)
-        end
+state(w::Worker) = remotecall_fetch(w.id) do
+    global private
+    sync() do
+        Fake6502m.state(private.cpu, private.temps)
     end
+end
 
 #function loadprg(w::Worker, mach::Machine, filename; labelfile = "")
 #    w.memory .= mach.newcpu.memory
@@ -339,12 +421,18 @@ state(w::Worker) =
 #end
 
 function SCNKEY(cpu::Cpu, temps::Temps)
-    log("SCNKEY")
     return temps
 end
 
+prevgetin = 0x00
+
 function GETIN(cpu::Cpu, temps::Temps)
-    log("GETIN")
+    global private, prevgetin
+    local chr = private.worker.memory[OFFSET_CHR]
+
+    chr != 0 && chr != prevgetin && log("GETIN $(repr(chr))")
+    prevgetin = chr
+    cpu.a = chr
     return temps
 end
 

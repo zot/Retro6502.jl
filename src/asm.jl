@@ -23,7 +23,9 @@ PROGRAM: { DEF "\n" }
 DEF: (LABEL | "*" | "+" | "-") [INSTRUCTION]
  | INSTRUCTION
  | ".include" JULIA_FILE
+ | ".include" JAS_FILE
  | LABEL ".data" JULIA_EXPR
+ | LABEL ".imm" JULIA_EXPR
  | LABEL ".julia" JULIA_EXPR
  | LABEL ".macro" ["(" ARGLIST ")" "->" JULIA_EXPR]
  | LABEL ".value" JULIA_EXPR
@@ -96,7 +98,7 @@ fred    .fake(a, b)-> JULIA CODE # declares a Julia-based fake subroutine
 =#
 module Asm
 using Printf, Dates
-using ...Fake6502: K, M, G, hex, rhex, register, asmerr, asmwarn, matches
+using ...Fake6502: K, M, G, hex, rhex, register, asmerr, asmwarn, matches, log
 using ..Fake6502m: addrsyms, opsyms
 using ..AsmTools
 
@@ -191,6 +193,8 @@ end
     stability::Int = 0
 end
 
+Base.show(io::IO, ::CodeContext) = print(io, "CodeContext")
+
 @kwdef struct ListingContext
     ctx::CodeContext
     lines::AbstractVector{Line} = Line[]
@@ -279,7 +283,12 @@ function pushfunc!(func, ctx, passes...)
             ctx.line = line
             ctx.lines = lines
             ctx.toks = toks
-            func()
+            try
+                func()
+            catch err
+                lineerror(line, err, err)
+                rethrow()
+            end
         end)
     end
 end
@@ -718,7 +727,7 @@ asm_fake(ctx::CodeContext) =
     assembleif(ctx, ".fake") do
         eattok(ctx)
         local expr, extra = parse_julia(ctx)
-        (expr.head ∉ (:function, :->) || length(expr.args[1].args) != 2) &&
+        expr.head ∈ (:function, :->) && length(expr.args[1].args) != 2 &&
             lineerror(ctx, """.fake expects a 2-argument function""")
         isnothing(ctx.label) && lineerror(ctx, """.fake with no label""")
         local index = length(ctx.fakes)
@@ -728,7 +737,7 @@ asm_fake(ctx::CodeContext) =
         ctx.fakes[ctx.label] = (index, (mach) -> nothing)
         pushfunc!(ctx, 4) do
             ctx.fakes[label] = (index, eval(ctx, expr))
-            ctx.min = min(ctx.min, index)
+            #ctx.min = min(ctx.min, index)
         end
     end
 
@@ -793,8 +802,8 @@ function assign_var(lctx::ListingContext, exprstr)
             end)))
         end
     catch err
+        lineerror(lctx, """Error $progress, $exprstr""", err)
         @error "ERROR ASSIGNING VARIABLE" exception = (err, catch_backtrace())
-        lineerror(lctx, """Error $progress, $exprstr""")
     end
 end
 
@@ -919,13 +928,26 @@ function assemble(ctx::CodeContext, op, addr, exprstr = "()")
     end
     isincomplete(expr) && lineerror(ctx, """Incomplete argument for $op, '$exprstr'""")
     pushfunc!(ctx, 2, 3, :stability) do
+        if addr == :abso
+            local arg = try
+                eval(ctx, expr)
+            catch
+                nothing
+            end
+            if arg isa UInt8 || arg isa Int8
+                addr == :zp
+                bytes = 2
+            end
+        end
         incoffset(ctx, bytes; track = true)
     end
+    #local line = ctx.line
     pushfunc!(ctx, 4) do
         local arg = eval(ctx, expr)
-        println(
-            "assemble $(rhex(ctx.offset)) ($op $addr)$(exprstr == "()" ? "" : " $expr") ->  $(join([rhex(opcode), arg...], " ")), line: $(ctx.line)",
-        )
+        #log("line: $line '$expr' = $arg")
+        #log(
+        #    "assemble $(rhex(ctx.offset)) ($op $addr)$(exprstr == "()" ? "" : " $expr") ->  $(join([rhex(opcode), arg...], " ")), line: $(ctx.line)"
+        #)
         add_listing(lctx, :opcode, bytes)
         if bytes == 1
             emit(ctx, opcode)
@@ -933,9 +955,10 @@ function assemble(ctx::CodeContext, op, addr, exprstr = "()")
             local a = if addr != :rel
                 UInt8(arg)
             elseif arg isa Union{UInt8,Int8}
-                reinterpret(Int8, arg)
+                reinterpret(UInt8, arg)
             else
-                Int8(arg - ctx.offset)
+                #log("BRANCH FROM  $(ctx.offset) TO $arg: $(reinterpret(UInt8, Int8(Int(arg) - Int(ctx.offset) + 2)))")
+                reinterpret(UInt8, Int8(Int(arg) - Int(ctx.offset) - 2))
             end
             emit(ctx, opcode, a)
         elseif bytes == 3
@@ -972,8 +995,10 @@ asm_op(ctx::CodeContext) =
         #check for zpx as opposed to absx -- skip for now and assemble ,x as absolute,x
         lasttoks(ctx, ",", "y") &&
             return assemble(ctx, op, :absy, tokstr(ctx, ctx.toks[1:end-2]))
-        lasttoks(ctx, ",", "x") &&
+        if lasttoks(ctx, ",", "x")
+            #log("abs,x: toks: $(ctx.toks)")
             return assemble(ctx, op, :absx, tokstr(ctx, ctx.toks[1:end-2]))
+        end
         is(ctx, "(") &&
             lasttoks(ctx, ")") &&
             op == :jmp &&
@@ -1035,9 +1060,13 @@ asm_include(ctx::CodeContext, line::Line, lines::Vector{Line}) =
 
 ismacrodecl(line::Line) = !isnothing(findfirst(m -> m.match == ".macro", line.tokens))
 
-lineerror(ctx::Union{ListingContext,CodeContext}, msg) = lineerror(ctx.line, msg)
+lineerror(ctx::Union{ListingContext,CodeContext}, msg, err = nothing) = lineerror(ctx.line, msg, err)
 
-lineerror(line::Line, msg) = error("Error on line $(line.number), $msg: $(line.line)")
+function lineerror(line::Line, msg, err = nothing)
+    log("Error on line $(line.number), $msg: $(line.line)")
+    !isnothing(err) && log(err)
+    error("Error on line $(line.number), $msg: $(line.line)")
+end
 
 function compilemacro(ctx::CodeContext)
     local firstline = ctx.line

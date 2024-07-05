@@ -199,14 +199,14 @@ in the mutable Cpu struct improves performance
     #penaltyaddr::UInt8 = 0x00
 end
 
-ticks(cpu, ::Temps) = cpu.clockticks6502
+ticks(cpu::Cpu, ::Temps) = cpu.clockticks6502
 
-function setticks(cpu, temps::Temps, ticks)
+function setticks(cpu::Cpu, temps::Temps, ticks)
     cpu.clockticks6502 = ticks
     temps
 end
 
-function addticks(cpu, temps::Temps, ticks)
+function addticks(cpu::Cpu, temps::Temps, ticks)
     cpu.clockticks6502 += ticks
     temps
 end

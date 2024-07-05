@@ -49,10 +49,10 @@ import TerminalUserInterfaces: render, set, view, update!, init!, should_quit, R
 using Printf
 using FileWatching
 using ..Asm: Asm, Line, dot_cmds, isincomplete
-using ...Fake6502: Fake6502, matches, display_chars, intrange, screen, log, BankSettings
+using ...Fake6502: Fake6502, matches, display_chars, intrange, screen, log, BankSettings, M, G, hex
 using ..Fake6502m: opsyms, Cpu
 using ..C64
-using ..Workers: Workers, Worker, add_worker
+using ..Workers: Workers, Worker, add_worker, OFFSET_COUNTL, OFFSET_COUNTH, CpuState
 using REPL
 using REPL: LineEdit, CompletionProvider
 using Crossterm
@@ -68,7 +68,7 @@ const COMMENT_PAT = r"^\s*;.*"
 const DIRECTIVE_PAT = r"^\s*(?:([a-z0-9_]+)\s+)?(\.?[a-z]+)\b|^\s*(\.)\s*$"si
 const LOAD_PAT = r"^\s*(\+w\s+)?(\S.*)?$"
 const SAVE_PAT = r"^\s*(\-f\s+)?(\S.*)?$"
-const DEFAULT_SETTINGS = (; maxticks = 150,)
+const DEFAULT_SETTINGS = (; maxticks = 10G,)
 
 last_load = ""
 last_save = ""
@@ -92,6 +92,7 @@ function cmd_set() end
 function cmd_show() end
 function cmd_status() end
 function cmd_step() end
+function cmd_stop() end
 function cmd_watch() end
 const ASM_CMDS = Set(string.(opsyms))
 const DEFS = [
@@ -136,6 +137,7 @@ const DEFS = [
     ".status" => (cmd_status, "", "print the current machine status"),
     ".step" =>
         (cmd_step, "[LOCATION]", "perform one step (optionally from LOCATION)", ".s"),
+    ".stop" => (cmd_stop, "", "stop the machine if it is running"),
     ".watch" => (
         cmd_watch,
         "RANGE [EXPR]",
@@ -155,6 +157,19 @@ const ALL_CMDS = sort!([ASM_CMDS..., DIRECTIVES...])
 println(ctx::Repl, args...) = println(ctx.screen, args...)
 print(ctx::Repl, args...) = print(ctx.screen, args...)
 
+_REPL = nothing
+
+function CLEAR()
+    global _REPL
+    local scr = _REPL.screen
+    scr.mode[] = :repl
+    empty!(scr.repllines)
+    empty!(scr.wrappedlines)
+    push!(scr.repllines, "READY!", "")
+    push!(scr.wrappedlines, ["READY!"], [""])
+    cursorend(scr)
+end
+
 function repl(specialization = Nothing)
     try
         ctx = Repl{specialization}()
@@ -169,8 +184,8 @@ function repl(specialization = Nothing)
         ctx.input_file_changed = false
         ctx.screen = Screen{specialization}(; diag = Ref(true), repl = ctx)
         ctx.banksettings = BankSettings()
-        ctx.state = (;)
         ctx.runid = 1
+        ctx.lastupdate = 0x0000
         bind_keys(ctx.screen)
         local mistate = nothing
         local mode = nothing
@@ -185,10 +200,7 @@ function repl(specialization = Nothing)
                 mode = LineEdit.mode(mistate)
                 #println(ctx, "6502...")
             end,
-            entered = s -> begin
-                TUI.app(ctx.screen)
-                REPL.LineEdit.transition(() -> nothing, mistate, mode)
-            end,
+            entered = s -> invokelatest(takeover_repl, mistate, mode, ctx.screen),
             mode_name = "ASM_mode",
             completion_provider = Completer(),
         )
@@ -201,7 +213,7 @@ function repl(specialization = Nothing)
     end
 end
 
-function takeover_repl(mistate, mode, screen, s::LineEdit.MIState)
+function takeover_repl(mistate, mode, screen)
     TUI.app(screen)
     REPL.LineEdit.transition(() -> nothing, mistate, mode)
 end
@@ -238,7 +250,7 @@ function handle_command(ctx::Repl, line)
     if haskey(REPL_CMDS, cmd)
         println(ctx, "REPL CMD: $cmd")
         local (cmd, func) = REPL_CMDS[cmd]
-        func(ctx, cmd, strip(body))
+        invokelatest(func, ctx, cmd, strip(body))
     else
         cmd_assemble(ctx, label, cmd, prefix, body, line)
     end
@@ -265,9 +277,8 @@ end
 function cmd_asm(ctx::Repl, cmd, args)
     !ctx.dirty && return
     if !isdefined(ctx, :worker)
-        println(ctx, "ADDING 6502 WORKER...")
+        println(ctx, "ADDING 6502 WORKER")
         ctx.worker = add_worker()
-        println(ctx, "DONE")
     else
         Workers.clear(ctx.worker)
     end
@@ -278,11 +289,15 @@ function cmd_asm(ctx::Repl, cmd, args)
         close(io)
         ctx.labels, ctx.asmlist = Workers.asmfile(ctx.worker, path)
     end
+    ctx.lastupdate = 0xFFFF
+    ctx.screen.lastscreen[] = UInt8[]
     ctx.dirty = false
+    println(ctx, "ASSEMBLED")
 end
 
 function cmd_prg(ctx::Repl, cmd, args)
     println(ctx, ctx.asmlist)
+    log(ctx.asmlist)
 end
 
 function cmd_break(ctx::Repl, cmd, args)
@@ -406,17 +421,47 @@ end
 
 function cmd_run(ctx::Repl, cmd, args)
     cmd_asm(ctx, cmd, args)
-    ctx.state = Workers.exec(
+    ctx.screen.lastscreen[] = UInt8[]
+    local result = Workers.exec(
         ctx.worker,
         :main;
         tickcount = ctx.settings[:maxticks],
-        bs = ctx.banksettings,
     )
-    ctx.runid += 1
+    if result == :running
+        print(ctx, "ALREADY RUNNING")
+    else
+        #ctx.state = result
+        ctx.runid += 1
+    end
+end
+
+function update_from_worker(ctx::Repl)
+    !isdefined(ctx, :worker) &&
+        return
+    local mem = ctx.worker.memory
+    local cur = mem[OFFSET_COUNTL] | (UInt16(mem[OFFSET_COUNTH]) << 8)
+    cur == ctx.lastupdate &&
+        return
+    ctx.state = Workers.cpustate(ctx.worker)
+    !(isdefined(ctx, :worker) && ctx.state.update != ctx.lastupdate) &&
+        return
+    #local bs = ctx.banksettings
+    #local chars = @view ctx.worker.memory[A(bs.chrmem:bs.chrmem + 0x07FF)]
+    #log("Update $upd 30 CHAR BYTES $(hex(chars[1:30]))")
+    ctx.lastupdate = cur
+    Workers.updatesettings(ctx.banksettings, ctx.state)
 end
 
 function cmd_reset(ctx::Repl, cmd, args)
-    println(ctx, "RESET $args")
+    if isdefined(ctx, :worker)
+        Workers.remove_worker(ctx.worker)
+        ctx.worker = add_worker()
+    end
+    ctx.dirty = true
+    if ctx.screen.mode[] != :repl
+        ctx.screen.mode[] = :repl
+        configure(ctx.screen)
+    end
 end
 
 function cmd_screen(ctx::Repl, cmd, args)
@@ -440,6 +485,8 @@ end
 function cmd_step(ctx::Repl, cmd, args)
     println(ctx, "STEP $args")
 end
+
+cmd_stop(ctx::Repl, cmd, args) = Workers.stop(ctx.worker)
 
 function cmd_watch(ctx::Repl, cmd, args)
     println(ctx, "WATCH $args")

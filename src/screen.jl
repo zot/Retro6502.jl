@@ -1,3 +1,4 @@
+using Revise
 using TerminalUserInterfaces:
     TextWrap,
     Word,
@@ -24,13 +25,16 @@ using TerminalUserInterfaces:
     BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT,
     BOX_DRAWINGS_LIGHT_ARC_UP_AND_RIGHT,
     BOX_DRAWINGS_LIGHT_ARC_UP_AND_LEFT,
+    Cell,
+    current_buffer,
     previous_buffer
 using TerminalUserInterfaces.Crossterm.LibCrossterm.libcrossterm_jll
 using .TextWrap
-using ..Fake6502: C64, Workers, Fake6502m, screen, char_defs, status, screenmem, charmem, ASCII_TO_SCREEN
+using ..Fake6502: C64, Workers, Fake6502m, screen, char_defs, status, screenmem, charmem, ASCII_TO_SCREEN,
+    A, screen2ascii, rhex
 using .C64: C64_PALETTE, BG0, COLOR_MEM, KEYBOARD_INPUTS, KEY_CODES, UNUSED_KEYS, ASCII_TO_KEY_CODE,
-    SHIFT, CTRL, SHIFTED
-using .Workers: updatememory, OFFSET_KEY
+    SHIFT, CTRL, SHIFTED, ASCII_CODES
+using .Workers: OFFSET_KEY, OFFSET_CHR
 using Mmap: sync!
 using Base64
 
@@ -53,6 +57,7 @@ const RETURN_RIGHT = "⮑"
 const NEWLINE_RIGHT = "⮓"
 const MOD_NAMES = (; SHIFT = "Shift", CONTROL = "Ctrl", ALT = "Alt")
 const KEYMAP = Dict{String,Function}()
+const MODES = (:repl, :screenchars, :screenbytes)
 
 setcursor(scr::Screen, x::Int) = scr.cursor[] = x
 
@@ -132,6 +137,16 @@ bottom_right(::BorderType{:SCREEN}) = BOX_DRAWINGS_LIGHT_UP_AND_HORIZONTAL
 
 top_left(::BorderType{:REPL_BORDER}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_RIGHT
 
+top_left(::BorderType{:SCREENCHARS}) = BOX_DRAWINGS_LIGHT_DOWN_AND_HORIZONTAL
+top_right(::BorderType{:SCREENCHARS}) = BOX_DRAWINGS_LIGHT_DOWN_AND_HORIZONTAL
+bottom_left(::BorderType{:SCREENCHARS}) = BOX_DRAWINGS_LIGHT_UP_AND_HORIZONTAL
+bottom_right(::BorderType{:SCREENCHARS}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
+
+top_left(::BorderType{:SCREENBYTES}) = BOX_DRAWINGS_LIGHT_DOWN_AND_HORIZONTAL
+top_right(::BorderType{:SCREENBYTES}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT
+bottom_left(::BorderType{:SCREENBYTES}) = BOX_DRAWINGS_LIGHT_UP_AND_HORIZONTAL
+bottom_right(::BorderType{:SCREENBYTES}) = BOX_DRAWINGS_LIGHT_VERTICAL_AND_LEFT
+
 top_left(::BorderType{:REGISTERS}) = BOX_DRAWINGS_LIGHT_DOWN_AND_HORIZONTAL
 top_right(::BorderType{:REGISTERS}) = BOX_DRAWINGS_LIGHT_ARC_DOWN_AND_LEFT
 bottom_left(::BorderType{:REGISTERS}) = BOX_DRAWINGS_LIGHT_UP_AND_HORIZONTAL
@@ -197,16 +212,23 @@ function screenarea(
 )
     global border_style
     local block =
-        Block(; title, title_style = border_style, border, border_type, border_style)
+        Ref(Block(; title, title_style = border_style, border, border_type, border_style))
 
-    FWidget() do area, buffer
+    FWidget((; block)) do area, buffer
         if adjust
             area = Rect(area.x, area.y, area.width, area.height - 1)
         end
-        func(inner(block, area), buffer)
-        render(block, area, buffer)
+        func(inner(block[], area), buffer)
+        render(block[], area, buffer)
     end
 end
+
+screenblock(; title = "", border = LTR, border_type = BorderType{:MID}()) =
+    Block(; title, title_style = border_style, border, border_type, border_style)
+
+screenblock(block::Block; title = block.title, title_style = block.title_style, border = block.border,
+            border_type = block.border_type) =
+    Block(; title, title_style, border, border_type, border_style)
 
 set(buffer::Buffer, area::Rect, line::AbstractString, style = nothing) =
     set(buffer, area, [line], style)
@@ -226,12 +248,14 @@ function set(
             set(buffer, col, row, chars[i], s)
         end
         row += 1
+        row > bottom(area) &&
+            break
     end
 end
 
 function configure(
     scr::Screen;
-    regs = scr.showcpu[],
+    regs = scr.mode[] ∈ (:screenchars, :screenbytes),
     monitor = regs,
     c64screen = regs,
     repl = true,
@@ -243,6 +267,7 @@ function configure(
         return BorderType{t}()
     end
 
+    set(current_buffer(), current_buffer().area, Cell(' ', screen_style))
     TUI.put("$(GSTART)a=d,d=a$GEND")
     scr.imageshown[] = false
     empty!(scr.layout.widgets)
@@ -253,6 +278,13 @@ function configure(
         local vpix = hpix * 320 / 200
         local scrwid = Int(ceil(vpix / width * columns))
         scr.screenwid[] = scrwid
+        scr.lastscreen[] = UInt8[]
+        scr.regsblock[] = screenarea(
+            drawregs(scr);
+            title = "Registers",
+            border_type = bt(:REGISTERS),
+            border = LTR,
+        )
         push!(scr.layout.constraints, Length(27))
         push!(
             scr.layout.widgets,
@@ -261,7 +293,7 @@ function configure(
                     Layout(
                         [
                             screenarea(;
-                                title = "Screen",
+                                title = "Retro6502 Screen",
                                 border_type = bt(:SCREEN),
                                 border = LT,
                             ) do area, buf
@@ -270,7 +302,7 @@ function configure(
                                 set(buf, area, String[])
                             end,
                             Block(;
-                                title = "Repl",
+                                title = "Retro6502 Repl",
                                 title_style = border_style,
                                 border = LT,
                                 border_type = bt(:REPL_BORDER),
@@ -280,27 +312,36 @@ function configure(
                         [Length(26), Length(1)],
                         :vertical,
                     ),
-                    Layout(
-                        [
-                            screenarea(
-                                drawregs(scr);
-                                title = "Registers",
-                                border_type = bt(:REGISTERS),
-                                border = LTR,
-                            ),
-                            screenarea(
-                                drawmonitor(scr);
-                                title = "Monitor",
-                                border_type = bt(:MONITOR),
-                                border = LTRB,
-                                adjust = true,
-                            ),
-                        ],
-                        [Length(3), Min(1)],
-                        :vertical,
-                    ),
+                    screenarea(drawcharacters(scr);
+                               title = scr.mode[] == :screenchars ? "Characters" : "Bytes",
+                               border_type = bt(scr.mode[] == :screenchars ? :SCREENCHARS : :SCREENBYTES),
+                               border = LTRB,
+                               adjust = true,
+                               ),
+                    (if scr.mode[] == :screenchars
+                        [Layout(
+                            [
+                                scr.regsblock[],
+                                screenarea(
+                                    drawmonitor(scr);
+                                    title = "Monitor",
+                                    border_type = bt(:MONITOR),
+                                    border = LTRB,
+                                    adjust = true,
+                                ),
+                            ],
+                            [Length(3), Min(1)],
+                            :vertical,
+                        )]
+                    else
+                        []
+                    end)...,
                 ],
-                [Length(scrwid + 1), Min(1)],
+                (if scr.mode[] == :screenchars
+                    [Length(scrwid + 1), Length(41), Min(1)]
+                else
+                    [Length(scrwid + 1), Min(124)]
+                end),
                 :horizontal,
             ),
         )
@@ -317,7 +358,7 @@ function configure(
         else
             push!(
                 scr.layout.widgets,
-                screenarea(; title = "Repl", border_type = bt()) do area, buf
+                screenarea(; title = "Retro6502 Repl", border_type = bt()) do area, buf
                     drawrepl(scr, area, buf)
                 end,
             )
@@ -339,17 +380,54 @@ end
 cursorend(scr::Screen) = setcursor(scr, length(scr.repllines[end]) + 1)
 
 drawregs(scr::Screen) = function (area::Rect, buf::Buffer)
-    local st = scr.repl.state
+    local running = scr.repl.state.running
+    local block = scr.regsblock[].props.block
+    if running && !contains(block[].title, "RUNNING") || !running && !contains(block[].title, "IDLE")
+        block[] = screenblock(block[]; title = "Registers [$(running ? "RUNNING" : "IDLE")]")
+    end
     scr.areas[:registers] = area
-    !haskey(st, :a) && return
+    local st = scr.repl.state
+    local bs = scr.repl.banksettings
+    local banks = sprint() do io
+        bs.basic && print(io, "BASIC ")
+        bs.chars && print(io, "CHARS ")
+        bs.kernal && print(io, "KERNAL ")
+        #@printf io "VIC #%d SCREEN 0x%04x CHAR 0x%04x" bs.vicbank >> 14 bs.scrmem bs.chrmem
+    end
     set(
         buf,
         area,
         [
-            (@sprintf "%-4s %-8s %-2s %-2s %-2s %-2s" "PC" "Status" "A" "X" "Y" "SP"),
-            (@sprintf "%04x %s %02x %02x %02x %02x" st.pc status(st.status) st.a st.x st.y st.sp),
+            (@sprintf "%-4s %-8s %-2s %-2s %-2s %-2s CLOCK                SLACK     BANKS" "PC" "Status" "A" "X" "Y" "SP"),
+            (@sprintf "%04x %s %02x %02x %02x %02x %-20d %f  %s" st.pc status(st.status) st.a st.x st.y st.sp st.clockticks6502 st.slack banks),
         ],
     )
+end
+
+drawcharacters(scr::Screen) = function (area::Rect, buf::Buffer)
+    local mem = scr.repl.worker.memory
+    
+    for row in 0:24
+        local rowoffset = scr.repl.banksettings.scrmem + row*40
+        local line = @view mem[rowoffset : rowoffset + 39]
+        if scr.mode[] == :screenchars
+            local chars = String(screen2ascii.(line))
+
+            set(buf, area.x, area.y + row, chars)
+        else
+            local offset = 0
+            for col in 0:39
+                if col > 0 && col % 10 == 0
+                    offset += 1
+                end
+                local byte = line[col + 1]
+                local chars = rhex(byte)
+                local style = byte ∈ (0x00, UInt8(' ')) ? dim_style : screen_style
+
+                set(buf, area.x + offset + col * 3, area.y + row, chars, style)
+            end
+        end
+    end
 end
 
 drawmonitor(scr::Screen) = function (area::Rect, buf::Buffer)
@@ -361,8 +439,10 @@ drawmonitor(scr::Screen) = function (area::Rect, buf::Buffer)
     scr.areas[:monitor] = area
     for row = 0:area.height
         local offset = start + row * 16
-        local values1 = join((@sprintf "%02x" mem[offset+i] for i = 0:7), " ")
-        local values2 = join((@sprintf "%02x" mem[offset+i] for i = 8:15), " ")
+        offset > 0xFFF0 &&
+            break
+        local values1 = join((@sprintf "%02x" mem[A(offset+i)] for i = 0:7), " ")
+        local values2 = join((@sprintf "%02x" mem[A(offset+i)] for i = 8:15), " ")
         local haspc = offset <= pc <= offset + 15
         set(
             buf,
@@ -376,6 +456,8 @@ drawmonitor(scr::Screen) = function (area::Rect, buf::Buffer)
             set(buf, col + 1, area.y + row, pc_style)
         end
     end
+    local offset = 10 + 3 * 16
+    area = Rect(; x = area.x + offset, area.y, width = area.width - offset, area.height)
 end
 
 function drawrepl(scr::Screen, area::Rect, buf::Buffer)
@@ -408,21 +490,25 @@ TUI.view(scr::Screen) = scr
 
 function TUI.update!(scr::Screen, evt::TUI.MouseEvent)
     evt.data.kind !== "DownLeft" && return
+    local old = scr.mouse_area[]
     scr.mouse_area[] = :unknown
+    scr.lastevt[] = evt
     for (name, area) in scr.areas
         !(
             left(area) <= evt.data.column + 1 <= right(area) &&
             top(area) <= evt.data.row + 1 <= bottom(area)
         ) && continue
-        local old = scr.mouse_area[]
         scr.mouse_area[] = name
         if name === :screen
             Crossterm.hide()
-        elseif old === :screen
-            Crossterm.show()
         end
     end
-    scr.lastevt[] = evt
+    if old === :screen && scr.mouse_area != :screen
+        Crossterm.show()
+        showcursor(scr)
+        scr.repl.worker.memory[OFFSET_KEY] = UNUSED_KEYS[1]
+        scr.repl.worker.memory[OFFSET_CHR] = 0
+    end
 end
 
 function TUI.update!(scr::Screen, evt::TUI.KeyEvent)
@@ -433,13 +519,15 @@ function TUI.update!(scr::Screen, evt::TUI.KeyEvent)
     keycode = isempty(keycode) ? key : keycode * "-" * key
     scr.lastevt[] = evt
     if scr.mouse_area[] === :screen
+        local keybyte = get(ASCII_TO_KEY_CODE, lowercase(key), nothing)
+
+        isnothing(keybyte) &&
+            return
         if evt.data.kind == "Release"
             scr.repl.worker.memory[OFFSET_KEY] = UNUSED_KEYS[1]
+            scr.repl.worker.memory[OFFSET_CHR] = 0
         elseif evt.data.kind == "Press"
-            local keybyte = get(ASCII_TO_KEY_CODE, lowercase(key), nothing)
-
-            isnothing(keybyte) &&
-                return
+            #log("PRESS $evt.data")
             if length(key) == 1 && lowercase(key) != key || "SHIFT" ∈ mod
                 keybyte |= SHIFT
             end
@@ -447,9 +535,11 @@ function TUI.update!(scr::Screen, evt::TUI.KeyEvent)
                 keybyte |= CTRL
             end
             scr.repl.worker.memory[OFFSET_KEY] = keybyte
+            local chr = get(ASCII_CODES, key, nothing)
+            scr.repl.worker.memory[OFFSET_CHR] = !isnothing(chr) ? chr : 0x0
         end
     elseif evt.data.kind ∈ ["Press", "Repeat"]
-        get(KEYMAP, keycode, (a...) -> nothing)(scr, evt, scr.cursor[]...)
+        invokelatest(get(KEYMAP, keycode, (a...) -> nothing), scr, evt, scr.cursor[]...)
     end
 end
 
@@ -464,18 +554,24 @@ function app(m::Screen; wait = 1 / 10)
         TUI.init!(m, t)
         log("STARTING APP")
         while !should_quit(m)
-            @debug "Getting event"
-            evt = TUI.try_get_event(t)
-            !isnothing(evt) && @debug "Got event" event = evt
-            @debug "Updating model"
-            TUI.update!(m, evt)
-            @debug "Rendering model"
-            TUI.render(t, m)
-            @debug "Drawing model"
-            TUI.draw(t, m)
+            Revise.revise()
+            invokelatest(appevent, m, t)
         end
         @debug "End"
     end
+end
+
+function appevent(m::Screen, t)
+    update_from_worker(m.repl)
+    #@debug "Getting event"
+    evt = TUI.try_get_event(t)
+    !isnothing(evt) && @debug "Got event" event = evt
+    #@debug "Updating model"
+    TUI.update!(m, evt)
+    #@debug "Rendering model"
+    TUI.render(t, m)
+    #@debug "Drawing model"
+    TUI.draw(t, m)
 end
 
 TUI.draw(t::CrosstermTerminal, ::Any) = TUI.draw(t)
@@ -487,7 +583,7 @@ function TUI.draw(t::CrosstermTerminal, scr::Screen)
         local mem = scr.repl.worker.memory
         local screenmem = @view mem[intrange(screen)]
         local chardefs = @view mem[intrange(char_defs)]
-        if scr.showcpu[]
+        if scr.mode[] != :repl
             if screenmem != scr.lastscreen[] || chardefs != scr.lastchars[]
                 scr.lastscreen[] = screenmem[:]
                 scr.lastchars[] = chardefs[:]
@@ -511,14 +607,15 @@ function drawscreen(scr::Screen)
     local mem = scr.repl.worker.memory
     local scrm = screenmem(scr.repl.banksettings, mem)
     local chardefs = charmem(scr.repl.banksettings, mem)
+    local bg = C64_PALETTE[1+mem[BG0.value]]
 
+    #log("DRAWING SCREEN, BG $(bg)\n  SCREEN $(hex(scr.repl.banksettings.chrmem))\n  30 CHAR DEFS BYTES $(hex(chardefs[1:30]))\n  30 SCREEN BYTES $(hex(scrm[1:30]))")
     for col = 0:39
         for row = 0:24
             i = row * 40 + col
             char = scrm[1+i]
             for pixel = 0:7
                 x = col * 8 + pixel
-                bg = C64_PALETTE[1+mem[BG0.value]]
                 fg = C64_PALETTE[1+mem[COLOR_MEM.value+i]]
                 for rowbyte = 0:7
                     y = row * 8 + rowbyte
@@ -631,11 +728,15 @@ function key_quit(scr::Screen, ::TUI.KeyEvent, x)
 end
 
 function key_layout(scr::Screen, ::TUI.KeyEvent, x)
-    scr.showcpu[] = !scr.showcpu[]
+    !isdefined(scr.repl, :worker) &&
+        return
+    local pos = findfirst(==(scr.mode[]), MODES)
+    scr.mode[] = MODES[pos % length(MODES) + 1]
     configure(scr)
 end
 
-function key_refresh(::Screen, ::TUI.KeyEvent, x)
+function key_refresh(scr::Screen, ::TUI.KeyEvent, x)
+    invokelatest(configure, scr)
     TerminalUserInterfaces.reset(previous_buffer())
 end
 

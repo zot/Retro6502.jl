@@ -64,6 +64,7 @@ A(x::Integer) = Addr(UInt32(x))
 A(r::AddrRange) = A(first(r)-1:last(r)-1)
 A(v::AbstractRange) = A(first(v)):Addr(last(v))
 A(v::AbstractVector) = Addr.(v)
+hex(addr::Addr) = hex(UInt16(addr.value - 1))
 
 intrange(r::AddrRange) = r.first.value:r.last.value
 Base.in(addr::Addr, r::AddrRange) = addr.value ∈ intrange(r)
@@ -113,8 +114,8 @@ include("worker.jl")
 include("repl.jl")
 include("fakerom.jl")
 
-using .AsmRepl: repl
-export repl
+using .AsmRepl: repl, CLEAR
+export repl, CLEAR
 
 run2(mach::Machine, temps::Temps, sym::Symbol, max_ticks::Int64) =
     run2(mach, temps, mach.labels[sym], max_ticks)
