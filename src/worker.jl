@@ -433,6 +433,7 @@ function GETIN(cpu::Cpu, temps::Temps)
     chr != 0 && chr != prevgetin && log("GETIN $(repr(chr))")
     prevgetin = chr
     cpu.a = chr
+    private.worker.memory[OFFSET_CHR] = 0x00
     return temps
 end
 
