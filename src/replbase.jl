@@ -1,3 +1,9 @@
+###
+### ALERT!!
+### replbase detected!
+### INFORM THE EMPIRE!
+###
+
 function color(rgb::UInt32...)
     extract(rgb) = rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF
     color(round.(Ref(UInt8), Base.Iterators.flatten(extract.(rgb)))...)
@@ -44,7 +50,8 @@ end
 render(fw::FWidget, area::Rect, buffer::Buffer) = fw.func(area, buffer)
 
 #const EXAMPLE = ["READY!", ".load examples/statichello.jas"]
-const EXAMPLE = ["READY!", ".load examples/move.jas"]
+#const EXAMPLE = ["READY!", ".load examples/move.jas"]
+const EXAMPLE = ["READY!", ".load examples/macro.jas"]
 
 """
 Screen structure, parameterized to allow customization

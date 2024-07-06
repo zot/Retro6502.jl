@@ -1,7 +1,6 @@
 ;;;;;;;;;;;;;;;;;;
 ;;;; INCLUDES ;;;;
 ;;;;;;;;;;;;;;;;;;
-.imm using ....Fake6502: log
 .imm using ...Workers
 
 ;;;;;;;;;;;;;;
@@ -14,6 +13,14 @@ VIC_MEM         = 0xD018
 STD_VIC_BANK    = 0x03
 STD_VIC_MEM     = 0x14
 
+;;;;;;;;;;;;;
+;;; BANKS ;;;
+;;;;;;;;;;;;;
+*           = VIC_BANK
+            .data STD_VIC_BANK
+*           = VIC_MEM
+            .data STD_VIC_MEM
+
 ;;;;;;;;;;;;;;;;;;;;;;
 ;;;; SCREEN SETUP ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;
@@ -23,14 +30,11 @@ STD_VIC_MEM     = 0x14
             .data ascii2screen.("                MOVEMENT")
 *           = 0xD800
             .data fill(0x01, 1000)
-*           = VIC_BANK
-            .data STD_VIC_BANK
-*           = VIC_MEM
-            .data STD_VIC_MEM
 
 ;;;;;;;;;;;;;;;;;;;;;;
 ;;;; ROM ROUTINES ;;;;
 ;;;;;;;;;;;;;;;;;;;;;;
+            ; fake routines get consecutive addresses 0x0000, 0x0001, 0x0002, and so on
 JL_SCNKEY   .fake Workers.SCNKEY
 JL_GETIN    .fake Workers.GETIN
 *           = 0xFF9F

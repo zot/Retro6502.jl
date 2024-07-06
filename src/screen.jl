@@ -406,10 +406,11 @@ end
 
 drawcharacters(scr::Screen) = function (area::Rect, buf::Buffer)
     local mem = scr.repl.worker.memory
+    local wide = area.width >= 40 * 3 + 3
     
     for row in 0:24
         local rowoffset = scr.repl.banksettings.scrmem + row*40
-        local line = @view mem[rowoffset : rowoffset + 39]
+        local line = @view mem[A(rowoffset) : A(rowoffset + 39)]
         if scr.mode[] == :screenchars
             local chars = String(screen2ascii.(line))
 
@@ -424,7 +425,7 @@ drawcharacters(scr::Screen) = function (area::Rect, buf::Buffer)
                 local chars = rhex(byte)
                 local style = byte ∈ (0x00, UInt8(' ')) ? dim_style : screen_style
 
-                set(buf, area.x + offset + col * 3, area.y + row, chars, style)
+                set(buf, area.x + offset + col * (wide ? 3 : 2), area.y + row, chars, style)
             end
         end
     end
@@ -518,7 +519,7 @@ function TUI.update!(scr::Screen, evt::TUI.KeyEvent)
 
     keycode = isempty(keycode) ? key : keycode * "-" * key
     scr.lastevt[] = evt
-    if scr.mouse_area[] === :screen
+    if scr.mouse_area[] === :screen && "CONTROL" ∉ mod
         local keybyte = get(ASCII_TO_KEY_CODE, lowercase(key), nothing)
 
         isnothing(keybyte) &&
@@ -526,7 +527,7 @@ function TUI.update!(scr::Screen, evt::TUI.KeyEvent)
         if evt.data.kind == "Release"
             scr.repl.worker.memory[OFFSET_KEY] = UNUSED_KEYS[1]
             scr.repl.worker.memory[OFFSET_CHR] = 0
-        elseif evt.data.kind == "Press"
+        elseif evt.data.kind ∈ ("Press", "Repeat")
             #log("PRESS $evt.data")
             if length(key) == 1 && lowercase(key) != key || "SHIFT" ∈ mod
                 keybyte |= SHIFT

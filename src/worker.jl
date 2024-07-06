@@ -140,22 +140,32 @@ end
 asmfile(filename::AbstractString) = invokelatest(innerasmfile, filename)
 
 function innerasmfile(filename::AbstractString)
-    try
-        global private
-        local ctx = private.ctx = Asm.asmfile(filename)
+    global private
 
-        private.worker.memory[ctx.min+1:ctx.max+1] .= ctx.memory[ctx.min+1:ctx.max+1]
-        #log("ASSEMBLED CONTEXT, SETTING WORKERS TO $Workers")
-        #try
-        #    invokelatest(Asm.eval(ctx, :(function(workers) global Workers = workers end)), Workers)
-        #catch err
-        #    log(err)
-        #end
-        local listing = sprint(io-> Asm.listings(io, ctx))
-        ctx.labels, listing
-    catch err
-        log(err)
-        rethrow()
+    open("/tmp/worker", "a") do io
+        redirect_stdout(io) do
+            try
+                log("bubba")
+                println("worker assembling")
+                local ctx = private.ctx = Asm.asmfile(filename)
+
+                private.worker.memory[ctx.min+1:ctx.max+1] .= ctx.memory[ctx.min+1:ctx.max+1]
+                #log("ASSEMBLED CONTEXT, SETTING WORKERS TO $Workers")
+                #try
+                #    invokelatest(Asm.eval(ctx, :(function(workers) global Workers = workers end)), Workers)
+                #catch err
+                #    log(err)
+                #end
+                local listing = sprint(io-> Asm.listings(io, ctx))
+                ctx.labels, listing
+            catch err
+                log(err)
+                @error err exception=(err,catch_backtrace())
+                rethrow()
+            finally
+                println("worker finished assembling")
+            end
+        end
     end
 end
 

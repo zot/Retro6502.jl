@@ -52,7 +52,7 @@ OPARG: EXPR
  | "(" EXPR ")" "," "y"
 
 JULIA_EXPR: <Julia expression>
--- can include rel"+++---" and label"LABEL"
+-- can include label"LABEL"
 ```
 
 ## How assembly works
@@ -129,7 +129,7 @@ const dot_cmds =
     Set([".data", ".julia", ".include", "=", ".macro", ".value", ".imm", ".fake"])
 const directives = Set([legal_ops..., dot_cmds...])
 const macro_arg_sep = r"(?<!\\),"
-const macro_ref_pat = r"\\\w+"
+const macro_ref_pat = r"\\(\w+)|\\\((\w+)\)"
 const CTX = :__CONTEXT__
 const OptSym = Union{Symbol,Nothing}
 
@@ -160,7 +160,7 @@ end
 
 @kwdef mutable struct CodeContext
     env::Module = eval(:(module $(Symbol(String(rand('a':'z', 16))))
-    using ...Fake6502: Fake6502, C64, Asm, AsmTools
+    using ...Fake6502: Fake6502, C64, Asm #, AsmTools
     using ..AsmTools
     import ..Asm: @asm_str, @noasm_str
     import ...Fake6502: rhex
@@ -230,7 +230,7 @@ function subenv(ctx::CodeContext)
         !eval(ctx, :($n isa Module))
     ]
     local expr = :(module $subname
-    using  .....Fake6502: Fake6502, C64, Asm, AsmTools
+    using  .....Fake6502: Fake6502, C64, Asm #, AsmTools
     using  ....AsmTools
     import .....Fake6502: rhex
     import ....Asm: @asm_str, @noasm_str
@@ -268,7 +268,7 @@ struct AssemblyCode
     pass4::Function
 end
 
-AssemblyCode() = AssemblyCode(() -> nothing, () -> nothing, () -> nothing, () -> nothing)
+AssemblyCode() = AssemblyCode(identity, identity, identity, identity, identity)
 
 function pushfunc!(func, ctx, passes...)
     for pass in passes
@@ -434,7 +434,7 @@ tokstr(line::Line, toks::RegexMatch...) = tokstr(line.line, toks...)
 
 tokstr(line::ListingLine, toks::RegexMatch...) = tokstr(line.line.line, toks...)
 
-tokstr(thing, toks::Vector{RegexMatch}) = tokstr(thing, toks[1], toks[end])
+tokstr(thing, toks::Vector{RegexMatch}) = !isempty(toks) ? tokstr(thing, toks[1], toks[end]) : ""
 
 tokstr(str::AbstractString, tok1, tok2) =
     @view str[tok1.offset:tok2.offset+length(tok2.match)-1]
@@ -477,8 +477,10 @@ macro asm_str(str)
     local pos = 1
     local buf = []
     for match in eachmatch(macro_ref_pat, str)
+        local ref = something(match[1], match[2])
         match.offset > pos && push!(buf, str[pos:match.offset-1])
-        push!(buf, :(string($(Symbol(match.match[2:end])))))
+        #push!(buf, :(string($(Symbol(match.match[2:end])))))
+        push!(buf, :(string($(Symbol(ref)))))
         pos = match.offset + length(match.match)
     end
     pos <= length(str) && push!(buf, str[pos:end])
@@ -507,6 +509,8 @@ function asmfile(
 end
 
 function prgbytes(ctx::CodeContext)
+    ctx.max == 0 &&
+        return UInt8[]
     local len = ctx.max - ctx.min + 1
     local bytes = zeros(UInt8, len + 2)
 
@@ -627,7 +631,7 @@ function scan_asm(ctx::CodeContext, lines)
         for dir in [asm_op, asm_data, asm_julia, asm_call, asm_value, asm_imm, asm_fake]
             dir(ctx) && @goto bottom
         end
-        !isdirective(ctx) && lineerror(line, """Unknown directive, $(tokstr(ctx))""")
+        !isdirective(ctx) && lineerror(line, """Unknown directive, $(tokstr(ctx)) [$(lowercase(tokstr(ctx)))]""")
         lineerror(line, """Unimplemented directive: $(tok(ctx))""")
         @label bottom
     end
@@ -808,23 +812,44 @@ function assign_var(lctx::ListingContext, exprstr)
 end
 
 asm_call(ctx::CodeContext) =
-    assembleif(ctx, tok_is(call_pat)) do
+    assembleif(ctx, _-> hastoks(ctx) && matches(call_pat, tokstr(ctx))) do
         eattok(ctx)
         local macname = Symbol(tok(ctx))
         println("ASSEMBLING CALL $macname")
         eattok(ctx)
         !haskey(ctx.macros, macname) && lineerror(ctx, """Reference to unknown macro""")
         local mac = ctx.macros[macname]
-        local args = macroargs(tokstr(ctx))
+        local label = ctx.label
+        local lctx = ListingContext(ctx)
+        log("macroargs($(tokstr(ctx)))")
+        #local args = [i for i in macroargs(tokstr(ctx)) if !isempty(i)]
+        local args, extra = parse_julia(ctx)
+        log("ARGS: $args")
+        if args isa Expr && args.head == :tuple
+            args = args.args
+        else
+            args = [args]
+        end
+        args = [sprint() do io; Base.show_unquoted(io, arg); end for arg in args]
+        log("ARGS: $(args)")
         length(args) != length(mac.argnames) && lineerror(
             ctx,
             """Wrong number of macro arguments to $macname, expecting $(length(mac.argnames)) but got $(length(args))""",
         )
         try
             println("ASSEMBLING $macname CALL")
-            local lctx = ListingContext(ctx)
             local tmpctx = subcontext(ctx)
-            local assembly = mac.func(args...)
+            local oldcaller = try
+                eval(ctx, :__CALLER__)
+            catch
+                nothing
+            end
+            local assembly = try
+                eval(ctx, :(__CALLER__ = $(QuoteNode(label))))
+                invokelatest(mac.func, args...)
+            finally
+                eval(ctx, :(__CALLER__ = $(QuoteNode(oldcaller))))
+            end
             tmpctx.macrolabel = ctx.label
             println("CALL MACRO, TMP OFFSET: $(tmpctx.offset)")
             tmpctx.pass = 1
@@ -842,11 +867,7 @@ asm_call(ctx::CodeContext) =
                 importall(tmpctx.env, ctx.env)
             end
             pushfunc!(ctx, 3, :stability) do
-                if tmpctx.macrovalue != 0
-                    add_listing(lctx, :call; remove_label = true)
-                else
-                    add_listing(lctx, :call)
-                end
+                add_listing(lctx, :call, extra)
                 importall(tmpctx.env, ctx.env)
                 println("CALLING $macname's FUNC")
                 tmpctx.pass = 3
@@ -864,6 +885,7 @@ asm_call(ctx::CodeContext) =
             end
         catch err
             @error "$err" exception = (err, catch_backtrace())
+            log(err)
             lineerror(ctx, """Error calling macro""")
         end
     end
@@ -1060,11 +1082,12 @@ asm_include(ctx::CodeContext, line::Line, lines::Vector{Line}) =
 
 ismacrodecl(line::Line) = !isnothing(findfirst(m -> m.match == ".macro", line.tokens))
 
-lineerror(ctx::Union{ListingContext,CodeContext}, msg, err = nothing) = lineerror(ctx.line, msg, err)
+lineerror(ctx::Union{ListingContext,CodeContext}, msg, err = nothing, cb = !isnothing(err) ? catch_backtrace() : nothing) =
+    lineerror(ctx.line, msg, err, cb)
 
-function lineerror(line::Line, msg, err = nothing)
+function lineerror(line::Line, msg, err = nothing, cb = !isnothing(err) ? catch_backtrace() : nothing)
     log("Error on line $(line.number), $msg: $(line.line)")
-    !isnothing(err) && log(err)
+    !isnothing(err) && log(err, cb)
     error("Error on line $(line.number), $msg: $(line.line)")
 end
 
@@ -1082,7 +1105,12 @@ function compilemacro(ctx::CodeContext)
     add_listing(ctx, :macro, extra)
     local macargs = expr.args[1]
     ctx.macros[label] =
-        Macro(macargs isa Symbol ? [macargs] : [expr.args[1].args...], eval(ctx, expr))
+        Macro(macargs isa Symbol ? [macargs] : [expr.args[1].args...], invokelatest(eval(ctx, :(
+            function()
+                local __MACRO__ = $(QuoteNode(label))
+                $expr
+            end
+        ))))
 end
 
 add_listing(ctx::CodeContext, args...; kw...) =
