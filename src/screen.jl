@@ -345,6 +345,10 @@ function configure(
                 :horizontal,
             ),
         )
+    else
+        scr.mouse_area[] = :repl
+        Crossterm.show()
+        showcursor(scr)
     end
     if repl
         push!(scr.layout.constraints, Min(2))
